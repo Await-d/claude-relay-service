@@ -1,7 +1,7 @@
 {
   "name": "claude-relay-service",
   "version": "1.0.0",
-  "description": "Claude Code API relay service with multi-account management, OpenAI compatibility, and API key authentication",
+  "description": "Claude Code API relay service with multi-account management, OpenAI compatibility, API key authentication, and automated Docker builds",
   "main": "src/app.js",
   "scripts": {
     "start": "npm run lint && node src/app.js",
