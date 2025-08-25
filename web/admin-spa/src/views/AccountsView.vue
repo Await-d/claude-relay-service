@@ -119,7 +119,7 @@
           <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
             <tr>
               <th
-                class="w-[22%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="w-[20%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                 @click="sortAccounts('name')"
               >
                 名称
@@ -134,7 +134,7 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
-                class="w-[15%] min-w-[120px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="w-[14%] min-w-[120px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                 @click="sortAccounts('platform')"
               >
                 平台/类型
@@ -194,12 +194,20 @@
                 会话窗口
               </th>
               <th
+                class="w-[12%] min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                <div class="flex items-center gap-1">
+                  <i class="fas fa-chart-line text-xs text-blue-500" />
+                  历史统计
+                </div>
+              </th>
+              <th
                 class="w-[8%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
               >
                 最后使用
               </th>
               <th
-                class="w-[15%] min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                class="w-[13%] min-w-[160px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
               >
                 操作
               </th>
@@ -511,6 +519,65 @@
                   <span class="text-xs">N/A</span>
                 </div>
               </td>
+              <td class="whitespace-nowrap px-3 py-4 text-sm">
+                <div v-if="account.usage && account.usage.total" class="space-y-2">
+                  <el-tooltip
+                    :content="`详细统计：\n总Token使用量: ${formatNumber(account.usage.total.tokens || 0)} tokens\n总请求次数: ${formatNumber(account.usage.total.requests || 0)} 次\n平均每请求Token: ${formatAverageTokensPerRequest(account.usage.total.tokens, account.usage.total.requests)} tokens/次`"
+                    effect="dark"
+                    placement="left"
+                    :show-after="800"
+                  >
+                    <div class="space-y-2">
+                      <!-- 总Token使用量 -->
+                      <div
+                        class="flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      >
+                        <i class="fas fa-coins text-xs text-yellow-600 dark:text-yellow-500" />
+                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {{ formatNumber(account.usage.total.tokens || 0) }}
+                        </span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">tokens</span>
+                      </div>
+
+                      <!-- 总请求次数 -->
+                      <div
+                        class="flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      >
+                        <i class="fas fa-paper-plane text-xs text-blue-600 dark:text-blue-500" />
+                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {{ formatNumber(account.usage.total.requests || 0) }}
+                        </span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">次</span>
+                      </div>
+
+                      <!-- 平均每请求Token数 -->
+                      <div
+                        class="flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      >
+                        <i class="fas fa-chart-bar text-xs text-green-600 dark:text-green-500" />
+                        <span class="text-xs font-medium text-gray-600 dark:text-gray-300">
+                          平均
+                          {{
+                            formatAverageTokensPerRequest(
+                              account.usage.total.tokens,
+                              account.usage.total.requests
+                            )
+                          }}/次
+                        </span>
+                      </div>
+                    </div>
+                  </el-tooltip>
+                </div>
+                <div
+                  v-else
+                  class="flex items-center justify-center text-gray-400 dark:text-gray-500"
+                >
+                  <div class="text-center">
+                    <i class="fas fa-chart-line mb-1 text-lg opacity-50" />
+                    <div class="text-xs">暂无统计</div>
+                  </div>
+                </div>
+              </td>
               <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-300">
                 {{ formatLastUsed(account.lastUsedAt) }}
               </td>
@@ -654,13 +721,58 @@
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500 dark:text-gray-400">总使用量</p>
-              <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                {{ formatNumber(account.usage?.total?.requests || 0) }} 次
+              <p class="mb-2 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                <i class="fas fa-chart-line text-xs" />
+                历史统计
               </p>
-              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ formatNumber(account.usage?.total?.allTokens || 0) }} tokens
-              </p>
+              <div v-if="account.usage?.total" class="space-y-1.5">
+                <!-- 总请求次数 -->
+                <div
+                  class="flex items-center gap-2 rounded-lg bg-blue-50 px-2 py-1.5 dark:bg-blue-900/20"
+                >
+                  <i class="fas fa-paper-plane text-xs text-blue-600 dark:text-blue-400" />
+                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {{ formatNumber(account.usage.total.requests || 0) }}
+                  </span>
+                  <span class="text-xs text-blue-600 dark:text-blue-400">次请求</span>
+                </div>
+
+                <!-- 总Token使用量 -->
+                <div
+                  class="flex items-center gap-2 rounded-lg bg-yellow-50 px-2 py-1.5 dark:bg-yellow-900/20"
+                >
+                  <i class="fas fa-coins text-xs text-yellow-600 dark:text-yellow-400" />
+                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {{ formatNumber(account.usage.total.tokens || 0) }}
+                  </span>
+                  <span class="text-xs text-yellow-600 dark:text-yellow-400">tokens</span>
+                </div>
+
+                <!-- 平均每请求Token数 -->
+                <div
+                  class="flex items-center gap-2 rounded-lg bg-green-50 px-2 py-1.5 dark:bg-green-900/20"
+                >
+                  <i class="fas fa-chart-bar text-xs text-green-600 dark:text-green-400" />
+                  <span class="text-xs font-medium text-green-600 dark:text-green-400">
+                    平均
+                    {{
+                      formatAverageTokensPerRequest(
+                        account.usage.total.tokens,
+                        account.usage.total.requests
+                      )
+                    }}/次
+                  </span>
+                </div>
+              </div>
+              <div
+                v-else
+                class="flex items-center justify-center py-4 text-gray-400 dark:text-gray-500"
+              >
+                <div class="text-center">
+                  <i class="fas fa-chart-line mb-1 text-lg opacity-50" />
+                  <div class="text-xs">暂无统计</div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -802,6 +914,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import { useConfirm } from '@/composables/useConfirm'
+import { formatNumber, getAverageTokensPerRequest } from '@/utils/format'
 import AccountForm from '@/components/accounts/AccountForm.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
@@ -832,6 +945,7 @@ const sortOptions = ref([
   { value: 'dailyTokens', label: '按今日Token排序', icon: 'fa-coins' },
   { value: 'dailyRequests', label: '按今日请求数排序', icon: 'fa-chart-line' },
   { value: 'totalTokens', label: '按总Token排序', icon: 'fa-database' },
+  { value: 'totalRequests', label: '按总请求数排序', icon: 'fa-paper-plane' },
   { value: 'lastUsed', label: '按最后使用排序', icon: 'fa-clock' }
 ])
 
@@ -887,8 +1001,11 @@ const sortedAccounts = computed(() => {
       aVal = a.usage?.daily?.requests || 0
       bVal = b.usage?.daily?.requests || 0
     } else if (accountsSortBy.value === 'totalTokens') {
-      aVal = a.usage?.total?.allTokens || 0
-      bVal = b.usage?.total?.allTokens || 0
+      aVal = a.usage?.total?.tokens || 0
+      bVal = b.usage?.total?.tokens || 0
+    } else if (accountsSortBy.value === 'totalRequests') {
+      aVal = a.usage?.total?.requests || 0
+      bVal = b.usage?.total?.requests || 0
     }
 
     // 处理最后使用时间
@@ -1071,14 +1188,13 @@ const sortAccounts = (field) => {
   }
 }
 
-// 格式化数字（与原版保持一致）
-const formatNumber = (num) => {
-  if (num === null || num === undefined) return '0'
-  const number = Number(num)
-  if (number >= 1000000) {
-    return Math.floor(number / 1000000).toLocaleString() + 'M'
+// 计算平均每请求Token数（使用优化的工具函数）
+const formatAverageTokensPerRequest = (totalTokens, totalRequests) => {
+  const usage = {
+    tokens: totalTokens || 0,
+    requests: totalRequests || 0
   }
-  return number.toLocaleString()
+  return getAverageTokensPerRequest(usage)
 }
 
 // 格式化最后使用时间
@@ -1549,6 +1665,7 @@ watch(accountSortBy, (newVal) => {
     dailyTokens: 'dailyTokens',
     dailyRequests: 'dailyRequests',
     totalTokens: 'totalTokens',
+    totalRequests: 'totalRequests',
     lastUsed: 'lastUsed'
   }
 
