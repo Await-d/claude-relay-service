@@ -815,6 +815,110 @@
               </p>
             </div>
 
+            <!-- 调度策略设置 -->
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                <i class="fas fa-route mr-2 text-blue-500" />
+                调度策略
+              </label>
+              <select
+                v-model="form.schedulingStrategy"
+                class="form-input w-full dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+              >
+                <option value="round_robin">轮询调度 (Round Robin)</option>
+                <option value="least_used">最少使用 (Least Used)</option>
+                <option value="least_recent">最近最少使用 (Least Recent)</option>
+                <option value="random">随机调度 (Random)</option>
+                <option value="weighted_random">加权随机 (Weighted Random)</option>
+                <option value="sequential">顺序调度 (Sequential)</option>
+              </select>
+              <div
+                class="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-900/30"
+              >
+                <div class="flex items-start gap-2">
+                  <i class="fas fa-info-circle mt-0.5 text-blue-600 dark:text-blue-400" />
+                  <div class="text-xs text-blue-700 dark:text-blue-300">
+                    <p class="mb-2 font-medium">调度策略说明：</p>
+                    <div class="space-y-1 text-xs">
+                      <div
+                        v-if="form.schedulingStrategy === 'round_robin'"
+                        class="text-blue-800 dark:text-blue-200"
+                      >
+                        <strong>轮询调度：</strong>按顺序循环选择账户，确保每个账户被平均使用
+                      </div>
+                      <div
+                        v-else-if="form.schedulingStrategy === 'least_used'"
+                        class="text-blue-800 dark:text-blue-200"
+                      >
+                        <strong>最少使用：</strong>优先选择使用次数最少的账户，实现负载均衡
+                      </div>
+                      <div
+                        v-else-if="form.schedulingStrategy === 'least_recent'"
+                        class="text-blue-800 dark:text-blue-200"
+                      >
+                        <strong>最近最少使用：</strong>优先选择最长时间未被使用的账户（默认策略）
+                      </div>
+                      <div
+                        v-else-if="form.schedulingStrategy === 'random'"
+                        class="text-blue-800 dark:text-blue-200"
+                      >
+                        <strong>随机调度：</strong>随机选择可用账户，分布相对均匀
+                      </div>
+                      <div
+                        v-else-if="form.schedulingStrategy === 'weighted_random'"
+                        class="text-blue-800 dark:text-blue-200"
+                      >
+                        <strong>加权随机：</strong>根据权重随机选择，权重越高被选中概率越大
+                      </div>
+                      <div
+                        v-else-if="form.schedulingStrategy === 'sequential'"
+                        class="text-blue-800 dark:text-blue-200"
+                      >
+                        <strong>顺序调度：</strong>按配置顺序逐一使用账户，适合有优先级要求的场景
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 加权随机权重设置 -->
+            <div v-if="form.schedulingStrategy === 'weighted_random'">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                <i class="fas fa-weight-hanging mr-2 text-orange-500" />
+                调度权重 (1-10)
+              </label>
+              <input
+                v-model.number="form.schedulingWeight"
+                class="form-input w-full dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                max="10"
+                min="1"
+                placeholder="权重值，默认5"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                权重越高的账户被选中的概率越大，建议范围：1-10
+              </p>
+            </div>
+
+            <!-- 顺序调度顺序设置 -->
+            <div v-if="form.schedulingStrategy === 'sequential'">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                <i class="fas fa-sort-numeric-down mr-2 text-purple-500" />
+                顺序位置
+              </label>
+              <input
+                v-model.number="form.sequentialOrder"
+                class="form-input w-full dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="在顺序调度中的位置，从1开始"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                数字越小越优先被选择，同一平台/分组内不应重复
+              </p>
+            </div>
+
             <!-- 手动输入 Token 字段 -->
             <div
               v-if="
@@ -1326,6 +1430,110 @@
             </p>
           </div>
 
+          <!-- 调度策略设置（编辑模式） -->
+          <div>
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+              <i class="fas fa-route mr-2 text-blue-500" />
+              调度策略
+            </label>
+            <select
+              v-model="form.schedulingStrategy"
+              class="form-input w-full dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+            >
+              <option value="round_robin">轮询调度 (Round Robin)</option>
+              <option value="least_used">最少使用 (Least Used)</option>
+              <option value="least_recent">最近最少使用 (Least Recent)</option>
+              <option value="random">随机调度 (Random)</option>
+              <option value="weighted_random">加权随机 (Weighted Random)</option>
+              <option value="sequential">顺序调度 (Sequential)</option>
+            </select>
+            <div
+              class="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-900/30"
+            >
+              <div class="flex items-start gap-2">
+                <i class="fas fa-info-circle mt-0.5 text-blue-600 dark:text-blue-400" />
+                <div class="text-xs text-blue-700 dark:text-blue-300">
+                  <p class="mb-2 font-medium">调度策略说明：</p>
+                  <div class="space-y-1 text-xs">
+                    <div
+                      v-if="form.schedulingStrategy === 'round_robin'"
+                      class="text-blue-800 dark:text-blue-200"
+                    >
+                      <strong>轮询调度：</strong>按顺序循环选择账户，确保每个账户被平均使用
+                    </div>
+                    <div
+                      v-else-if="form.schedulingStrategy === 'least_used'"
+                      class="text-blue-800 dark:text-blue-200"
+                    >
+                      <strong>最少使用：</strong>优先选择使用次数最少的账户，实现负载均衡
+                    </div>
+                    <div
+                      v-else-if="form.schedulingStrategy === 'least_recent'"
+                      class="text-blue-800 dark:text-blue-200"
+                    >
+                      <strong>最近最少使用：</strong>优先选择最长时间未被使用的账户（默认策略）
+                    </div>
+                    <div
+                      v-else-if="form.schedulingStrategy === 'random'"
+                      class="text-blue-800 dark:text-blue-200"
+                    >
+                      <strong>随机调度：</strong>随机选择可用账户，分布相对均匀
+                    </div>
+                    <div
+                      v-else-if="form.schedulingStrategy === 'weighted_random'"
+                      class="text-blue-800 dark:text-blue-200"
+                    >
+                      <strong>加权随机：</strong>根据权重随机选择，权重越高被选中概率越大
+                    </div>
+                    <div
+                      v-else-if="form.schedulingStrategy === 'sequential'"
+                      class="text-blue-800 dark:text-blue-200"
+                    >
+                      <strong>顺序调度：</strong>按配置顺序逐一使用账户，适合有优先级要求的场景
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 加权随机权重设置（编辑模式） -->
+          <div v-if="form.schedulingStrategy === 'weighted_random'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+              <i class="fas fa-weight-hanging mr-2 text-orange-500" />
+              调度权重 (1-10)
+            </label>
+            <input
+              v-model.number="form.schedulingWeight"
+              class="form-input w-full dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+              max="10"
+              min="1"
+              placeholder="权重值，默认5"
+              type="number"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              权重越高的账户被选中的概率越大，建议范围：1-10
+            </p>
+          </div>
+
+          <!-- 顺序调度顺序设置（编辑模式） -->
+          <div v-if="form.schedulingStrategy === 'sequential'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+              <i class="fas fa-sort-numeric-down mr-2 text-purple-500" />
+              顺序位置
+            </label>
+            <input
+              v-model.number="form.sequentialOrder"
+              class="form-input w-full dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+              min="1"
+              placeholder="在顺序调度中的位置，从1开始"
+              type="number"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              数字越小越优先被选择，同一平台/分组内不应重复
+            </p>
+          </div>
+
           <!-- Claude Console 特定字段（编辑模式）-->
           <div v-if="form.platform === 'claude-console'" class="space-y-4">
             <div>
@@ -1780,6 +1988,10 @@ const form = ref({
   apiUrl: props.account?.apiUrl || '',
   apiKey: props.account?.apiKey || '',
   priority: props.account?.priority || 50,
+  // 调度策略相关字段
+  schedulingStrategy: props.account?.schedulingStrategy || 'least_recent',
+  schedulingWeight: props.account?.schedulingWeight || 5,
+  sequentialOrder: props.account?.sequentialOrder || 1,
   supportedModels: (() => {
     const models = props.account?.supportedModels
     if (!models) return ''
@@ -2029,6 +2241,14 @@ const handleOAuthSuccess = async (tokenInfo) => {
       // Claude使用claudeAiOauth字段
       data.claudeAiOauth = tokenInfo.claudeAiOauth || tokenInfo
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
       // 添加订阅类型信息
       data.subscriptionInfo = {
         accountType: form.value.subscriptionType || 'claude_max',
@@ -2044,10 +2264,26 @@ const handleOAuthSuccess = async (tokenInfo) => {
       }
       // 添加 Gemini 优先级
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
     } else if (form.value.platform === 'openai') {
       data.openaiOauth = tokenInfo.tokens || tokenInfo
       data.accountInfo = tokenInfo.accountInfo
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
     }
 
     let result
@@ -2166,6 +2402,14 @@ const createAccount = async () => {
         scopes: [] // 手动添加没有 scopes
       }
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
       // 添加订阅类型信息
       data.subscriptionInfo = {
         accountType: form.value.subscriptionType || 'claude_max',
@@ -2193,6 +2437,14 @@ const createAccount = async () => {
 
       // 添加 Gemini 优先级
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
     } else if (form.value.platform === 'openai') {
       // OpenAI手动模式需要构建openaiOauth对象
       const expiresInMs = form.value.refreshToken
@@ -2244,11 +2496,27 @@ const createAccount = async () => {
 
       data.accountInfo = accountInfo
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
     } else if (form.value.platform === 'claude-console') {
       // Claude Console 账户特定数据
       data.apiUrl = form.value.apiUrl
       data.apiKey = form.value.apiKey
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
       data.supportedModels = convertMappingsToObject() || {}
       data.userAgent = form.value.userAgent || null
       // 如果不启用限流，传递 0 表示不限流
@@ -2264,6 +2532,14 @@ const createAccount = async () => {
       data.defaultModel = form.value.defaultModel || null
       data.smallFastModel = form.value.smallFastModel || null
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
       // 如果不启用限流，传递 0 表示不限流
       data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
     }
@@ -2392,6 +2668,14 @@ const updateAccount = async () => {
     // Claude 官方账号优先级和订阅类型更新
     if (props.account.platform === 'claude') {
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
       // 更新订阅类型信息
       data.subscriptionInfo = {
         accountType: form.value.subscriptionType || 'claude_max',
@@ -2404,11 +2688,27 @@ const updateAccount = async () => {
     // OpenAI 账号优先级更新
     if (props.account.platform === 'openai') {
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
     }
 
     // Gemini 账号优先级更新
     if (props.account.platform === 'gemini') {
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
     }
 
     // Claude Console 特定更新
@@ -2418,6 +2718,14 @@ const updateAccount = async () => {
         data.apiKey = form.value.apiKey
       }
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
       data.supportedModels = convertMappingsToObject() || {}
       data.userAgent = form.value.userAgent || null
       // 如果不启用限流，传递 0 表示不限流
@@ -2446,6 +2754,14 @@ const updateAccount = async () => {
       data.defaultModel = form.value.defaultModel || null
       data.smallFastModel = form.value.smallFastModel || null
       data.priority = form.value.priority || 50
+      // 添加调度策略信息
+      data.schedulingStrategy = form.value.schedulingStrategy || 'least_recent'
+      if (form.value.schedulingStrategy === 'weighted_random') {
+        data.schedulingWeight = form.value.schedulingWeight || 5
+      }
+      if (form.value.schedulingStrategy === 'sequential') {
+        data.sequentialOrder = form.value.sequentialOrder || 1
+      }
       // 如果不启用限流，传递 0 表示不限流
       data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
     }
@@ -2739,6 +3055,10 @@ watch(
         apiUrl: newAccount.apiUrl || '',
         apiKey: '', // 编辑模式不显示现有的 API Key
         priority: newAccount.priority || 50,
+        // 调度策略相关字段
+        schedulingStrategy: newAccount.schedulingStrategy || 'least_recent',
+        schedulingWeight: newAccount.schedulingWeight || 5,
+        sequentialOrder: newAccount.sequentialOrder || 1,
         supportedModels: (() => {
           const models = newAccount.supportedModels
           if (!models) return ''

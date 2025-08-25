@@ -371,6 +371,13 @@ async function createAccount(accountData) {
     // 调度相关
     schedulable: accountData.schedulable !== undefined ? String(accountData.schedulable) : 'true',
     priority: accountData.priority || 50, // 调度优先级 (1-100，数字越小优先级越高)
+    // 新增调度策略字段
+    schedulingStrategy: accountData.schedulingStrategy || 'least_recent', // 调度策略
+    schedulingWeight: accountData.schedulingWeight || 1, // 调度权重 (1-10)
+    sequentialOrder: accountData.sequentialOrder || 1, // 顺序调度的顺序号
+    roundRobinIndex: 0, // 轮询索引，初始为0
+    usageCount: 0, // 使用计数，初始为0
+    lastScheduledAt: '', // 最后调度时间，初始为空
 
     // OAuth 相关字段（加密存储）
     geminiOauth: geminiOauth ? encrypt(geminiOauth) : '',
@@ -479,6 +486,20 @@ async function updateAccount(accountId, updates) {
   // 处理 schedulable 字段，确保正确转换为字符串存储
   if (updates.schedulable !== undefined) {
     updates.schedulable = updates.schedulable.toString()
+  }
+
+  // 处理调度策略字段
+  if (updates.schedulingWeight !== undefined) {
+    updates.schedulingWeight = parseInt(updates.schedulingWeight) || 1
+  }
+  if (updates.sequentialOrder !== undefined) {
+    updates.sequentialOrder = parseInt(updates.sequentialOrder) || 1
+  }
+  if (updates.roundRobinIndex !== undefined) {
+    updates.roundRobinIndex = parseInt(updates.roundRobinIndex) || 0
+  }
+  if (updates.usageCount !== undefined) {
+    updates.usageCount = parseInt(updates.usageCount) || 0
   }
 
   // 加密敏感字段
@@ -1343,6 +1364,59 @@ async function generateContentStream(
   return response.data // 返回流对象
 }
 
+// 🔄 更新账户调度相关字段（用于调度算法）
+async function updateAccountSchedulingFields(accountId, updates) {
+  try {
+    const client = redisClient.getClientSafe()
+    const accountKey = `${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`
+
+    // 将数字字段转换为字符串存储
+    const processedUpdates = {}
+    Object.keys(updates).forEach((key) => {
+      if (['schedulingWeight', 'sequentialOrder', 'roundRobinIndex', 'usageCount'].includes(key)) {
+        processedUpdates[key] = updates[key].toString()
+      } else {
+        processedUpdates[key] = updates[key]
+      }
+    })
+
+    // 添加更新时间
+    processedUpdates.updatedAt = new Date().toISOString()
+
+    await client.hmset(accountKey, processedUpdates)
+    logger.debug(`🔄 Updated Gemini scheduling fields for account ${accountId}:`, updates)
+    return { success: true }
+  } catch (error) {
+    logger.error(`❌ Failed to update Gemini scheduling fields for account ${accountId}:`, error)
+    throw error
+  }
+}
+
+// 🔢 增加账户使用计数并更新最后调度时间
+async function recordAccountUsage(accountId) {
+  try {
+    const client = redisClient.getClientSafe()
+    const accountKey = `${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`
+
+    // 获取当前使用计数
+    const currentUsageCount = await client.hget(accountKey, 'usageCount')
+    const usageCount = parseInt(currentUsageCount || '0') + 1
+
+    // 更新使用计数和最后调度时间
+    await client.hmset(accountKey, {
+      usageCount: usageCount.toString(),
+      lastScheduledAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+
+    logger.debug(`🔢 Recorded usage for Gemini account ${accountId}, new count: ${usageCount}`)
+    return { success: true, usageCount }
+  } catch (error) {
+    logger.error(`❌ Failed to record usage for Gemini account ${accountId}:`, error)
+    throw error
+  }
+}
+
 module.exports = {
   generateAuthUrl,
   pollAuthorizationStatus,
@@ -1371,6 +1445,9 @@ module.exports = {
   countTokens,
   generateContent,
   generateContentStream,
+  // 新增调度相关方法
+  updateAccountSchedulingFields,
+  recordAccountUsage,
   OAUTH_CLIENT_ID,
   OAUTH_SCOPES
 }

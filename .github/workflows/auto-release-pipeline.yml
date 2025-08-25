@@ -256,8 +256,8 @@ jobs:
           ## 🐳 Docker 镜像
           
           ```bash
-          docker pull ${{ secrets.DOCKERHUB_USERNAME || 'weishaw' }}/claude-relay-service:${{ steps.next_version.outputs.new_tag }}
-          docker pull ${{ secrets.DOCKERHUB_USERNAME || 'weishaw' }}/claude-relay-service:latest
+          docker pull ${{ secrets.DOCKERHUB_USERNAME || 'await2719' }}/claude-relay-service:${{ steps.next_version.outputs.new_tag }}
+          docker pull ${{ secrets.DOCKERHUB_USERNAME || 'await2719' }}/claude-relay-service:latest
           ```
           
           ## 📦 主要更新
@@ -430,13 +430,13 @@ jobs:
         MESSAGE+="${CHANGELOG_TRUNCATED}"$'\n'$'\n'
         MESSAGE+="🐳 *Docker 部署:*"$'\n'
         MESSAGE+="\`\`\`bash"$'\n'
-        MESSAGE+="docker pull weishaw/claude-relay-service:${TAG}"$'\n'
-        MESSAGE+="docker pull weishaw/claude-relay-service:latest"$'\n'
+        MESSAGE+="docker pull await2719/claude-relay-service:${TAG}"$'\n'
+        MESSAGE+="docker pull await2719/claude-relay-service:latest"$'\n'
         MESSAGE+="\`\`\`"$'\n'$'\n'
         MESSAGE+="🔗 *相关链接:*"$'\n'
         MESSAGE+="• [GitHub Release](https://github.com/${REPO}/releases/tag/${TAG})"$'\n'
         MESSAGE+="• [完整更新日志](https://github.com/${REPO}/releases)"$'\n'
-        MESSAGE+="• [Docker Hub](https://hub.docker.com/r/weishaw/claude-relay-service)"$'\n'$'\n'
+        MESSAGE+="• [Docker Hub](https://hub.docker.com/r/await2719/claude-relay-service)"$'\n'$'\n'
         MESSAGE+="#ClaudeRelay #Update #v${VERSION//./_}"
         
         # 使用 jq 构建 JSON 并发送

@@ -72,3 +72,16 @@ export function formatBytes(bytes, decimals = 2) {
 
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
 }
+
+// 计算平均每请求Token数
+export function getAverageTokensPerRequest(usage) {
+  if (!usage || !usage.tokens || !usage.requests) return '0'
+
+  const tokens = parseInt(usage.tokens) || 0
+  const requests = parseInt(usage.requests) || 0
+
+  if (requests === 0) return '0'
+
+  const average = tokens / requests
+  return formatNumber(Math.round(average))
+}

@@ -179,6 +179,14 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
+                class="w-[10%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                <div class="flex items-center gap-1">
+                  <i class="fas fa-route text-xs text-blue-500" />
+                  调度策略
+                </div>
+              </th>
+              <th
                 class="w-[10%] min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
               >
                 代理
@@ -440,6 +448,44 @@
                 </div>
                 <div v-else class="text-sm text-gray-400">
                   <span class="text-xs">N/A</span>
+                </div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4">
+                <div class="flex flex-col gap-1">
+                  <!-- 调度策略名称 -->
+                  <div class="flex items-center gap-2">
+                    <div
+                      :class="[
+                        'flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium',
+                        getStrategyColor(account.schedulingStrategy || 'least_recent')
+                      ]"
+                    >
+                      <i :class="getStrategyIcon(account.schedulingStrategy || 'least_recent')" />
+                      <span>{{
+                        getStrategyName(account.schedulingStrategy || 'least_recent')
+                      }}</span>
+                    </div>
+                  </div>
+
+                  <!-- 策略特殊参数 -->
+                  <div
+                    v-if="
+                      account.schedulingStrategy === 'weighted_random' && account.schedulingWeight
+                    "
+                    class="text-xs text-gray-600 dark:text-gray-300"
+                  >
+                    <i class="fas fa-weight-hanging mr-1 text-orange-500" />
+                    权重: {{ account.schedulingWeight }}
+                  </div>
+                  <div
+                    v-else-if="
+                      account.schedulingStrategy === 'sequential' && account.sequentialOrder
+                    "
+                    class="text-xs text-gray-600 dark:text-gray-300"
+                  >
+                    <i class="fas fa-sort-numeric-down mr-1 text-purple-500" />
+                    顺序: {{ account.sequentialOrder }}
+                  </div>
                 </div>
               </td>
               <td class="px-3 py-4 text-sm text-gray-600">
@@ -843,6 +889,37 @@
               <span class="font-medium text-gray-700 dark:text-gray-200">
                 {{ account.priority || 50 }}
               </span>
+            </div>
+
+            <!-- 调度策略 -->
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-gray-500 dark:text-gray-400">调度策略</span>
+              <div class="flex flex-col items-end gap-1">
+                <div
+                  :class="[
+                    'flex items-center gap-1 rounded px-2 py-1 text-xs font-medium',
+                    getStrategyColor(account.schedulingStrategy || 'least_recent')
+                  ]"
+                >
+                  <i :class="getStrategyIcon(account.schedulingStrategy || 'least_recent')" />
+                  <span>{{ getStrategyName(account.schedulingStrategy || 'least_recent') }}</span>
+                </div>
+                <!-- 策略特殊参数 -->
+                <div
+                  v-if="
+                    account.schedulingStrategy === 'weighted_random' && account.schedulingWeight
+                  "
+                  class="text-xs text-gray-600 dark:text-gray-300"
+                >
+                  权重: {{ account.schedulingWeight }}
+                </div>
+                <div
+                  v-else-if="account.schedulingStrategy === 'sequential' && account.sequentialOrder"
+                  class="text-xs text-gray-600 dark:text-gray-300"
+                >
+                  顺序: {{ account.sequentialOrder }}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1678,6 +1755,52 @@ onMounted(() => {
   // 首次加载时强制刷新所有数据
   loadAccounts(true)
 })
+
+// 调度策略相关辅助函数
+const getStrategyName = (strategy) => {
+  const strategyNames = {
+    round_robin: '轮询',
+    least_used: '最少使用',
+    least_recent: '最近最少',
+    random: '随机',
+    weighted_random: '加权随机',
+    sequential: '顺序'
+  }
+  return strategyNames[strategy] || '未知'
+}
+
+const getStrategyIcon = (strategy) => {
+  const strategyIcons = {
+    round_robin: 'fas fa-sync-alt text-blue-500',
+    least_used: 'fas fa-chart-bar text-green-500',
+    least_recent: 'fas fa-clock text-orange-500',
+    random: 'fas fa-random text-purple-500',
+    weighted_random: 'fas fa-weight-hanging text-orange-600',
+    sequential: 'fas fa-sort-numeric-down text-indigo-500'
+  }
+  return strategyIcons[strategy] || 'fas fa-question text-gray-400'
+}
+
+const getStrategyColor = (strategy) => {
+  const strategyColors = {
+    round_robin:
+      'bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-700',
+    least_used:
+      'bg-green-100 text-green-800 border border-green-200 dark:bg-green-900/30 dark:text-green-200 dark:border-green-700',
+    least_recent:
+      'bg-orange-100 text-orange-800 border border-orange-200 dark:bg-orange-900/30 dark:text-orange-200 dark:border-orange-700',
+    random:
+      'bg-purple-100 text-purple-800 border border-purple-200 dark:bg-purple-900/30 dark:text-purple-200 dark:border-purple-700',
+    weighted_random:
+      'bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700',
+    sequential:
+      'bg-indigo-100 text-indigo-800 border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200 dark:border-indigo-700'
+  }
+  return (
+    strategyColors[strategy] ||
+    'bg-gray-100 text-gray-800 border border-gray-200 dark:bg-gray-900/30 dark:text-gray-200 dark:border-gray-700'
+  )
+}
 </script>
 
 <style scoped>

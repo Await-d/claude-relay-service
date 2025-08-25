@@ -56,6 +56,13 @@ class BedrockAccountService {
       priority,
       schedulable,
       credentialType,
+      // 新增调度策略字段
+      schedulingStrategy: options.schedulingStrategy || 'least_recent', // 调度策略
+      schedulingWeight: options.schedulingWeight || 1, // 调度权重 (1-10)
+      sequentialOrder: options.sequentialOrder || 1, // 顺序调度的顺序号
+      roundRobinIndex: 0, // 轮询索引，初始为0
+      usageCount: 0, // 使用计数，初始为0
+      lastScheduledAt: '', // 最后调度时间，初始为空
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       type: 'bedrock' // 标识这是Bedrock账户
@@ -84,6 +91,13 @@ class BedrockAccountService {
         priority,
         schedulable,
         credentialType,
+        // 新增调度策略字段
+        schedulingStrategy: accountData.schedulingStrategy,
+        schedulingWeight: accountData.schedulingWeight,
+        sequentialOrder: accountData.sequentialOrder,
+        roundRobinIndex: accountData.roundRobinIndex,
+        usageCount: accountData.usageCount,
+        lastScheduledAt: accountData.lastScheduledAt,
         createdAt: accountData.createdAt,
         type: 'bedrock'
       }
@@ -142,6 +156,13 @@ class BedrockAccountService {
             priority: account.priority,
             schedulable: account.schedulable,
             credentialType: account.credentialType,
+            // 新增调度策略字段
+            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingWeight: account.schedulingWeight || 1,
+            sequentialOrder: account.sequentialOrder || 1,
+            roundRobinIndex: account.roundRobinIndex || 0,
+            usageCount: account.usageCount || 0,
+            lastScheduledAt: account.lastScheduledAt || '',
             createdAt: account.createdAt,
             updatedAt: account.updatedAt,
             type: 'bedrock',
@@ -209,6 +230,26 @@ class BedrockAccountService {
       }
       if (updates.credentialType !== undefined) {
         account.credentialType = updates.credentialType
+      }
+
+      // 处理调度策略字段
+      if (updates.schedulingStrategy !== undefined) {
+        account.schedulingStrategy = updates.schedulingStrategy
+      }
+      if (updates.schedulingWeight !== undefined) {
+        account.schedulingWeight = parseInt(updates.schedulingWeight) || 1
+      }
+      if (updates.sequentialOrder !== undefined) {
+        account.sequentialOrder = parseInt(updates.sequentialOrder) || 1
+      }
+      if (updates.roundRobinIndex !== undefined) {
+        account.roundRobinIndex = parseInt(updates.roundRobinIndex) || 0
+      }
+      if (updates.usageCount !== undefined) {
+        account.usageCount = parseInt(updates.usageCount) || 0
+      }
+      if (updates.lastScheduledAt !== undefined) {
+        account.lastScheduledAt = updates.lastScheduledAt
       }
 
       // 更新AWS凭证
@@ -472,6 +513,73 @@ class BedrockAccountService {
       return { success: true, data: stats }
     } catch (error) {
       logger.error('❌ 获取Bedrock账户统计失败', error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  // 🔄 更新账户调度相关字段（用于调度算法）
+  async updateAccountSchedulingFields(accountId, updates) {
+    try {
+      const client = redis.getClientSafe()
+      const accountData = await client.get(`bedrock_account:${accountId}`)
+      if (!accountData) {
+        return { success: false, error: 'Account not found' }
+      }
+
+      const account = JSON.parse(accountData)
+
+      // 更新调度相关字段
+      if (updates.schedulingStrategy !== undefined) {
+        account.schedulingStrategy = updates.schedulingStrategy
+      }
+      if (updates.schedulingWeight !== undefined) {
+        account.schedulingWeight = parseInt(updates.schedulingWeight) || 1
+      }
+      if (updates.sequentialOrder !== undefined) {
+        account.sequentialOrder = parseInt(updates.sequentialOrder) || 1
+      }
+      if (updates.roundRobinIndex !== undefined) {
+        account.roundRobinIndex = parseInt(updates.roundRobinIndex) || 0
+      }
+      if (updates.usageCount !== undefined) {
+        account.usageCount = parseInt(updates.usageCount) || 0
+      }
+      if (updates.lastScheduledAt !== undefined) {
+        account.lastScheduledAt = updates.lastScheduledAt
+      }
+
+      account.updatedAt = new Date().toISOString()
+
+      await client.set(`bedrock_account:${accountId}`, JSON.stringify(account))
+      logger.debug(`🔄 Updated Bedrock scheduling fields for account ${accountId}:`, updates)
+      return { success: true }
+    } catch (error) {
+      logger.error(`❌ Failed to update Bedrock scheduling fields for account ${accountId}:`, error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  // 🔢 增加账户使用计数并更新最后调度时间
+  async recordAccountUsage(accountId) {
+    try {
+      const client = redis.getClientSafe()
+      const accountData = await client.get(`bedrock_account:${accountId}`)
+      if (!accountData) {
+        return { success: false, error: 'Account not found' }
+      }
+
+      const account = JSON.parse(accountData)
+      const usageCount = (account.usageCount || 0) + 1
+
+      account.usageCount = usageCount
+      account.lastScheduledAt = new Date().toISOString()
+      account.updatedAt = new Date().toISOString()
+
+      await client.set(`bedrock_account:${accountId}`, JSON.stringify(account))
+      logger.debug(`🔢 Recorded usage for Bedrock account ${accountId}, new count: ${usageCount}`)
+      return { success: true, usageCount }
+    } catch (error) {
+      logger.error(`❌ Failed to record usage for Bedrock account ${accountId}:`, error)
       return { success: false, error: error.message }
     }
   }

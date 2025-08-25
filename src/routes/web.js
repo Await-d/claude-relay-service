@@ -51,7 +51,7 @@ router.post('/auth/login', async (req, res) => {
           }
 
           // 重新存储到Redis，不设置过期时间
-          await redis.getClient().hset('session:admin_credentials', adminData)
+          await redis.getClient().hmset('session:admin_credentials', adminData)
 
           logger.info('✅ Admin credentials reloaded from init.json')
         } catch (error) {

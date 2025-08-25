@@ -57,7 +57,11 @@ class ClaudeAccountService {
       platform = 'claude',
       priority = 50, // 调度优先级 (1-100，数字越小优先级越高)
       schedulable = true, // 是否可被调度
-      subscriptionInfo = null // 手动设置的订阅信息
+      subscriptionInfo = null, // 手动设置的订阅信息
+      // 新增调度策略字段
+      schedulingStrategy = 'least_recent', // 调度策略
+      schedulingWeight = 1, // 调度权重 (1-10)
+      sequentialOrder = 1 // 顺序调度的顺序号
     } = options
 
     const accountId = uuidv4()
@@ -93,7 +97,14 @@ class ClaudeAccountService {
           ? JSON.stringify(subscriptionInfo)
           : claudeAiOauth.subscriptionInfo
             ? JSON.stringify(claudeAiOauth.subscriptionInfo)
-            : ''
+            : '',
+        // 新增调度策略字段
+        schedulingStrategy,
+        schedulingWeight: schedulingWeight.toString(),
+        sequentialOrder: sequentialOrder.toString(),
+        roundRobinIndex: '0', // 轮询索引，初始为0
+        usageCount: '0', // 使用计数，初始为0
+        lastScheduledAt: '' // 最后调度时间，初始为空
       }
     } else {
       // 兼容旧格式
@@ -119,7 +130,14 @@ class ClaudeAccountService {
         errorMessage: '',
         schedulable: schedulable.toString(), // 是否可被调度
         // 手动设置的订阅信息
-        subscriptionInfo: subscriptionInfo ? JSON.stringify(subscriptionInfo) : ''
+        subscriptionInfo: subscriptionInfo ? JSON.stringify(subscriptionInfo) : '',
+        // 新增调度策略字段
+        schedulingStrategy,
+        schedulingWeight: schedulingWeight.toString(),
+        sequentialOrder: sequentialOrder.toString(),
+        roundRobinIndex: '0', // 轮询索引，初始为0
+        usageCount: '0', // 使用计数，初始为0
+        lastScheduledAt: '' // 最后调度时间，初始为空
       }
     }
 
@@ -158,7 +176,14 @@ class ClaudeAccountService {
       status: accountData.status,
       createdAt: accountData.createdAt,
       expiresAt: accountData.expiresAt,
-      scopes: claudeAiOauth ? claudeAiOauth.scopes : []
+      scopes: claudeAiOauth ? claudeAiOauth.scopes : [],
+      // 返回调度策略字段
+      schedulingStrategy,
+      schedulingWeight,
+      sequentialOrder,
+      roundRobinIndex: 0,
+      usageCount: 0,
+      lastScheduledAt: ''
     }
   }
 
@@ -512,7 +537,11 @@ class ClaudeAccountService {
         'accountType',
         'priority',
         'schedulable',
-        'subscriptionInfo'
+        'subscriptionInfo',
+        // 新增调度策略字段
+        'schedulingStrategy',
+        'schedulingWeight',
+        'sequentialOrder'
       ]
       const updatedData = { ...accountData }
 
@@ -542,6 +571,9 @@ class ClaudeAccountService {
               updatedData.errorMessage = ''
               updatedData.lastRefreshAt = new Date().toISOString()
             }
+          } else if (['schedulingWeight', 'sequentialOrder'].includes(field)) {
+            // 数字类型的调度策略字段转为字符串存储
+            updatedData[field] = value.toString()
           } else {
             updatedData[field] = value.toString()
           }
@@ -620,6 +652,33 @@ class ClaudeAccountService {
       return { success: true }
     } catch (error) {
       logger.error('❌ Failed to delete Claude account:', error)
+      throw error
+    }
+  }
+
+  // 🔄 更新账户调度相关字段（用于调度算法）
+  async updateAccountSchedulingFields(accountId, updates) {
+    try {
+      await redis.updateClaudeAccountSchedulingFields(accountId, updates)
+      logger.debug(`🔄 Updated scheduling fields for account ${accountId}:`, updates)
+      return { success: true }
+    } catch (error) {
+      logger.error(`❌ Failed to update scheduling fields for account ${accountId}:`, error)
+      throw error
+    }
+  }
+
+  // 🔢 增加账户使用计数并更新最后调度时间
+  async recordAccountUsage(accountId) {
+    try {
+      const usageCount = await redis.incrementClaudeAccountUsageCount(accountId)
+      await redis.updateClaudeAccountSchedulingFields(accountId, {
+        lastScheduledAt: new Date().toISOString()
+      })
+      logger.debug(`🔢 Recorded usage for account ${accountId}, new count: ${usageCount}`)
+      return { success: true, usageCount }
+    } catch (error) {
+      logger.error(`❌ Failed to record usage for account ${accountId}:`, error)
       throw error
     }
   }

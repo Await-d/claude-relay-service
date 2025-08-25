@@ -50,7 +50,10 @@ class ClaudeConsoleAccountService {
       proxy = null,
       isActive = true,
       accountType = 'shared', // 'dedicated' or 'shared'
-      schedulable = true // 是否可被调度
+      schedulable = true, // 是否可被调度
+      schedulingStrategy = 'least_recent', // 调度策略
+      schedulingWeight = 1, // 调度权重 (1-10)
+      sequentialOrder = 1 // 顺序调度的顺序号
     } = options
 
     // 验证必填字段
@@ -85,7 +88,14 @@ class ClaudeConsoleAccountService {
       rateLimitedAt: '',
       rateLimitStatus: '',
       // 调度控制
-      schedulable: schedulable.toString()
+      schedulable: schedulable.toString(),
+      // 调度策略字段
+      schedulingStrategy,
+      schedulingWeight: schedulingWeight.toString(),
+      sequentialOrder: sequentialOrder.toString(),
+      // 统计字段
+      usageCount: '0', // 使用计数，初始为0
+      lastScheduledAt: '' // 最后调度时间，初始为空
     }
 
     const client = redis.getClientSafe()
@@ -200,6 +210,13 @@ class ClaudeConsoleAccountService {
     accountData.isActive = accountData.isActive === 'true'
     accountData.schedulable = accountData.schedulable !== 'false' // 默认为true
 
+    // 📊 处理调度策略字段（向后兼容）
+    accountData.schedulingStrategy = accountData.schedulingStrategy || 'least_recent'
+    accountData.schedulingWeight = parseInt(accountData.schedulingWeight) || 1
+    accountData.sequentialOrder = parseInt(accountData.sequentialOrder) || 1
+    accountData.usageCount = parseInt(accountData.usageCount) || 0
+    accountData.lastScheduledAt = accountData.lastScheduledAt || ''
+
     if (accountData.proxy) {
       accountData.proxy = JSON.parse(accountData.proxy)
     }
@@ -265,6 +282,23 @@ class ClaudeConsoleAccountService {
       }
       if (updates.schedulable !== undefined) {
         updatedData.schedulable = updates.schedulable.toString()
+      }
+
+      // 📊 处理调度策略字段
+      if (updates.schedulingStrategy !== undefined) {
+        updatedData.schedulingStrategy = updates.schedulingStrategy
+      }
+      if (updates.schedulingWeight !== undefined) {
+        updatedData.schedulingWeight = updates.schedulingWeight.toString()
+      }
+      if (updates.sequentialOrder !== undefined) {
+        updatedData.sequentialOrder = updates.sequentialOrder.toString()
+      }
+      if (updates.usageCount !== undefined) {
+        updatedData.usageCount = updates.usageCount.toString()
+      }
+      if (updates.lastScheduledAt !== undefined) {
+        updatedData.lastScheduledAt = updates.lastScheduledAt
       }
 
       // 处理账户类型变更
@@ -680,6 +714,65 @@ class ClaudeConsoleAccountService {
 
     // 返回映射后的模型，如果不存在则返回原模型
     return modelMapping[requestedModel] || requestedModel
+  }
+
+  // 🔄 更新账户调度相关字段（用于调度算法）
+  async updateAccountSchedulingFields(accountId, updates) {
+    try {
+      const client = redis.getClientSafe()
+      const accountKey = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
+
+      // 将数字字段转换为字符串存储
+      const processedUpdates = {}
+      Object.keys(updates).forEach((key) => {
+        if (
+          ['schedulingWeight', 'sequentialOrder', 'roundRobinIndex', 'usageCount'].includes(key)
+        ) {
+          processedUpdates[key] = updates[key].toString()
+        } else {
+          processedUpdates[key] = updates[key]
+        }
+      })
+
+      // 添加更新时间
+      processedUpdates.updatedAt = new Date().toISOString()
+
+      await client.hset(accountKey, processedUpdates)
+      logger.debug(`🔄 Updated Claude Console scheduling fields for account ${accountId}:`, updates)
+      return { success: true }
+    } catch (error) {
+      logger.error(
+        `❌ Failed to update Claude Console scheduling fields for account ${accountId}:`,
+        error
+      )
+      throw error
+    }
+  }
+
+  // 📊 记录账户使用（用于统计和调度）
+  async recordAccountUsage(accountId) {
+    try {
+      const client = redis.getClientSafe()
+      const accountKey = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
+
+      // 原子性增加使用计数并更新最后调度时间
+      const currentUsageCount = await client.hget(accountKey, 'usageCount')
+      const usageCount = parseInt(currentUsageCount || '0') + 1
+
+      await client.hset(accountKey, {
+        usageCount: usageCount.toString(),
+        lastScheduledAt: new Date().toISOString(),
+        lastUsedAt: new Date().toISOString() // 也更新lastUsedAt
+      })
+
+      logger.debug(
+        `📊 Recorded usage for Claude Console account ${accountId}, new count: ${usageCount}`
+      )
+      return { success: true, usageCount }
+    } catch (error) {
+      logger.error(`❌ Failed to record account usage for ${accountId}:`, error)
+      return { success: false, error: error.message }
+    }
   }
 }
 

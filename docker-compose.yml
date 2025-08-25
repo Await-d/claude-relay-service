@@ -7,7 +7,7 @@ services:
   # 🚀 Claude Relay Service
   claude-relay:
     build: .
-    image: weishaw/claude-relay-service:latest
+    image: await2719/claude-relay-service:latest
     restart: unless-stopped
     ports:
       # 绑定地址：生产环境建议使用反向代理，设置 BIND_HOST=127.0.0.1

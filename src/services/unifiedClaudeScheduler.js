@@ -1,6 +1,9 @@
 const claudeAccountService = require('./claudeAccountService')
 const claudeConsoleAccountService = require('./claudeConsoleAccountService')
 const bedrockAccountService = require('./bedrockAccountService')
+const geminiAccountService = require('./geminiAccountService')
+const openaiAccountService = require('./openaiAccountService')
+const azureOpenaiAccountService = require('./azureOpenaiAccountService')
 const accountGroupService = require('./accountGroupService')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
@@ -8,6 +11,19 @@ const logger = require('../utils/logger')
 class UnifiedClaudeScheduler {
   constructor() {
     this.SESSION_MAPPING_PREFIX = 'unified_claude_session_mapping:'
+    this.ROUND_ROBIN_KEY = 'scheduler:round_robin:index'
+    this.SEQUENTIAL_KEY = 'scheduler:sequential:position'
+    this.USAGE_STATS_PREFIX = 'scheduler:usage_stats:'
+
+    // 支持的调度策略
+    this.SUPPORTED_STRATEGIES = [
+      'round_robin',
+      'least_used',
+      'least_recent',
+      'random',
+      'weighted_random',
+      'sequential'
+    ]
   }
 
   // 🔧 辅助方法：检查账户是否可调度（兼容字符串和布尔值）
@@ -95,6 +111,67 @@ class UnifiedClaudeScheduler {
         }
       }
 
+      // 4. 检查Gemini账户绑定
+      if (apiKeyData.geminiAccountId) {
+        const boundGeminiAccount = await geminiAccountService.getAccount(apiKeyData.geminiAccountId)
+        if (boundGeminiAccount && boundGeminiAccount.isActive === true) {
+          logger.info(
+            `🎯 Using bound dedicated Gemini account: ${boundGeminiAccount.name} (${apiKeyData.geminiAccountId}) for API key ${apiKeyData.name}`
+          )
+          return {
+            accountId: apiKeyData.geminiAccountId,
+            accountType: 'gemini'
+          }
+        } else {
+          logger.warn(
+            `⚠️ Bound Gemini account ${apiKeyData.geminiAccountId} is not available, falling back to pool`
+          )
+        }
+      }
+
+      // 5. 检查OpenAI账户绑定
+      if (apiKeyData.openaiAccountId) {
+        const boundOpenAIAccountResult = await openaiAccountService.getAccount(
+          apiKeyData.openaiAccountId
+        )
+        if (boundOpenAIAccountResult.success && boundOpenAIAccountResult.data.isActive === true) {
+          logger.info(
+            `🎯 Using bound dedicated OpenAI account: ${boundOpenAIAccountResult.data.name} (${apiKeyData.openaiAccountId}) for API key ${apiKeyData.name}`
+          )
+          return {
+            accountId: apiKeyData.openaiAccountId,
+            accountType: 'openai'
+          }
+        } else {
+          logger.warn(
+            `⚠️ Bound OpenAI account ${apiKeyData.openaiAccountId} is not available, falling back to pool`
+          )
+        }
+      }
+
+      // 6. 检查Azure OpenAI账户绑定
+      if (apiKeyData.azureOpenaiAccountId) {
+        const boundAzureOpenAIAccountResult = await azureOpenaiAccountService.getAccount(
+          apiKeyData.azureOpenaiAccountId
+        )
+        if (
+          boundAzureOpenAIAccountResult.success &&
+          boundAzureOpenAIAccountResult.data.isActive === true
+        ) {
+          logger.info(
+            `🎯 Using bound dedicated Azure OpenAI account: ${boundAzureOpenAIAccountResult.data.name} (${apiKeyData.azureOpenaiAccountId}) for API key ${apiKeyData.name}`
+          )
+          return {
+            accountId: apiKeyData.azureOpenaiAccountId,
+            accountType: 'azure-openai'
+          }
+        } else {
+          logger.warn(
+            `⚠️ Bound Azure OpenAI account ${apiKeyData.azureOpenaiAccountId} is not available, falling back to pool`
+          )
+        }
+      }
+
       // 如果有会话哈希，检查是否有已映射的账户
       if (sessionHash) {
         const mappedAccount = await this._getSessionMapping(sessionHash)
@@ -132,8 +209,13 @@ class UnifiedClaudeScheduler {
         }
       }
 
-      // 按优先级和最后使用时间排序
-      const sortedAccounts = this._sortAccountsByPriority(availableAccounts)
+      // 按优先级和调度策略排序（现在每个账户可以有自己的调度策略）
+      // 默认策略从API Key获取，但账户可以覆盖自己的策略
+      const defaultStrategy = apiKeyData.schedulingStrategy || 'least_recent'
+      const sortedAccounts = await this._sortAccountsByPriorityAndStrategy(
+        availableAccounts,
+        defaultStrategy
+      )
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]
@@ -150,8 +232,11 @@ class UnifiedClaudeScheduler {
         )
       }
 
+      // 更新使用统计
+      await this.updateAccountUsageStats(selectedAccount.accountId, selectedAccount.accountType)
+
       logger.info(
-        `🎯 Selected account: ${selectedAccount.name} (${selectedAccount.accountId}, ${selectedAccount.accountType}) with priority ${selectedAccount.priority} for API key ${apiKeyData.name}`
+        `🎯 Selected account: ${selectedAccount.name} (${selectedAccount.accountId}, ${selectedAccount.accountType}) with priority ${selectedAccount.priority} using strategy ${selectedAccount.schedulingStrategy || defaultStrategy} for API key ${apiKeyData.name}`
       )
 
       return {
@@ -189,7 +274,13 @@ class UnifiedClaudeScheduler {
               accountId: boundAccount.id,
               accountType: 'claude-official',
               priority: parseInt(boundAccount.priority) || 50,
-              lastUsedAt: boundAccount.lastUsedAt || '0'
+              lastUsedAt: boundAccount.lastUsedAt || '0',
+              // 包含调度策略字段
+              schedulingStrategy: boundAccount.schedulingStrategy || 'least_recent',
+              schedulingWeight: parseInt(boundAccount.schedulingWeight) || 1,
+              sequentialOrder: parseInt(boundAccount.sequentialOrder) || 1,
+              usageCount: parseInt(boundAccount.usageCount) || 0,
+              lastScheduledAt: boundAccount.lastScheduledAt || ''
             }
           ]
         }
@@ -221,7 +312,13 @@ class UnifiedClaudeScheduler {
               accountId: boundConsoleAccount.id,
               accountType: 'claude-console',
               priority: parseInt(boundConsoleAccount.priority) || 50,
-              lastUsedAt: boundConsoleAccount.lastUsedAt || '0'
+              lastUsedAt: boundConsoleAccount.lastUsedAt || '0',
+              // 包含调度策略字段
+              schedulingStrategy: boundConsoleAccount.schedulingStrategy || 'least_recent',
+              schedulingWeight: parseInt(boundConsoleAccount.schedulingWeight) || 1,
+              sequentialOrder: parseInt(boundConsoleAccount.sequentialOrder) || 1,
+              usageCount: parseInt(boundConsoleAccount.usageCount) || 0,
+              lastScheduledAt: boundConsoleAccount.lastScheduledAt || ''
             }
           ]
         }
@@ -247,11 +344,108 @@ class UnifiedClaudeScheduler {
             accountId: boundBedrockAccountResult.data.id,
             accountType: 'bedrock',
             priority: parseInt(boundBedrockAccountResult.data.priority) || 50,
-            lastUsedAt: boundBedrockAccountResult.data.lastUsedAt || '0'
+            lastUsedAt: boundBedrockAccountResult.data.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: boundBedrockAccountResult.data.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(boundBedrockAccountResult.data.schedulingWeight) || 1,
+            sequentialOrder: parseInt(boundBedrockAccountResult.data.sequentialOrder) || 1,
+            usageCount: parseInt(boundBedrockAccountResult.data.usageCount) || 0,
+            lastScheduledAt: boundBedrockAccountResult.data.lastScheduledAt || ''
           }
         ]
       } else {
         logger.warn(`⚠️ Bound Bedrock account ${apiKeyData.bedrockAccountId} is not available`)
+      }
+    }
+
+    // 4. 检查Gemini账户绑定
+    if (apiKeyData.geminiAccountId) {
+      const boundGeminiAccount = await geminiAccountService.getAccount(apiKeyData.geminiAccountId)
+      if (boundGeminiAccount && boundGeminiAccount.isActive === true) {
+        logger.info(
+          `🎯 Using bound dedicated Gemini account: ${boundGeminiAccount.name} (${apiKeyData.geminiAccountId})`
+        )
+        return [
+          {
+            ...boundGeminiAccount,
+            accountId: boundGeminiAccount.id,
+            accountType: 'gemini',
+            priority: parseInt(boundGeminiAccount.priority) || 50,
+            lastUsedAt: boundGeminiAccount.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: boundGeminiAccount.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(boundGeminiAccount.schedulingWeight) || 1,
+            sequentialOrder: parseInt(boundGeminiAccount.sequentialOrder) || 1,
+            usageCount: parseInt(boundGeminiAccount.usageCount) || 0,
+            lastScheduledAt: boundGeminiAccount.lastScheduledAt || ''
+          }
+        ]
+      } else {
+        logger.warn(`⚠️ Bound Gemini account ${apiKeyData.geminiAccountId} is not available`)
+      }
+    }
+
+    // 5. 检查OpenAI账户绑定
+    if (apiKeyData.openaiAccountId) {
+      const boundOpenAIAccountResult = await openaiAccountService.getAccount(
+        apiKeyData.openaiAccountId
+      )
+      if (boundOpenAIAccountResult.success && boundOpenAIAccountResult.data.isActive === true) {
+        logger.info(
+          `🎯 Using bound dedicated OpenAI account: ${boundOpenAIAccountResult.data.name} (${apiKeyData.openaiAccountId})`
+        )
+        return [
+          {
+            ...boundOpenAIAccountResult.data,
+            accountId: boundOpenAIAccountResult.data.id,
+            accountType: 'openai',
+            priority: parseInt(boundOpenAIAccountResult.data.priority) || 50,
+            lastUsedAt: boundOpenAIAccountResult.data.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: boundOpenAIAccountResult.data.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(boundOpenAIAccountResult.data.schedulingWeight) || 1,
+            sequentialOrder: parseInt(boundOpenAIAccountResult.data.sequentialOrder) || 1,
+            usageCount: parseInt(boundOpenAIAccountResult.data.usageCount) || 0,
+            lastScheduledAt: boundOpenAIAccountResult.data.lastScheduledAt || ''
+          }
+        ]
+      } else {
+        logger.warn(`⚠️ Bound OpenAI account ${apiKeyData.openaiAccountId} is not available`)
+      }
+    }
+
+    // 6. 检查Azure OpenAI账户绑定
+    if (apiKeyData.azureOpenaiAccountId) {
+      const boundAzureOpenAIAccountResult = await azureOpenaiAccountService.getAccount(
+        apiKeyData.azureOpenaiAccountId
+      )
+      if (
+        boundAzureOpenAIAccountResult.success &&
+        boundAzureOpenAIAccountResult.data.isActive === true
+      ) {
+        logger.info(
+          `🎯 Using bound dedicated Azure OpenAI account: ${boundAzureOpenAIAccountResult.data.name} (${apiKeyData.azureOpenaiAccountId})`
+        )
+        return [
+          {
+            ...boundAzureOpenAIAccountResult.data,
+            accountId: boundAzureOpenAIAccountResult.data.id,
+            accountType: 'azure-openai',
+            priority: parseInt(boundAzureOpenAIAccountResult.data.priority) || 50,
+            lastUsedAt: boundAzureOpenAIAccountResult.data.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy:
+              boundAzureOpenAIAccountResult.data.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(boundAzureOpenAIAccountResult.data.schedulingWeight) || 1,
+            sequentialOrder: parseInt(boundAzureOpenAIAccountResult.data.sequentialOrder) || 1,
+            usageCount: parseInt(boundAzureOpenAIAccountResult.data.usageCount) || 0,
+            lastScheduledAt: boundAzureOpenAIAccountResult.data.lastScheduledAt || ''
+          }
+        ]
+      } else {
+        logger.warn(
+          `⚠️ Bound Azure OpenAI account ${apiKeyData.azureOpenaiAccountId} is not available`
+        )
       }
     }
 
@@ -304,7 +498,13 @@ class UnifiedClaudeScheduler {
             accountId: account.id,
             accountType: 'claude-official',
             priority: parseInt(account.priority) || 50, // 默认优先级50
-            lastUsedAt: account.lastUsedAt || '0'
+            lastUsedAt: account.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(account.schedulingWeight) || 1,
+            sequentialOrder: parseInt(account.sequentialOrder) || 1,
+            usageCount: parseInt(account.usageCount) || 0,
+            lastScheduledAt: account.lastScheduledAt || ''
           })
         }
       }
@@ -364,7 +564,13 @@ class UnifiedClaudeScheduler {
             accountId: account.id,
             accountType: 'claude-console',
             priority: parseInt(account.priority) || 50,
-            lastUsedAt: account.lastUsedAt || '0'
+            lastUsedAt: account.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(account.schedulingWeight) || 1,
+            sequentialOrder: parseInt(account.sequentialOrder) || 1,
+            usageCount: parseInt(account.usageCount) || 0,
+            lastScheduledAt: account.lastScheduledAt || ''
           })
           logger.info(
             `✅ Added Claude Console account to available pool: ${account.name} (priority: ${account.priority})`
@@ -402,7 +608,13 @@ class UnifiedClaudeScheduler {
             accountId: account.id,
             accountType: 'bedrock',
             priority: parseInt(account.priority) || 50,
-            lastUsedAt: account.lastUsedAt || '0'
+            lastUsedAt: account.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(account.schedulingWeight) || 1,
+            sequentialOrder: parseInt(account.sequentialOrder) || 1,
+            usageCount: parseInt(account.usageCount) || 0,
+            lastScheduledAt: account.lastScheduledAt || ''
           })
           logger.info(
             `✅ Added Bedrock account to available pool: ${account.name} (priority: ${account.priority})`
@@ -415,25 +627,562 @@ class UnifiedClaudeScheduler {
       }
     }
 
+    // 获取Gemini账户（共享池）
+    const geminiAccountsResult = await geminiAccountService.getAllAccounts()
+    if (geminiAccountsResult.success) {
+      const geminiAccounts = geminiAccountsResult.data
+      logger.info(`📋 Found ${geminiAccounts.length} total Gemini accounts`)
+
+      for (const account of geminiAccounts) {
+        logger.info(
+          `🔍 Checking Gemini account: ${account.name} - isActive: ${account.isActive}, accountType: ${account.accountType}, schedulable: ${account.schedulable}`
+        )
+
+        if (
+          account.isActive === true &&
+          account.accountType === 'shared' &&
+          this._isSchedulable(account.schedulable)
+        ) {
+          // 检查是否被限流（如果Gemini支持限流检查）
+          // 目前假设Gemini账户不需要限流检查
+          availableAccounts.push({
+            ...account,
+            accountId: account.id,
+            accountType: 'gemini',
+            priority: parseInt(account.priority) || 50,
+            lastUsedAt: account.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(account.schedulingWeight) || 1,
+            sequentialOrder: parseInt(account.sequentialOrder) || 1,
+            usageCount: parseInt(account.usageCount) || 0,
+            lastScheduledAt: account.lastScheduledAt || ''
+          })
+          logger.info(
+            `✅ Added Gemini account to available pool: ${account.name} (priority: ${account.priority})`
+          )
+        } else {
+          logger.info(
+            `❌ Gemini account ${account.name} not eligible - isActive: ${account.isActive}, accountType: ${account.accountType}, schedulable: ${account.schedulable}`
+          )
+        }
+      }
+    }
+
+    // 获取OpenAI账户（共享池）
+    const openaiAccountsResult = await openaiAccountService.getAllAccounts()
+    if (openaiAccountsResult.success) {
+      const openaiAccounts = openaiAccountsResult.data
+      logger.info(`📋 Found ${openaiAccounts.length} total OpenAI accounts`)
+
+      for (const account of openaiAccounts) {
+        logger.info(
+          `🔍 Checking OpenAI account: ${account.name} - isActive: ${account.isActive}, accountType: ${account.accountType}, schedulable: ${account.schedulable}`
+        )
+
+        if (
+          account.isActive === true &&
+          account.accountType === 'shared' &&
+          this._isSchedulable(account.schedulable)
+        ) {
+          // 检查是否被限流（如果OpenAI支持限流检查）
+          // 目前假设OpenAI账户不需要限流检查
+          availableAccounts.push({
+            ...account,
+            accountId: account.id,
+            accountType: 'openai',
+            priority: parseInt(account.priority) || 50,
+            lastUsedAt: account.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(account.schedulingWeight) || 1,
+            sequentialOrder: parseInt(account.sequentialOrder) || 1,
+            usageCount: parseInt(account.usageCount) || 0,
+            lastScheduledAt: account.lastScheduledAt || ''
+          })
+          logger.info(
+            `✅ Added OpenAI account to available pool: ${account.name} (priority: ${account.priority})`
+          )
+        } else {
+          logger.info(
+            `❌ OpenAI account ${account.name} not eligible - isActive: ${account.isActive}, accountType: ${account.accountType}, schedulable: ${account.schedulable}`
+          )
+        }
+      }
+    }
+
+    // 获取Azure OpenAI账户（共享池）
+    const azureOpenaiAccountsResult = await azureOpenaiAccountService.getAllAccounts()
+    if (azureOpenaiAccountsResult.success) {
+      const azureOpenaiAccounts = azureOpenaiAccountsResult.data
+      logger.info(`📋 Found ${azureOpenaiAccounts.length} total Azure OpenAI accounts`)
+
+      for (const account of azureOpenaiAccounts) {
+        logger.info(
+          `🔍 Checking Azure OpenAI account: ${account.name} - isActive: ${account.isActive}, accountType: ${account.accountType}, schedulable: ${account.schedulable}`
+        )
+
+        if (
+          account.isActive === true &&
+          account.accountType === 'shared' &&
+          this._isSchedulable(account.schedulable)
+        ) {
+          // 检查是否被限流（如果Azure OpenAI支持限流检查）
+          // 目前假设Azure OpenAI账户不需要限流检查
+          availableAccounts.push({
+            ...account,
+            accountId: account.id,
+            accountType: 'azure-openai',
+            priority: parseInt(account.priority) || 50,
+            lastUsedAt: account.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingWeight: parseInt(account.schedulingWeight) || 1,
+            sequentialOrder: parseInt(account.sequentialOrder) || 1,
+            usageCount: parseInt(account.usageCount) || 0,
+            lastScheduledAt: account.lastScheduledAt || ''
+          })
+          logger.info(
+            `✅ Added Azure OpenAI account to available pool: ${account.name} (priority: ${account.priority})`
+          )
+        } else {
+          logger.info(
+            `❌ Azure OpenAI account ${account.name} not eligible - isActive: ${account.isActive}, accountType: ${account.accountType}, schedulable: ${account.schedulable}`
+          )
+        }
+      }
+    }
+
     logger.info(
-      `📊 Total available accounts: ${availableAccounts.length} (Claude: ${availableAccounts.filter((a) => a.accountType === 'claude-official').length}, Console: ${availableAccounts.filter((a) => a.accountType === 'claude-console').length}, Bedrock: ${availableAccounts.filter((a) => a.accountType === 'bedrock').length})`
+      `📊 Total available accounts: ${availableAccounts.length} (Claude: ${availableAccounts.filter((a) => a.accountType === 'claude-official').length}, Console: ${availableAccounts.filter((a) => a.accountType === 'claude-console').length}, Bedrock: ${availableAccounts.filter((a) => a.accountType === 'bedrock').length}, Gemini: ${availableAccounts.filter((a) => a.accountType === 'gemini').length}, OpenAI: ${availableAccounts.filter((a) => a.accountType === 'openai').length}, Azure OpenAI: ${availableAccounts.filter((a) => a.accountType === 'azure-openai').length})`
     )
     return availableAccounts
   }
 
-  // 🔢 按优先级和最后使用时间排序账户
-  _sortAccountsByPriority(accounts) {
-    return accounts.sort((a, b) => {
-      // 首先按优先级排序（数字越小优先级越高）
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority
+  // 📊 更新账户使用统计
+  async updateAccountUsageStats(accountId, accountType) {
+    try {
+      // 调用相应服务的recordAccountUsage方法以正确更新调度字段
+      if (accountType === 'claude-official') {
+        await claudeAccountService.recordAccountUsage(accountId)
+      } else if (accountType === 'claude-console') {
+        await claudeConsoleAccountService.recordAccountUsage(accountId)
+      } else if (accountType === 'bedrock') {
+        await bedrockAccountService.recordAccountUsage(accountId)
+      } else if (accountType === 'gemini') {
+        await geminiAccountService.recordAccountUsage(accountId)
+      } else if (accountType === 'openai') {
+        await openaiAccountService.recordAccountUsage(accountId)
+      } else if (accountType === 'azure-openai') {
+        await azureOpenaiAccountService.recordAccountUsage(accountId)
       }
 
-      // 优先级相同时，按最后使用时间排序（最久未使用的优先）
+      // 保持原有的统计逻辑用于调度器内部统计
+      const client = redis.getClientSafe()
+      const statsKey = `${this.USAGE_STATS_PREFIX}${accountType}:${accountId}`
+
+      // 增加使用次数
+      await client.incr(statsKey)
+
+      // 设置过期时间为30天，避免统计数据无限增长
+      await client.expire(statsKey, 30 * 24 * 60 * 60)
+
+      logger.debug(`📊 Updated usage stats for account ${accountId} (${accountType})`)
+    } catch (error) {
+      logger.warn('⚠️ Failed to update account usage stats:', error)
+    }
+  }
+
+  // 📈 获取账户使用统计
+  async getAccountUsageCount(accountId, accountType) {
+    try {
+      const client = redis.getClientSafe()
+      const statsKey = `${this.USAGE_STATS_PREFIX}${accountType}:${accountId}`
+      const count = await client.get(statsKey)
+      return parseInt(count) || 0
+    } catch (error) {
+      logger.warn('⚠️ Failed to get account usage stats:', error)
+      return 0
+    }
+  }
+
+  // 🔢 按优先级和调度策略排序账户（支持个别账户的自定义策略）
+  async _sortAccountsByPriorityAndStrategy(accounts, defaultStrategy = 'least_recent') {
+    // 按优先级分组
+    const groupsByPriority = {}
+    for (const account of accounts) {
+      const { priority } = account
+      if (!groupsByPriority[priority]) {
+        groupsByPriority[priority] = []
+      }
+      groupsByPriority[priority].push(account)
+    }
+
+    // 按优先级排序（数字越小优先级越高）
+    const sortedPriorities = Object.keys(groupsByPriority).sort((a, b) => parseInt(a) - parseInt(b))
+
+    const sortedAccounts = []
+
+    // 对每个优先级组应用调度策略（支持账户级别的策略）
+    for (const priority of sortedPriorities) {
+      const priorityAccounts = groupsByPriority[priority]
+
+      // 检查这个优先级组的账户是否有统一的调度策略
+      const strategies = priorityAccounts.map((acc) => acc.schedulingStrategy || defaultStrategy)
+      const uniqueStrategies = [...new Set(strategies)]
+
+      if (uniqueStrategies.length === 1) {
+        // 所有账户使用同一策略，可以统一处理
+        const strategy = uniqueStrategies[0]
+        logger.info(
+          `🎯 Applying ${strategy} strategy to ${priorityAccounts.length} accounts with priority ${priority}`
+        )
+
+        try {
+          const strategyAccounts = await this._applySchedulingStrategy(
+            priorityAccounts,
+            strategy,
+            priority
+          )
+          sortedAccounts.push(...strategyAccounts)
+        } catch (error) {
+          logger.error(`❌ Failed to apply strategy ${strategy} for priority ${priority}:`, error)
+          // 回退到默认策略
+          const fallbackAccounts = await this._applySchedulingStrategy(
+            priorityAccounts,
+            'least_recent',
+            priority
+          )
+          sortedAccounts.push(...fallbackAccounts)
+        }
+      } else {
+        // 账户使用不同策略，需要分组处理
+        logger.info(
+          `🎯 Mixed strategies in priority ${priority}: ${uniqueStrategies.join(', ')}, applying account-level strategies`
+        )
+
+        const strategyGroups = {}
+        for (const account of priorityAccounts) {
+          const strategy = account.schedulingStrategy || defaultStrategy
+          if (!strategyGroups[strategy]) {
+            strategyGroups[strategy] = []
+          }
+          strategyGroups[strategy].push(account)
+        }
+
+        // 对每个策略组分别处理，然后合并结果
+        const strategyResults = []
+        for (const [strategy, strategyAccounts] of Object.entries(strategyGroups)) {
+          try {
+            const processedAccounts = await this._applySchedulingStrategy(
+              strategyAccounts,
+              strategy,
+              priority
+            )
+            strategyResults.push({
+              strategy,
+              accounts: processedAccounts,
+              weight: strategyAccounts.length
+            })
+          } catch (error) {
+            logger.error(`❌ Failed to apply strategy ${strategy}:`, error)
+            const fallbackAccounts = await this._applySchedulingStrategy(
+              strategyAccounts,
+              'least_recent',
+              priority
+            )
+            strategyResults.push({
+              strategy: 'least_recent',
+              accounts: fallbackAccounts,
+              weight: strategyAccounts.length
+            })
+          }
+        }
+
+        // 按权重（账户数量）排序策略组，账户多的策略优先
+        strategyResults.sort((a, b) => b.weight - a.weight)
+
+        // 合并结果（权重高的策略组的第一个账户优先）
+        const maxLength = Math.max(...strategyResults.map((r) => r.accounts.length))
+        for (let i = 0; i < maxLength; i++) {
+          for (const result of strategyResults) {
+            if (i < result.accounts.length) {
+              sortedAccounts.push(result.accounts[i])
+            }
+          }
+        }
+      }
+    }
+
+    return sortedAccounts
+  }
+
+  // 🔢 按优先级和调度策略排序账户（原有方法，保持向后兼容）
+  async _sortAccountsByPriority(accounts, strategy = 'least_recent') {
+    // 验证调度策略
+    if (!this.SUPPORTED_STRATEGIES.includes(strategy)) {
+      logger.warn(`⚠️ Unknown scheduling strategy: ${strategy}, falling back to least_recent`)
+      strategy = 'least_recent'
+    }
+
+    // 按优先级分组
+    const groupsByPriority = {}
+    for (const account of accounts) {
+      const { priority } = account
+      if (!groupsByPriority[priority]) {
+        groupsByPriority[priority] = []
+      }
+      groupsByPriority[priority].push(account)
+    }
+
+    // 按优先级排序（数字越小优先级越高）
+    const sortedPriorities = Object.keys(groupsByPriority).sort((a, b) => parseInt(a) - parseInt(b))
+
+    const sortedAccounts = []
+
+    // 对每个优先级组应用调度策略
+    for (const priority of sortedPriorities) {
+      const priorityAccounts = groupsByPriority[priority]
+
+      logger.info(
+        `🎯 Applying ${strategy} strategy to ${priorityAccounts.length} accounts with priority ${priority}`
+      )
+
+      let strategyAccounts
+      try {
+        strategyAccounts = await this._applySchedulingStrategy(priorityAccounts, strategy, priority)
+      } catch (error) {
+        logger.error(`❌ Failed to apply strategy ${strategy} for priority ${priority}:`, error)
+        // 回退到默认策略
+        strategyAccounts = await this._applySchedulingStrategy(
+          priorityAccounts,
+          'least_recent',
+          priority
+        )
+      }
+
+      sortedAccounts.push(...strategyAccounts)
+    }
+
+    return sortedAccounts
+  }
+
+  // 🎯 应用调度策略
+  async _applySchedulingStrategy(accounts, strategy, priority = null) {
+    switch (strategy) {
+      case 'round_robin':
+        return await this._roundRobinStrategy(accounts, priority)
+      case 'least_used':
+        return await this._leastUsedStrategy(accounts)
+      case 'least_recent':
+        return this._leastRecentStrategy(accounts)
+      case 'random':
+        return this._randomStrategy(accounts)
+      case 'weighted_random':
+        return this._weightedRandomStrategy(accounts)
+      case 'sequential':
+        return await this._sequentialStrategy(accounts, priority)
+      default:
+        logger.warn(`⚠️ Unknown strategy: ${strategy}, using least_recent`)
+        return this._leastRecentStrategy(accounts)
+    }
+  }
+
+  // 🔄 轮询调度策略
+  async _roundRobinStrategy(accounts, priority = null) {
+    try {
+      const client = redis.getClientSafe()
+
+      // 为每个优先级组使用独立的轮询键
+      const roundRobinKey =
+        priority !== null ? `${this.ROUND_ROBIN_KEY}:priority:${priority}` : this.ROUND_ROBIN_KEY
+
+      // 获取当前轮询索引
+      let currentIndex = await client.get(roundRobinKey)
+      currentIndex = parseInt(currentIndex) || 0
+
+      // 确保索引在有效范围内
+      const selectedIndex = currentIndex % accounts.length
+
+      // 更新索引为下一位置
+      const nextIndex = (currentIndex + 1) % accounts.length
+      await client.set(roundRobinKey, nextIndex)
+
+      // 将选中的账户移到首位
+      const selectedAccount = accounts[selectedIndex]
+      const reorderedAccounts = [selectedAccount, ...accounts.filter((_, i) => i !== selectedIndex)]
+
+      logger.info(
+        `🔄 Round robin selected index ${selectedIndex}: ${selectedAccount.name} (${selectedAccount.accountId})`
+      )
+
+      return reorderedAccounts
+    } catch (error) {
+      logger.error('❌ Round robin strategy failed:', error)
+      return this._leastRecentStrategy(accounts)
+    }
+  }
+
+  // 📊 最少使用调度策略
+  async _leastUsedStrategy(accounts) {
+    try {
+      // 获取所有账户的使用统计
+      const accountsWithUsage = await Promise.all(
+        accounts.map(async (account) => {
+          const usageCount = await this.getAccountUsageCount(account.accountId, account.accountType)
+          return {
+            ...account,
+            usageCount
+          }
+        })
+      )
+
+      // 按使用次数排序（最少使用的优先）
+      const sortedAccounts = accountsWithUsage.sort((a, b) => {
+        if (a.usageCount !== b.usageCount) {
+          return a.usageCount - b.usageCount
+        }
+        // 使用次数相同时，按最后使用时间排序
+        const aLastUsed = new Date(a.lastUsedAt || 0).getTime()
+        const bLastUsed = new Date(b.lastUsedAt || 0).getTime()
+        return aLastUsed - bLastUsed
+      })
+
+      logger.info(
+        `📊 Least used selected: ${sortedAccounts[0].name} (usage: ${sortedAccounts[0].usageCount})`
+      )
+
+      return sortedAccounts
+    } catch (error) {
+      logger.error('❌ Least used strategy failed:', error)
+      return this._leastRecentStrategy(accounts)
+    }
+  }
+
+  // ⏰ 最近最少使用调度策略（默认策略）
+  _leastRecentStrategy(accounts) {
+    const sortedAccounts = accounts.sort((a, b) => {
       const aLastUsed = new Date(a.lastUsedAt || 0).getTime()
       const bLastUsed = new Date(b.lastUsedAt || 0).getTime()
       return aLastUsed - bLastUsed
     })
+
+    logger.info(
+      `⏰ Least recent selected: ${sortedAccounts[0].name} (last used: ${sortedAccounts[0].lastUsedAt || 'never'})`
+    )
+
+    return sortedAccounts
+  }
+
+  // 🎲 随机调度策略
+  _randomStrategy(accounts) {
+    const shuffledAccounts = [...accounts]
+
+    // Fisher-Yates shuffle algorithm
+    for (let i = shuffledAccounts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffledAccounts[i], shuffledAccounts[j]] = [shuffledAccounts[j], shuffledAccounts[i]]
+    }
+
+    logger.info(
+      `🎲 Random selected: ${shuffledAccounts[0].name} (${shuffledAccounts[0].accountId})`
+    )
+
+    return shuffledAccounts
+  }
+
+  // ⚖️ 加权随机调度策略
+  _weightedRandomStrategy(accounts) {
+    try {
+      // 为每个账户分配权重（weight 字段，默认为1）
+      const accountsWithWeight = accounts.map((account) => ({
+        ...account,
+        weight: parseFloat(account.weight) || 1.0
+      }))
+
+      // 计算总权重
+      const totalWeight = accountsWithWeight.reduce((sum, account) => sum + account.weight, 0)
+
+      // 生成随机数
+      let random = Math.random() * totalWeight
+
+      // 根据权重选择账户
+      for (let i = 0; i < accountsWithWeight.length; i++) {
+        random -= accountsWithWeight[i].weight
+        if (random <= 0) {
+          const selectedAccount = accountsWithWeight[i]
+          // 将选中的账户移到首位
+          const reorderedAccounts = [
+            selectedAccount,
+            ...accountsWithWeight.filter((_, idx) => idx !== i)
+          ]
+
+          logger.info(
+            `⚖️ Weighted random selected: ${selectedAccount.name} (weight: ${selectedAccount.weight})`
+          )
+
+          return reorderedAccounts
+        }
+      }
+
+      // 如果没有选中（不应该发生），返回第一个
+      logger.info(`⚖️ Weighted random fallback to first: ${accountsWithWeight[0].name}`)
+      return accountsWithWeight
+    } catch (error) {
+      logger.error('❌ Weighted random strategy failed:', error)
+      return this._randomStrategy(accounts)
+    }
+  }
+
+  // 🔢 顺序调度策略
+  async _sequentialStrategy(accounts, priority = null) {
+    try {
+      // 按 sequentialOrder 字段排序
+      const sortedByOrder = accounts.sort((a, b) => {
+        const aOrder = parseInt(a.sequentialOrder) || Number.MAX_SAFE_INTEGER
+        const bOrder = parseInt(b.sequentialOrder) || Number.MAX_SAFE_INTEGER
+
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder
+        }
+
+        // sequentialOrder 相同时，按账户ID排序保证一致性
+        return a.accountId.localeCompare(b.accountId)
+      })
+
+      const client = redis.getClientSafe()
+
+      // 为每个优先级组使用独立的顺序键
+      const sequentialKey =
+        priority !== null ? `${this.SEQUENTIAL_KEY}:priority:${priority}` : this.SEQUENTIAL_KEY
+
+      // 获取当前位置
+      let currentPosition = await client.get(sequentialKey)
+      currentPosition = parseInt(currentPosition) || 0
+
+      // 确保位置在有效范围内
+      const selectedIndex = currentPosition % sortedByOrder.length
+
+      // 更新位置为下一个
+      const nextPosition = (currentPosition + 1) % sortedByOrder.length
+      await client.set(sequentialKey, nextPosition)
+
+      // 将选中的账户移到首位
+      const selectedAccount = sortedByOrder[selectedIndex]
+      const reorderedAccounts = [
+        selectedAccount,
+        ...sortedByOrder.filter((_, i) => i !== selectedIndex)
+      ]
+
+      logger.info(
+        `🔢 Sequential selected position ${selectedIndex}: ${selectedAccount.name} (order: ${selectedAccount.sequentialOrder || 'undefined'})`
+      )
+
+      return reorderedAccounts
+    } catch (error) {
+      logger.error('❌ Sequential strategy failed:', error)
+      return this._leastRecentStrategy(accounts)
+    }
   }
 
   // 🔍 检查账户是否可用
@@ -472,6 +1221,42 @@ class UnifiedClaudeScheduler {
           return false
         }
         // Bedrock账户暂不需要限流检查，因为AWS管理限流
+        return true
+      } else if (accountType === 'gemini') {
+        const account = await geminiAccountService.getAccount(accountId)
+        if (!account || !account.isActive) {
+          return false
+        }
+        // 检查是否可调度
+        if (!this._isSchedulable(account.schedulable)) {
+          logger.info(`🚫 Gemini account ${accountId} is not schedulable`)
+          return false
+        }
+        // Gemini账户暂不需要限流检查
+        return true
+      } else if (accountType === 'openai') {
+        const accountResult = await openaiAccountService.getAccount(accountId)
+        if (!accountResult.success || !accountResult.data.isActive) {
+          return false
+        }
+        // 检查是否可调度
+        if (!this._isSchedulable(accountResult.data.schedulable)) {
+          logger.info(`🚫 OpenAI account ${accountId} is not schedulable`)
+          return false
+        }
+        // OpenAI账户暂不需要限流检查
+        return true
+      } else if (accountType === 'azure-openai') {
+        const accountResult = await azureOpenaiAccountService.getAccount(accountId)
+        if (!accountResult.success || !accountResult.data.isActive) {
+          return false
+        }
+        // 检查是否可调度
+        if (!this._isSchedulable(accountResult.data.schedulable)) {
+          logger.info(`🚫 Azure OpenAI account ${accountId} is not schedulable`)
+          return false
+        }
+        // Azure OpenAI账户暂不需要限流检查
         return true
       }
       return false
@@ -736,8 +1521,12 @@ class UnifiedClaudeScheduler {
         throw new Error(`No available accounts in group ${group.name}`)
       }
 
-      // 使用现有的优先级排序逻辑
-      const sortedAccounts = this._sortAccountsByPriority(availableAccounts)
+      // 使用现有的优先级排序逻辑（分组可以配置调度策略，默认least_recent）
+      const schedulingStrategy = group.schedulingStrategy || 'least_recent'
+      const sortedAccounts = await this._sortAccountsByPriority(
+        availableAccounts,
+        schedulingStrategy
+      )
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]
@@ -754,8 +1543,11 @@ class UnifiedClaudeScheduler {
         )
       }
 
+      // 更新使用统计
+      await this.updateAccountUsageStats(selectedAccount.accountId, selectedAccount.accountType)
+
       logger.info(
-        `🎯 Selected account from group ${group.name}: ${selectedAccount.name} (${selectedAccount.accountId}, ${selectedAccount.accountType}) with priority ${selectedAccount.priority}`
+        `🎯 Selected account from group ${group.name}: ${selectedAccount.name} (${selectedAccount.accountId}, ${selectedAccount.accountType}) with priority ${selectedAccount.priority} using strategy ${schedulingStrategy}`
       )
 
       return {

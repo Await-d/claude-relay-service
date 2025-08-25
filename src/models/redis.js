@@ -810,12 +810,40 @@ class RedisClient {
   // 🏢 Claude 账户管理
   async setClaudeAccount(accountId, accountData) {
     const key = `claude:account:${accountId}`
-    await this.client.hset(key, accountData)
+
+    // 确保新的调度策略字段有默认值
+    const enrichedAccountData = {
+      ...accountData,
+      // 调度策略字段（向后兼容）
+      schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+      schedulingWeight: accountData.schedulingWeight || '1',
+      sequentialOrder: accountData.sequentialOrder || '1',
+      roundRobinIndex: accountData.roundRobinIndex || '0',
+      usageCount: accountData.usageCount || '0',
+      lastScheduledAt: accountData.lastScheduledAt || ''
+    }
+
+    await this.client.hset(key, enrichedAccountData)
   }
 
   async getClaudeAccount(accountId) {
     const key = `claude:account:${accountId}`
-    return await this.client.hgetall(key)
+    const accountData = await this.client.hgetall(key)
+
+    if (!accountData || Object.keys(accountData).length === 0) {
+      return accountData
+    }
+
+    // 确保所有调度策略字段都有默认值（向后兼容）
+    return {
+      ...accountData,
+      schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+      schedulingWeight: accountData.schedulingWeight || '1',
+      sequentialOrder: accountData.sequentialOrder || '1',
+      roundRobinIndex: accountData.roundRobinIndex || '0',
+      usageCount: accountData.usageCount || '0',
+      lastScheduledAt: accountData.lastScheduledAt || ''
+    }
   }
 
   async getAllClaudeAccounts() {
@@ -824,7 +852,18 @@ class RedisClient {
     for (const key of keys) {
       const accountData = await this.client.hgetall(key)
       if (accountData && Object.keys(accountData).length > 0) {
-        accounts.push({ id: key.replace('claude:account:', ''), ...accountData })
+        // 确保所有调度策略字段都有默认值（向后兼容）
+        const enrichedAccount = {
+          id: key.replace('claude:account:', ''),
+          ...accountData,
+          schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+          schedulingWeight: accountData.schedulingWeight || '1',
+          sequentialOrder: accountData.sequentialOrder || '1',
+          roundRobinIndex: accountData.roundRobinIndex || '0',
+          usageCount: accountData.usageCount || '0',
+          lastScheduledAt: accountData.lastScheduledAt || ''
+        }
+        accounts.push(enrichedAccount)
       }
     }
     return accounts
@@ -834,13 +873,71 @@ class RedisClient {
     const key = `claude:account:${accountId}`
     return await this.client.del(key)
   }
+
+  // 🔄 更新Claude账户调度相关字段
+  async updateClaudeAccountSchedulingFields(accountId, updates) {
+    const key = `claude:account:${accountId}`
+
+    // 仅更新调度相关的字段
+    const schedulingUpdates = {}
+
+    if (updates.usageCount !== undefined) {
+      schedulingUpdates.usageCount = updates.usageCount.toString()
+    }
+
+    if (updates.lastScheduledAt !== undefined) {
+      schedulingUpdates.lastScheduledAt = updates.lastScheduledAt
+    }
+
+    if (updates.roundRobinIndex !== undefined) {
+      schedulingUpdates.roundRobinIndex = updates.roundRobinIndex.toString()
+    }
+
+    if (Object.keys(schedulingUpdates).length > 0) {
+      await this.client.hset(key, schedulingUpdates)
+    }
+  }
+
+  // 🔢 原子性地增加账户使用计数
+  async incrementClaudeAccountUsageCount(accountId) {
+    const key = `claude:account:${accountId}`
+    return await this.client.hincrby(key, 'usageCount', 1)
+  }
   async setOpenAiAccount(accountId, accountData) {
     const key = `openai:account:${accountId}`
-    await this.client.hset(key, accountData)
+
+    // 确保新的调度策略字段有默认值
+    const enrichedAccountData = {
+      ...accountData,
+      // 调度策略字段（向后兼容）
+      schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+      schedulingWeight: accountData.schedulingWeight || '1',
+      sequentialOrder: accountData.sequentialOrder || '1',
+      roundRobinIndex: accountData.roundRobinIndex || '0',
+      usageCount: accountData.usageCount || '0',
+      lastScheduledAt: accountData.lastScheduledAt || ''
+    }
+
+    await this.client.hset(key, enrichedAccountData)
   }
   async getOpenAiAccount(accountId) {
     const key = `openai:account:${accountId}`
-    return await this.client.hgetall(key)
+    const accountData = await this.client.hgetall(key)
+
+    if (!accountData || Object.keys(accountData).length === 0) {
+      return accountData
+    }
+
+    // 确保所有调度策略字段都有默认值（向后兼容）
+    return {
+      ...accountData,
+      schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+      schedulingWeight: accountData.schedulingWeight || '1',
+      sequentialOrder: accountData.sequentialOrder || '1',
+      roundRobinIndex: accountData.roundRobinIndex || '0',
+      usageCount: accountData.usageCount || '0',
+      lastScheduledAt: accountData.lastScheduledAt || ''
+    }
   }
   async deleteOpenAiAccount(accountId) {
     const key = `openai:account:${accountId}`
@@ -853,7 +950,18 @@ class RedisClient {
     for (const key of keys) {
       const accountData = await this.client.hgetall(key)
       if (accountData && Object.keys(accountData).length > 0) {
-        accounts.push({ id: key.replace('openai:account:', ''), ...accountData })
+        // 确保所有调度策略字段都有默认值（向后兼容）
+        const enrichedAccount = {
+          id: key.replace('openai:account:', ''),
+          ...accountData,
+          schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+          schedulingWeight: accountData.schedulingWeight || '1',
+          sequentialOrder: accountData.sequentialOrder || '1',
+          roundRobinIndex: accountData.roundRobinIndex || '0',
+          usageCount: accountData.usageCount || '0',
+          lastScheduledAt: accountData.lastScheduledAt || ''
+        }
+        accounts.push(enrichedAccount)
       }
     }
     return accounts
@@ -862,7 +970,7 @@ class RedisClient {
   // 🔐 会话管理（用于管理员登录等）
   async setSession(sessionId, sessionData, ttl = 86400) {
     const key = `session:${sessionId}`
-    await this.client.hset(key, sessionData)
+    await this.client.hmset(key, sessionData)
     await this.client.expire(key, ttl)
   }
 

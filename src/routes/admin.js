@@ -15,6 +15,7 @@ const CostCalculator = require('../utils/costCalculator')
 const pricingService = require('../services/pricingService')
 const claudeCodeHeadersService = require('../services/claudeCodeHeadersService')
 const webhookNotifier = require('../utils/webhookNotifier')
+const schedulingValidator = require('../utils/schedulingValidator')
 const axios = require('axios')
 const crypto = require('crypto')
 const fs = require('fs')
@@ -1507,7 +1508,11 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
       accountType,
       platform = 'claude',
       priority,
-      groupId
+      groupId,
+      // 新增调度策略字段
+      schedulingStrategy,
+      schedulingWeight,
+      sequentialOrder
     } = req.body
 
     if (!name) {
@@ -1534,6 +1539,23 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Priority must be a number between 1 and 100' })
     }
 
+    // 使用验证工具验证调度策略字段
+    const schedulingFields = {
+      schedulingStrategy,
+      schedulingWeight,
+      sequentialOrder
+    }
+
+    const schedulingValidation =
+      schedulingValidator.validateAndPrepareSchedulingFields(schedulingFields)
+
+    if (!schedulingValidation.valid) {
+      return res.status(400).json({
+        error: 'Invalid scheduling fields',
+        details: schedulingValidation.errors
+      })
+    }
+
     const newAccount = await claudeAccountService.createAccount({
       name,
       description,
@@ -1544,7 +1566,9 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
       proxy,
       accountType: accountType || 'shared', // 默认为共享类型
       platform,
-      priority: priority || 50 // 默认优先级为50
+      priority: priority || 50, // 默认优先级为50
+      // 使用验证后的调度策略字段
+      ...schedulingValidation.fields
     })
 
     // 如果是分组类型，将账户添加到分组
@@ -1586,6 +1610,29 @@ router.put('/claude-accounts/:accountId', authenticateAdmin, async (req, res) =>
     // 如果更新为分组类型，验证groupId
     if (updates.accountType === 'group' && !updates.groupId) {
       return res.status(400).json({ error: 'Group ID is required for group type accounts' })
+    }
+
+    // 使用验证工具验证调度策略字段（只验证提供的字段）
+    const schedulingFields = {}
+    if (updates.schedulingStrategy !== undefined) {
+      schedulingFields.schedulingStrategy = updates.schedulingStrategy
+    }
+    if (updates.schedulingWeight !== undefined) {
+      schedulingFields.schedulingWeight = updates.schedulingWeight
+    }
+    if (updates.sequentialOrder !== undefined) {
+      schedulingFields.sequentialOrder = updates.sequentialOrder
+    }
+
+    if (Object.keys(schedulingFields).length > 0) {
+      const schedulingValidation = schedulingValidator.validateSchedulingFields(schedulingFields)
+
+      if (!schedulingValidation.valid) {
+        return res.status(400).json({
+          error: 'Invalid scheduling fields',
+          details: schedulingValidation.errors
+        })
+      }
     }
 
     // 获取账户当前信息以处理分组变更

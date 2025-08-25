@@ -6,6 +6,19 @@ const logger = require('../utils/logger')
 class UnifiedOpenAIScheduler {
   constructor() {
     this.SESSION_MAPPING_PREFIX = 'unified_openai_session_mapping:'
+    this.ROUND_ROBIN_KEY = 'scheduler:openai:round_robin:index'
+    this.SEQUENTIAL_KEY = 'scheduler:openai:sequential:position'
+    this.USAGE_STATS_PREFIX = 'scheduler:openai:usage_stats:'
+
+    // 支持的调度策略
+    this.SUPPORTED_STRATEGIES = [
+      'round_robin',
+      'least_used',
+      'least_recent',
+      'random',
+      'weighted_random',
+      'sequential'
+    ]
   }
 
   // 🔧 辅助方法：检查账户是否可调度（兼容字符串和布尔值）
@@ -484,6 +497,29 @@ class UnifiedOpenAIScheduler {
   async _isAccountInGroup(accountId, groupId) {
     const members = await accountGroupService.getGroupMembers(groupId)
     return members.includes(accountId)
+  }
+
+  // 📊 更新账户使用统计（用于调度算法）
+  async updateAccountUsageStats(accountId, accountType) {
+    try {
+      // 调用相应服务的recordAccountUsage方法以正确更新调度字段
+      if (accountType === 'openai') {
+        await openaiAccountService.recordAccountUsage(accountId)
+      }
+
+      // 保持原有的统计逻辑用于调度器内部统计
+      const client = redis.getClientSafe()
+      const statsKey = `${this.USAGE_STATS_PREFIX}${accountType}:${accountId}`
+
+      // 增加使用次数
+      await client.incr(statsKey)
+      // 设置过期时间为30天，避免统计数据无限增长
+      await client.expire(statsKey, 30 * 24 * 60 * 60)
+
+      logger.debug(`📊 Updated usage stats for OpenAI account ${accountId} (${accountType})`)
+    } catch (error) {
+      logger.warn('⚠️ Failed to update OpenAI account usage stats:', error)
+    }
   }
 
   // 📊 更新账户最后使用时间
