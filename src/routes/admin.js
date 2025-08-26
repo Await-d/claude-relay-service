@@ -5686,7 +5686,7 @@ router.post('/migrate-api-keys-azure', authenticateAdmin, async (req, res) => {
 // 🎯 系统调度配置管理
 
 // 获取系统调度配置
-router.get('/scheduling-config', authenticateAdmin, async (req, res) => {
+router.get('/scheduling/config', authenticateAdmin, async (req, res) => {
   try {
     const schedulingConfig = await redis.getSystemSchedulingConfig()
 
@@ -5704,12 +5704,23 @@ router.get('/scheduling-config', authenticateAdmin, async (req, res) => {
 })
 
 // 更新系统调度配置
-router.put('/scheduling-config', authenticateAdmin, async (req, res) => {
+router.post('/scheduling/config', authenticateAdmin, async (req, res) => {
   try {
-    const { defaultStrategy, enableAccountOverride, enableGroupOverride } = req.body
+    const { 
+      globalDefaultStrategy, 
+      globalDefaultWeight, 
+      globalDefaultOrder,
+      enableAccountOverride, 
+      enableGroupOverride,
+      // 支持旧格式
+      defaultStrategy
+    } = req.body
+    
+    // 兼容新旧字段格式
+    const strategy = globalDefaultStrategy || defaultStrategy
 
     // 验证调度策略
-    if (defaultStrategy && !schedulingValidator.isValidSchedulingStrategy(defaultStrategy)) {
+    if (strategy && !schedulingValidator.isValidSchedulingStrategy(strategy)) {
       return res.status(400).json({
         error: 'Invalid scheduling strategy',
         message: `Must be one of: ${schedulingValidator.VALID_SCHEDULING_STRATEGIES.join(', ')}`
@@ -5719,8 +5730,16 @@ router.put('/scheduling-config', authenticateAdmin, async (req, res) => {
     // 准备配置数据
     const configData = {}
 
-    if (defaultStrategy !== undefined) {
-      configData.defaultStrategy = defaultStrategy
+    if (strategy !== undefined) {
+      configData.defaultStrategy = strategy
+    }
+    
+    if (globalDefaultWeight !== undefined) {
+      configData.globalDefaultWeight = globalDefaultWeight.toString()
+    }
+    
+    if (globalDefaultOrder !== undefined) {
+      configData.globalDefaultOrder = globalDefaultOrder.toString()
     }
 
     if (enableAccountOverride !== undefined) {
@@ -5748,6 +5767,31 @@ router.put('/scheduling-config', authenticateAdmin, async (req, res) => {
     logger.error('❌ Failed to update system scheduling config:', error)
     return res.status(500).json({
       error: 'Failed to update system scheduling config',
+      message: error.message
+    })
+  }
+})
+
+// 重置系统调度配置
+router.post('/scheduling/config/reset', authenticateAdmin, async (req, res) => {
+  try {
+    // 删除现有配置，让系统使用默认值
+    await redis.deleteSystemSchedulingConfig()
+
+    // 获取重置后的配置（会返回默认配置）
+    const defaultConfig = await redis.getSystemSchedulingConfig()
+
+    logger.success(`✅ System scheduling configuration reset to defaults by admin`)
+
+    return res.json({
+      success: true,
+      message: 'System scheduling configuration reset to defaults successfully',
+      data: defaultConfig
+    })
+  } catch (error) {
+    logger.error('❌ Failed to reset system scheduling config:', error)
+    return res.status(500).json({
+      error: 'Failed to reset system scheduling config',
       message: error.message
     })
   }
