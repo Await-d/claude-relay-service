@@ -67,6 +67,13 @@ const config = {
     defaultTokenLimit: parseInt(process.env.DEFAULT_TOKEN_LIMIT) || 1000000
   },
 
+  // 🎯 调度策略配置
+  scheduling: {
+    defaultStrategy: process.env.DEFAULT_SCHEDULING_STRATEGY || 'least_recent',
+    enableAccountOverride: process.env.ENABLE_ACCOUNT_OVERRIDE !== 'false',
+    enableGroupOverride: process.env.ENABLE_GROUP_OVERRIDE !== 'false'
+  },
+
   // 📝 日志配置
   logging: {
     level: process.env.LOG_LEVEL || 'info',

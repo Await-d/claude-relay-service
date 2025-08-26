@@ -2,6 +2,7 @@ const openaiAccountService = require('./openaiAccountService')
 const accountGroupService = require('./accountGroupService')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
+const config = require('../../config/config')
 
 class UnifiedOpenAIScheduler {
   constructor() {
@@ -19,6 +20,24 @@ class UnifiedOpenAIScheduler {
       'weighted_random',
       'sequential'
     ]
+  }
+
+  // 🎯 获取系统默认调度策略
+  async _getSystemDefaultStrategy() {
+    try {
+      // 首先尝试从Redis获取动态配置
+      const systemConfig = await redis.getSystemSchedulingConfig()
+      if (systemConfig && systemConfig.defaultStrategy) {
+        return systemConfig.defaultStrategy
+      }
+
+      // 回退到配置文件中的默认值
+      return config.scheduling?.defaultStrategy || 'least_recent'
+    } catch (error) {
+      logger.debug('Failed to get system scheduling config, using fallback:', error)
+      // 出错时使用配置文件默认值或硬编码默认值
+      return config.scheduling?.defaultStrategy || 'least_recent'
+    }
   }
 
   // 🔧 辅助方法：检查账户是否可调度（兼容字符串和布尔值）
@@ -128,12 +147,19 @@ class UnifiedOpenAIScheduler {
         }
       }
 
-      // 按最后使用时间排序（最久未使用的优先，与 Claude 保持一致）
-      const sortedAccounts = availableAccounts.sort((a, b) => {
-        const aLastUsed = new Date(a.lastUsedAt || 0).getTime()
-        const bLastUsed = new Date(b.lastUsedAt || 0).getTime()
-        return aLastUsed - bLastUsed // 最久未使用的优先
-      })
+      // 按优先级和调度策略排序（现在支持每个账户的自定义策略）
+      // 优先级：API Key调度策略 > 系统默认策略
+      const systemDefaultStrategy = await this._getSystemDefaultStrategy()
+      const defaultStrategy = apiKeyData.schedulingStrategy || systemDefaultStrategy
+
+      logger.info(
+        `🎯 Using scheduling strategy for OpenAI API Key ${apiKeyData.name}: ${defaultStrategy} ${apiKeyData.schedulingStrategy ? '(from API Key config)' : '(system default)'}`
+      )
+
+      const sortedAccounts = await this._sortAccountsByPriorityAndStrategy(
+        availableAccounts,
+        defaultStrategy
+      )
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]
@@ -218,7 +244,14 @@ class UnifiedOpenAIScheduler {
           accountId: account.id,
           accountType: 'openai',
           priority: parseInt(account.priority) || 50,
-          lastUsedAt: account.lastUsedAt || '0'
+          lastUsedAt: account.lastUsedAt || '0',
+          // 包含调度策略字段
+          schedulingStrategy:
+            account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
+          schedulingWeight: parseInt(account.schedulingWeight) || 1,
+          sequentialOrder: parseInt(account.sequentialOrder) || 1,
+          usageCount: parseInt(account.usageCount) || 0,
+          lastScheduledAt: account.lastScheduledAt || ''
         })
       }
     }
@@ -445,7 +478,14 @@ class UnifiedOpenAIScheduler {
             accountId: account.id,
             accountType: 'openai',
             priority: parseInt(account.priority) || 50,
-            lastUsedAt: account.lastUsedAt || '0'
+            lastUsedAt: account.lastUsedAt || '0',
+            // 包含调度策略字段
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
+            schedulingWeight: parseInt(account.schedulingWeight) || 1,
+            sequentialOrder: parseInt(account.sequentialOrder) || 1,
+            usageCount: parseInt(account.usageCount) || 0,
+            lastScheduledAt: account.lastScheduledAt || ''
           })
         }
       }
@@ -454,12 +494,17 @@ class UnifiedOpenAIScheduler {
         throw new Error(`No available accounts in group ${group.name}`)
       }
 
-      // 按最后使用时间排序（最久未使用的优先，与 Claude 保持一致）
-      const sortedAccounts = availableAccounts.sort((a, b) => {
-        const aLastUsed = new Date(a.lastUsedAt || 0).getTime()
-        const bLastUsed = new Date(b.lastUsedAt || 0).getTime()
-        return aLastUsed - bLastUsed // 最久未使用的优先
-      })
+      // 使用分组的调度策略，如果分组没有配置则使用系统默认策略
+      const schedulingStrategy =
+        group.schedulingStrategy || (await this._getSystemDefaultStrategy())
+      logger.info(
+        `🎯 Using scheduling strategy for OpenAI group ${group.name}: ${schedulingStrategy} ${group.schedulingStrategy ? '(from group config)' : '(system default)'}`
+      )
+
+      const sortedAccounts = await this._sortAccountsByPriorityAndStrategy(
+        availableAccounts,
+        schedulingStrategy
+      )
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]
@@ -533,6 +578,376 @@ class UnifiedOpenAIScheduler {
     } catch (error) {
       logger.warn(`⚠️ Failed to update last used time for account ${accountId}:`, error)
     }
+  }
+
+  // 🎯 按优先级和调度策略排序账户（支持个别账户的自定义策略）
+  async _sortAccountsByPriorityAndStrategy(accounts, defaultStrategy = null) {
+    // 如果没有提供默认策略，从系统配置获取
+    if (!defaultStrategy) {
+      defaultStrategy = await this._getSystemDefaultStrategy()
+    }
+
+    // 按优先级分组
+    const groupsByPriority = {}
+    for (const account of accounts) {
+      const { priority } = account
+      if (!groupsByPriority[priority]) {
+        groupsByPriority[priority] = []
+      }
+      groupsByPriority[priority].push(account)
+    }
+
+    // 按优先级排序（数字越小优先级越高）
+    const sortedPriorities = Object.keys(groupsByPriority).sort((a, b) => parseInt(a) - parseInt(b))
+
+    const sortedAccounts = []
+
+    // 对每个优先级组应用调度策略（支持账户级别的策略）
+    for (const priority of sortedPriorities) {
+      const priorityAccounts = groupsByPriority[priority]
+
+      // 检查这个优先级组的账户是否有统一的调度策略
+      const strategies = priorityAccounts.map((acc) => acc.schedulingStrategy || defaultStrategy)
+      const uniqueStrategies = [...new Set(strategies)]
+
+      if (uniqueStrategies.length === 1) {
+        // 所有账户使用同一策略，可以统一处理
+        const strategy = uniqueStrategies[0]
+        logger.info(
+          `🎯 Applying ${strategy} strategy to ${priorityAccounts.length} OpenAI accounts with priority ${priority}`
+        )
+
+        try {
+          const strategyAccounts = await this._applySchedulingStrategy(
+            priorityAccounts,
+            strategy,
+            priority
+          )
+          sortedAccounts.push(...strategyAccounts)
+        } catch (error) {
+          logger.error(`❌ Failed to apply strategy ${strategy} for priority ${priority}:`, error)
+          // 回退到默认策略
+          const fallbackAccounts = await this._applySchedulingStrategy(
+            priorityAccounts,
+            'least_recent',
+            priority
+          )
+          sortedAccounts.push(...fallbackAccounts)
+        }
+      } else {
+        // 账户使用不同策略，需要分组处理
+        logger.info(
+          `🎯 Mixed strategies in OpenAI priority ${priority}: ${uniqueStrategies.join(', ')}, applying account-level strategies`
+        )
+
+        const strategyGroups = {}
+        for (const account of priorityAccounts) {
+          const strategy = account.schedulingStrategy || defaultStrategy
+          if (!strategyGroups[strategy]) {
+            strategyGroups[strategy] = []
+          }
+          strategyGroups[strategy].push(account)
+        }
+
+        // 对每个策略组分别处理，然后合并结果
+        const strategyResults = []
+        for (const [strategy, strategyAccounts] of Object.entries(strategyGroups)) {
+          try {
+            const processedAccounts = await this._applySchedulingStrategy(
+              strategyAccounts,
+              strategy,
+              priority
+            )
+            strategyResults.push({
+              strategy,
+              accounts: processedAccounts,
+              weight: strategyAccounts.length
+            })
+          } catch (error) {
+            logger.error(`❌ Failed to apply strategy ${strategy}:`, error)
+            const fallbackAccounts = await this._applySchedulingStrategy(
+              strategyAccounts,
+              'least_recent',
+              priority
+            )
+            strategyResults.push({
+              strategy: 'least_recent',
+              accounts: fallbackAccounts,
+              weight: strategyAccounts.length
+            })
+          }
+        }
+
+        // 按权重（账户数量）排序策略组，账户多的策略优先
+        strategyResults.sort((a, b) => b.weight - a.weight)
+
+        // 合并结果（权重高的策略组的第一个账户优先）
+        const maxLength = Math.max(...strategyResults.map((r) => r.accounts.length))
+        for (let i = 0; i < maxLength; i++) {
+          for (const result of strategyResults) {
+            if (i < result.accounts.length) {
+              sortedAccounts.push(result.accounts[i])
+            }
+          }
+        }
+      }
+    }
+
+    return sortedAccounts
+  }
+
+  // 🎯 应用调度策略（完整版本，支持所有策略）
+  async _applySchedulingStrategy(accounts, strategy, priority = null) {
+    if (!this.SUPPORTED_STRATEGIES.includes(strategy)) {
+      logger.warn(`⚠️ Unknown OpenAI scheduling strategy: ${strategy}, using least_recent`)
+      strategy = 'least_recent'
+    }
+
+    switch (strategy) {
+      case 'round_robin':
+        return await this._roundRobinStrategy(accounts, priority)
+      case 'least_used':
+        return await this._leastUsedStrategy(accounts)
+      case 'least_recent':
+        return this._leastRecentStrategy(accounts)
+      case 'random':
+        return this._randomStrategy(accounts)
+      case 'weighted_random':
+        return this._weightedRandomStrategy(accounts)
+      case 'sequential':
+        return await this._sequentialStrategy(accounts, priority)
+      default:
+        logger.warn(`⚠️ Unknown strategy: ${strategy}, using least_recent`)
+        return this._leastRecentStrategy(accounts)
+    }
+  }
+
+  // 🔄 轮询调度策略
+  async _roundRobinStrategy(accounts, priority = null) {
+    try {
+      const client = redis.getClientSafe()
+
+      // 为每个优先级组使用独立的轮询键
+      const roundRobinKey =
+        priority !== null ? `${this.ROUND_ROBIN_KEY}:priority:${priority}` : this.ROUND_ROBIN_KEY
+
+      // 获取当前轮询索引
+      let currentIndex = await client.get(roundRobinKey)
+      currentIndex = parseInt(currentIndex) || 0
+
+      // 确保索引在有效范围内
+      const selectedIndex = currentIndex % accounts.length
+
+      // 更新索引为下一位置
+      const nextIndex = (currentIndex + 1) % accounts.length
+      await client.set(roundRobinKey, nextIndex)
+
+      // 将选中的账户移到首位
+      const selectedAccount = accounts[selectedIndex]
+      const reorderedAccounts = [selectedAccount, ...accounts.filter((_, i) => i !== selectedIndex)]
+
+      logger.info(
+        `🔄 OpenAI round robin selected index ${selectedIndex}: ${selectedAccount.name} (${selectedAccount.accountId})`
+      )
+
+      return reorderedAccounts
+    } catch (error) {
+      logger.error('❌ OpenAI round robin strategy failed:', error)
+      return this._leastRecentStrategy(accounts)
+    }
+  }
+
+  // 📊 最少使用调度策略
+  async _leastUsedStrategy(accounts) {
+    try {
+      // 获取所有账户的使用统计
+      const accountsWithUsage = await Promise.all(
+        accounts.map(async (account) => {
+          const usageCount = await this.getAccountUsageCount(account.accountId)
+          return {
+            ...account,
+            usageCount
+          }
+        })
+      )
+
+      // 按使用次数排序（最少使用的优先）
+      const sortedAccounts = accountsWithUsage.sort((a, b) => {
+        if (a.usageCount !== b.usageCount) {
+          return a.usageCount - b.usageCount
+        }
+        // 使用次数相同时，按最后使用时间排序
+        const aLastUsed = new Date(a.lastUsedAt || 0).getTime()
+        const bLastUsed = new Date(b.lastUsedAt || 0).getTime()
+        return aLastUsed - bLastUsed
+      })
+
+      logger.info(
+        `📊 OpenAI least used selected: ${sortedAccounts[0].name} (usage: ${sortedAccounts[0].usageCount})`
+      )
+
+      return sortedAccounts
+    } catch (error) {
+      logger.error('❌ OpenAI least used strategy failed:', error)
+      return this._leastRecentStrategy(accounts)
+    }
+  }
+
+  // ⏰ 最近最少使用调度策略（默认策略）
+  _leastRecentStrategy(accounts) {
+    const sortedAccounts = accounts.sort((a, b) => {
+      const aLastUsed = new Date(a.lastUsedAt || 0).getTime()
+      const bLastUsed = new Date(b.lastUsedAt || 0).getTime()
+      return aLastUsed - bLastUsed
+    })
+
+    logger.info(
+      `⏰ OpenAI least recent selected: ${sortedAccounts[0].name} (last used: ${sortedAccounts[0].lastUsedAt || 'never'})`
+    )
+
+    return sortedAccounts
+  }
+
+  // 🎲 随机调度策略
+  _randomStrategy(accounts) {
+    const shuffledAccounts = [...accounts]
+
+    // Fisher-Yates shuffle algorithm
+    for (let i = shuffledAccounts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffledAccounts[i], shuffledAccounts[j]] = [shuffledAccounts[j], shuffledAccounts[i]]
+    }
+
+    logger.info(
+      `🎲 OpenAI random selected: ${shuffledAccounts[0].name} (${shuffledAccounts[0].accountId})`
+    )
+
+    return shuffledAccounts
+  }
+
+  // ⚖️ 加权随机调度策略
+  _weightedRandomStrategy(accounts) {
+    try {
+      // 为每个账户分配权重（schedulingWeight 字段，默认为1）
+      const accountsWithWeight = accounts.map((account) => ({
+        ...account,
+        weight: parseFloat(account.schedulingWeight) || 1.0
+      }))
+
+      // 计算总权重
+      const totalWeight = accountsWithWeight.reduce((sum, account) => sum + account.weight, 0)
+
+      // 生成随机数
+      let random = Math.random() * totalWeight
+
+      // 根据权重选择账户
+      for (let i = 0; i < accountsWithWeight.length; i++) {
+        random -= accountsWithWeight[i].weight
+        if (random <= 0) {
+          const selectedAccount = accountsWithWeight[i]
+          // 将选中的账户移到首位
+          const reorderedAccounts = [
+            selectedAccount,
+            ...accountsWithWeight.filter((_, idx) => idx !== i)
+          ]
+
+          logger.info(
+            `⚖️ OpenAI weighted random selected: ${selectedAccount.name} (weight: ${selectedAccount.weight})`
+          )
+
+          return reorderedAccounts
+        }
+      }
+
+      // 如果没有选中（不应该发生），返回第一个
+      logger.info(`⚖️ OpenAI weighted random fallback to first: ${accountsWithWeight[0].name}`)
+      return accountsWithWeight
+    } catch (error) {
+      logger.error('❌ OpenAI weighted random strategy failed:', error)
+      return this._randomStrategy(accounts)
+    }
+  }
+
+  // 🔢 顺序调度策略
+  async _sequentialStrategy(accounts, priority = null) {
+    try {
+      // 按 sequentialOrder 字段排序
+      const sortedByOrder = accounts.sort((a, b) => {
+        const aOrder = parseInt(a.sequentialOrder) || Number.MAX_SAFE_INTEGER
+        const bOrder = parseInt(b.sequentialOrder) || Number.MAX_SAFE_INTEGER
+
+        if (aOrder !== bOrder) {
+          return aOrder - bOrder
+        }
+
+        // sequentialOrder 相同时，按账户ID排序保证一致性
+        return a.accountId.localeCompare(b.accountId)
+      })
+
+      const client = redis.getClientSafe()
+
+      // 为每个优先级组使用独立的顺序键
+      const sequentialKey =
+        priority !== null ? `${this.SEQUENTIAL_KEY}:priority:${priority}` : this.SEQUENTIAL_KEY
+
+      // 获取当前位置
+      let currentPosition = await client.get(sequentialKey)
+      currentPosition = parseInt(currentPosition) || 0
+
+      // 确保位置在有效范围内
+      const selectedIndex = currentPosition % sortedByOrder.length
+
+      // 更新位置为下一个
+      const nextPosition = (currentPosition + 1) % sortedByOrder.length
+      await client.set(sequentialKey, nextPosition)
+
+      // 将选中的账户移到首位
+      const selectedAccount = sortedByOrder[selectedIndex]
+      const reorderedAccounts = [
+        selectedAccount,
+        ...sortedByOrder.filter((_, i) => i !== selectedIndex)
+      ]
+
+      logger.info(
+        `🔢 OpenAI sequential selected position ${selectedIndex}: ${selectedAccount.name} (order: ${selectedAccount.sequentialOrder || 'undefined'})`
+      )
+
+      return reorderedAccounts
+    } catch (error) {
+      logger.error('❌ OpenAI sequential strategy failed:', error)
+      return this._leastRecentStrategy(accounts)
+    }
+  }
+
+  // 📈 获取账户使用统计
+  async getAccountUsageCount(accountId) {
+    try {
+      const client = redis.getClientSafe()
+      const statsKey = `${this.USAGE_STATS_PREFIX}${accountId}`
+      const count = await client.get(statsKey)
+      return parseInt(count) || 0
+    } catch (error) {
+      logger.warn('⚠️ Failed to get OpenAI account usage stats:', error)
+      return 0
+    }
+  }
+
+  // 🎯 应用调度策略 (旧版本，保持向后兼容)
+  _applySortingStrategy(accounts, strategy) {
+    logger.debug(`🎯 Applying OpenAI sorting strategy: ${strategy}`)
+
+    if (strategy !== 'least_recent') {
+      logger.warn(
+        `⚠️ Using legacy sorting method. Strategy '${strategy}' will fallback to 'least_recent'. Consider using the new _sortAccountsByPriorityAndStrategy method.`
+      )
+    }
+
+    // 为了保持向后兼容，保留原有的简单实现
+    return accounts.sort((a, b) => {
+      const aLastUsed = new Date(a.lastUsedAt || 0).getTime()
+      const bLastUsed = new Date(b.lastUsedAt || 0).getTime()
+      return aLastUsed - bLastUsed // 最久未使用的优先
+    })
   }
 }
 

@@ -27,6 +27,18 @@
           <button
             :class="[
               'border-b-2 pb-2 text-sm font-medium transition-colors',
+              activeSection === 'scheduling'
+                ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            ]"
+            @click="activeSection = 'scheduling'"
+          >
+            <i class="fas fa-route mr-2"></i>
+            调度策略配置
+          </button>
+          <button
+            :class="[
+              'border-b-2 pb-2 text-sm font-medium transition-colors',
               activeSection === 'webhook'
                 ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -50,6 +62,7 @@
       <div v-else>
         <!-- 品牌设置部分 -->
         <div v-show="activeSection === 'branding'">
+          <!-- 品牌设置内容保持不变 -->
           <!-- 桌面端表格视图 -->
           <div class="table-container hidden sm:block">
             <table class="min-w-full">
@@ -191,6 +204,243 @@
           <!-- 移动端卡片视图 -->
           <div class="space-y-4 sm:hidden">
             <!-- 省略移动端视图代码... -->
+          </div>
+        </div>
+
+        <!-- 调度策略配置部分 -->
+        <div v-show="activeSection === 'scheduling'">
+          <!-- 全局默认策略设置 -->
+          <div
+            class="mb-6 rounded-lg bg-white/80 p-6 shadow-lg backdrop-blur-sm dark:bg-gray-800/80"
+          >
+            <div class="mb-4 flex items-center justify-between">
+              <div>
+                <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                  <i class="fas fa-route mr-2 text-blue-500" />
+                  全局默认调度策略
+                </h2>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  设置系统的默认调度策略，影响所有未单独配置的账户和分组
+                </p>
+              </div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">
+                当前生效：{{ getCurrentEffectiveStrategy() }}
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  默认策略
+                </label>
+                <select
+                  v-model="schedulingConfig.globalDefaultStrategy"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  @change="saveSchedulingConfig"
+                >
+                  <option value="round_robin">
+                    <i class="fas fa-sync-alt mr-2" />轮询调度 (Round Robin)
+                  </option>
+                  <option value="least_used">
+                    <i class="fas fa-chart-bar mr-2" />最少使用 (Least Used)
+                  </option>
+                  <option value="least_recent">
+                    <i class="fas fa-clock mr-2" />最近最少使用 (Least Recent)
+                  </option>
+                  <option value="random"><i class="fas fa-random mr-2" />随机调度 (Random)</option>
+                  <option value="weighted_random">
+                    <i class="fas fa-balance-scale mr-2" />加权随机 (Weighted Random)
+                  </option>
+                  <option value="sequential">
+                    <i class="fas fa-list-ol mr-2" />顺序调度 (Sequential)
+                  </option>
+                </select>
+              </div>
+
+              <!-- 策略说明 -->
+              <div
+                class="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-700 dark:bg-blue-900/30"
+              >
+                <div class="flex items-start gap-2">
+                  <i :class="getStrategyIcon(schedulingConfig.globalDefaultStrategy)" />
+                  <div class="text-sm text-blue-700 dark:text-blue-300">
+                    <p class="mb-1 font-medium">
+                      {{ getStrategyName(schedulingConfig.globalDefaultStrategy) }}策略说明：
+                    </p>
+                    <p>{{ getStrategyDescription(schedulingConfig.globalDefaultStrategy) }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 全局权重/顺序配置 -->
+              <div
+                v-if="schedulingConfig.globalDefaultStrategy === 'weighted_random'"
+                class="space-y-2"
+              >
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <i class="fas fa-weight-hanging mr-2 text-amber-500" />
+                  全局默认权重 (1-10)
+                </label>
+                <input
+                  v-model.number="schedulingConfig.globalDefaultWeight"
+                  class="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  max="10"
+                  min="1"
+                  type="number"
+                  @change="saveSchedulingConfig"
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  权重越高的账户被选中的概率越大
+                </p>
+              </div>
+
+              <div
+                v-else-if="schedulingConfig.globalDefaultStrategy === 'sequential'"
+                class="space-y-2"
+              >
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <i class="fas fa-sort-numeric-down mr-2 text-indigo-500" />
+                  全局默认起始位置
+                </label>
+                <input
+                  v-model.number="schedulingConfig.globalDefaultOrder"
+                  class="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  min="1"
+                  type="number"
+                  @change="saveSchedulingConfig"
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400">数字越小的账户优先被选择</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 覆盖设置 -->
+          <div
+            class="mb-6 rounded-lg bg-white/80 p-6 shadow-lg backdrop-blur-sm dark:bg-gray-800/80"
+          >
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-gray-200">
+              <i class="fas fa-cogs mr-2 text-green-500" />
+              策略覆盖设置
+            </h2>
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-medium text-gray-700 dark:text-gray-300">账户级别覆盖</h3>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    允许单个账户覆盖全局调度策略
+                  </p>
+                </div>
+                <label class="relative inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="schedulingConfig.enableAccountOverride"
+                    class="peer sr-only"
+                    type="checkbox"
+                    @change="saveSchedulingConfig"
+                  />
+                  <div
+                    class="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:border-gray-600 dark:bg-gray-700 dark:peer-focus:ring-blue-800"
+                  ></div>
+                </label>
+              </div>
+
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-medium text-gray-700 dark:text-gray-300">分组级别覆盖</h3>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">允许分组覆盖全局调度策略</p>
+                </div>
+                <label class="relative inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="schedulingConfig.enableGroupOverride"
+                    class="peer sr-only"
+                    type="checkbox"
+                    @change="saveSchedulingConfig"
+                  />
+                  <div
+                    class="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:border-gray-600 dark:bg-gray-700 dark:peer-focus:ring-blue-800"
+                  ></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- 使用统计 -->
+          <div
+            class="mb-6 rounded-lg bg-white/80 p-6 shadow-lg backdrop-blur-sm dark:bg-gray-800/80"
+          >
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-gray-200">
+              <i class="fas fa-chart-pie mr-2 text-purple-500" />
+              当前使用统计
+            </h2>
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">使用全局策略</p>
+                    <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                      {{ schedulingStats.globalStrategyCount || 0 }}
+                    </p>
+                  </div>
+                  <i class="fas fa-globe text-xl text-blue-500" />
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">账户数量</p>
+              </div>
+
+              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">自定义策略</p>
+                    <p class="text-2xl font-bold text-green-600 dark:text-green-400">
+                      {{ schedulingStats.customStrategyCount || 0 }}
+                    </p>
+                  </div>
+                  <i class="fas fa-cog text-xl text-green-500" />
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">账户数量</p>
+              </div>
+
+              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">分组策略</p>
+                    <p class="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                      {{ schedulingStats.groupStrategyCount || 0 }}
+                    </p>
+                  </div>
+                  <i class="fas fa-layer-group text-xl text-purple-500" />
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">分组数量</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 保存重置按钮 -->
+          <div class="flex items-center justify-between">
+            <div class="flex gap-3">
+              <button
+                class="btn btn-primary px-6 py-3"
+                :class="{ 'cursor-not-allowed opacity-50': savingScheduling }"
+                :disabled="savingScheduling"
+                @click="saveSchedulingConfig"
+              >
+                <div v-if="savingScheduling" class="loading-spinner mr-2"></div>
+                <i v-else class="fas fa-save mr-2" />
+                {{ savingScheduling ? '保存中...' : '保存配置' }}
+              </button>
+
+              <button
+                class="btn bg-gray-100 px-6 py-3 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                :disabled="savingScheduling"
+                @click="resetSchedulingConfig"
+              >
+                <i class="fas fa-undo mr-2" />
+                重置为默认
+              </button>
+            </div>
+
+            <div v-if="schedulingConfig.updatedAt" class="text-sm text-gray-500 dark:text-gray-400">
+              <i class="fas fa-clock mr-1" />
+              最后更新：{{ formatDateTime(schedulingConfig.updatedAt) }}
+            </div>
           </div>
         </div>
 
@@ -713,11 +963,31 @@ const platformForm = ref({
   secret: ''
 })
 
+// 调度策略配置
+const schedulingConfig = ref({
+  globalDefaultStrategy: 'least_recent',
+  globalDefaultWeight: 5,
+  globalDefaultOrder: 1,
+  enableAccountOverride: true,
+  enableGroupOverride: true,
+  updatedAt: null
+})
+
+const schedulingStats = ref({
+  globalStrategyCount: 0,
+  customStrategyCount: 0,
+  groupStrategyCount: 0
+})
+
+const savingScheduling = ref(false)
+
 // 监听activeSection变化，加载对应配置
 const sectionWatcher = watch(activeSection, async (newSection) => {
   if (!isMounted.value) return
   if (newSection === 'webhook') {
     await loadWebhookConfig()
+  } else if (newSection === 'scheduling') {
+    await loadSchedulingConfig()
   }
 })
 
@@ -727,6 +997,8 @@ onMounted(async () => {
     await settingsStore.loadOemSettings()
     if (activeSection.value === 'webhook') {
       await loadWebhookConfig()
+    } else if (activeSection.value === 'scheduling') {
+      await loadSchedulingConfig()
     }
   } catch (error) {
     showToast('加载设置失败', 'error')
@@ -1154,6 +1426,155 @@ const removeIcon = () => {
 // 处理图标加载错误
 const handleIconError = () => {
   console.warn('Icon failed to load')
+}
+
+// 调度策略相关函数
+
+// 加载调度配置
+const loadSchedulingConfig = async () => {
+  if (!isMounted.value) return
+  try {
+    const response = await apiClient.get('/admin/scheduling/config', {
+      signal: abortController.value.signal
+    })
+    if (response.success && isMounted.value) {
+      schedulingConfig.value = {
+        globalDefaultStrategy: response.config?.globalDefaultStrategy || 'least_recent',
+        globalDefaultWeight: response.config?.globalDefaultWeight || 5,
+        globalDefaultOrder: response.config?.globalDefaultOrder || 1,
+        enableAccountOverride: response.config?.enableAccountOverride ?? true,
+        enableGroupOverride: response.config?.enableGroupOverride ?? true,
+        updatedAt: response.config?.updatedAt
+      }
+      // 加载使用统计
+      await loadSchedulingStats()
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    console.error('加载调度配置失败:', error)
+  }
+}
+
+// 保存调度配置
+const saveSchedulingConfig = async () => {
+  if (!isMounted.value) return
+  savingScheduling.value = true
+  try {
+    const response = await apiClient.post('/admin/scheduling/config', schedulingConfig.value, {
+      signal: abortController.value.signal
+    })
+    if (response.success && isMounted.value) {
+      schedulingConfig.value.updatedAt = new Date().toISOString()
+      showToast('调度策略配置已保存', 'success')
+      await loadSchedulingStats()
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    showToast('保存配置失败', 'error')
+    console.error(error)
+  } finally {
+    if (isMounted.value) {
+      savingScheduling.value = false
+    }
+  }
+}
+
+// 重置调度配置
+const resetSchedulingConfig = async () => {
+  if (!confirm('确定要重置调度策略配置为默认设置吗？')) return
+
+  savingScheduling.value = true
+  try {
+    const response = await apiClient.post(
+      '/admin/scheduling/config/reset',
+      {},
+      {
+        signal: abortController.value.signal
+      }
+    )
+    if (response.success && isMounted.value) {
+      schedulingConfig.value = {
+        globalDefaultStrategy: 'least_recent',
+        globalDefaultWeight: 5,
+        globalDefaultOrder: 1,
+        enableAccountOverride: true,
+        enableGroupOverride: true,
+        updatedAt: new Date().toISOString()
+      }
+      showToast('调度策略配置已重置', 'success')
+      await loadSchedulingStats()
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    showToast('重置配置失败', 'error')
+    console.error(error)
+  } finally {
+    if (isMounted.value) {
+      savingScheduling.value = false
+    }
+  }
+}
+
+// 加载使用统计
+const loadSchedulingStats = async () => {
+  if (!isMounted.value) return
+  try {
+    const response = await apiClient.get('/admin/scheduling/stats', {
+      signal: abortController.value.signal
+    })
+    if (response.success && isMounted.value) {
+      schedulingStats.value = response.stats
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    console.error('加载使用统计失败:', error)
+  }
+}
+
+// 获取当前生效策略
+const getCurrentEffectiveStrategy = () => {
+  return getStrategyName(schedulingConfig.value.globalDefaultStrategy)
+}
+
+// 调度策略相关辅助函数
+const getStrategyIcon = (strategy) => {
+  const icons = {
+    round_robin: 'fas fa-sync-alt text-blue-500',
+    least_used: 'fas fa-chart-bar text-green-500',
+    least_recent: 'fas fa-clock text-orange-500',
+    random: 'fas fa-random text-purple-500',
+    weighted_random: 'fas fa-balance-scale text-amber-500',
+    sequential: 'fas fa-list-ol text-indigo-500'
+  }
+  return icons[strategy] || 'fas fa-clock text-orange-500'
+}
+
+const getStrategyName = (strategy) => {
+  const names = {
+    round_robin: '轮询调度',
+    least_used: '最少使用',
+    least_recent: '最近最少使用',
+    random: '随机调度',
+    weighted_random: '加权随机',
+    sequential: '顺序调度'
+  }
+  return names[strategy] || '最近最少使用'
+}
+
+const getStrategyDescription = (strategy) => {
+  const descriptions = {
+    round_robin: '按顺序循环选择账户，确保每个账户被平均使用',
+    least_used: '优先选择使用次数最少的账户，实现负载均衡',
+    least_recent: '优先选择最长时间未被使用的账户，适合大部分场景',
+    random: '随机选择可用账户，分布相对均匀',
+    weighted_random: '根据权重随机选择，权重越高被选中概率越大',
+    sequential: '按配置顺序逐一使用账户，适合有优先级要求的场景'
+  }
+  return descriptions[strategy] || '优先选择最长时间未被使用的账户'
 }
 
 // 格式化日期时间

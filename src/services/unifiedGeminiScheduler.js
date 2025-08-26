@@ -2,6 +2,7 @@ const geminiAccountService = require('./geminiAccountService')
 const accountGroupService = require('./accountGroupService')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
+const config = require('../../config/config')
 
 class UnifiedGeminiScheduler {
   constructor() {
@@ -19,6 +20,24 @@ class UnifiedGeminiScheduler {
       'weighted_random',
       'sequential'
     ]
+  }
+
+  // 🎯 获取系统默认调度策略
+  async _getSystemDefaultStrategy() {
+    try {
+      // 首先尝试从Redis获取动态配置
+      const systemConfig = await redis.getSystemSchedulingConfig()
+      if (systemConfig && systemConfig.defaultStrategy) {
+        return systemConfig.defaultStrategy
+      }
+
+      // 回退到配置文件中的默认值
+      return config.scheduling?.defaultStrategy || 'least_recent'
+    } catch (error) {
+      logger.debug('Failed to get system scheduling config, using fallback:', error)
+      // 出错时使用配置文件默认值或硬编码默认值
+      return config.scheduling?.defaultStrategy || 'least_recent'
+    }
   }
 
   // 🔧 辅助方法：检查账户是否可调度（兼容字符串和布尔值）
@@ -104,7 +123,14 @@ class UnifiedGeminiScheduler {
       }
 
       // 按优先级和调度策略排序（现在支持每个账户的自定义策略）
-      const defaultStrategy = apiKeyData.schedulingStrategy || 'least_recent'
+      // 优先级：API Key调度策略 > 系统默认策略
+      const systemDefaultStrategy = await this._getSystemDefaultStrategy()
+      const defaultStrategy = apiKeyData.schedulingStrategy || systemDefaultStrategy
+
+      logger.info(
+        `🎯 Using scheduling strategy for API Key ${apiKeyData.name}: ${defaultStrategy} ${apiKeyData.schedulingStrategy ? '(from API Key config)' : '(system default)'}`
+      )
+
       const sortedAccounts = await this._sortAccountsByPriorityAndStrategy(
         availableAccounts,
         defaultStrategy
@@ -182,7 +208,8 @@ class UnifiedGeminiScheduler {
               priority: parseInt(boundAccount.priority) || 50,
               lastUsedAt: boundAccount.lastUsedAt || '0',
               // 包含调度策略字段
-              schedulingStrategy: boundAccount.schedulingStrategy || 'least_recent',
+              schedulingStrategy:
+                boundAccount.schedulingStrategy || (await this._getSystemDefaultStrategy()),
               schedulingWeight: parseInt(boundAccount.schedulingWeight) || 1,
               sequentialOrder: parseInt(boundAccount.sequentialOrder) || 1,
               usageCount: parseInt(boundAccount.usageCount) || 0,
@@ -240,7 +267,8 @@ class UnifiedGeminiScheduler {
             priority: parseInt(account.priority) || 50, // 默认优先级50
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(account.schedulingWeight) || 1,
             sequentialOrder: parseInt(account.sequentialOrder) || 1,
             usageCount: parseInt(account.usageCount) || 0,
@@ -255,7 +283,11 @@ class UnifiedGeminiScheduler {
   }
 
   // 🔢 按优先级和调度策略排序账户（支持个别账户的自定义策略）
-  async _sortAccountsByPriorityAndStrategy(accounts, defaultStrategy = 'least_recent') {
+  async _sortAccountsByPriorityAndStrategy(accounts, defaultStrategy = null) {
+    // 如果没有提供默认策略，从系统配置获取
+    if (!defaultStrategy) {
+      defaultStrategy = await this._getSystemDefaultStrategy()
+    }
     // 按优先级分组
     const groupsByPriority = {}
     for (const account of accounts) {
@@ -369,7 +401,7 @@ class UnifiedGeminiScheduler {
   async _applySchedulingStrategy(accounts, strategy, priority = null) {
     if (!this.SUPPORTED_STRATEGIES.includes(strategy)) {
       logger.warn(`⚠️ Unknown Gemini scheduling strategy: ${strategy}, using least_recent`)
-      strategy = 'least_recent'
+      strategy = await this._getSystemDefaultStrategy()
     }
 
     switch (strategy) {
@@ -850,7 +882,8 @@ class UnifiedGeminiScheduler {
               priority: parseInt(account.priority) || 50,
               lastUsedAt: account.lastUsedAt || '0',
               // 包含调度策略字段
-              schedulingStrategy: account.schedulingStrategy || 'least_recent',
+              schedulingStrategy:
+                account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
               schedulingWeight: parseInt(account.schedulingWeight) || 1,
               sequentialOrder: parseInt(account.sequentialOrder) || 1,
               usageCount: parseInt(account.usageCount) || 0,
@@ -864,8 +897,17 @@ class UnifiedGeminiScheduler {
         throw new Error(`No available accounts in Gemini group ${group.name}`)
       }
 
-      // 使用现有的优先级排序逻辑
-      const sortedAccounts = this._sortAccountsByPriority(availableAccounts)
+      // 使用分组的调度策略，如果分组没有配置则使用系统默认策略
+      const schedulingStrategy =
+        group.schedulingStrategy || (await this._getSystemDefaultStrategy())
+      logger.info(
+        `🎯 Using scheduling strategy for Gemini group ${group.name}: ${schedulingStrategy} ${group.schedulingStrategy ? '(from group config)' : '(system default)'}`
+      )
+
+      const sortedAccounts = await this._sortAccountsByPriorityAndStrategy(
+        availableAccounts,
+        schedulingStrategy
+      )
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]
@@ -883,7 +925,7 @@ class UnifiedGeminiScheduler {
       }
 
       logger.info(
-        `🎯 Selected account from Gemini group ${group.name}: ${selectedAccount.name} (${selectedAccount.accountId}, ${selectedAccount.accountType}) with priority ${selectedAccount.priority} using strategy ${selectedAccount.schedulingStrategy || 'least_recent'}`
+        `🎯 Selected account from Gemini group ${group.name}: ${selectedAccount.name} (${selectedAccount.accountId}, ${selectedAccount.accountType}) with priority ${selectedAccount.priority} using strategy ${schedulingStrategy}`
       )
 
       // 更新账户的最后使用时间和统计

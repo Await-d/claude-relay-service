@@ -1083,12 +1083,25 @@ router.delete('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
 // 创建账户分组
 router.post('/account-groups', authenticateAdmin, async (req, res) => {
   try {
-    const { name, platform, description } = req.body
+    const { name, platform, description, schedulingStrategy, schedulingWeight, sequentialOrder } =
+      req.body
+
+    // 验证调度策略字段
+    const schedulingFields = { schedulingStrategy, schedulingWeight, sequentialOrder }
+    const validation = schedulingValidator.validateSchedulingFields(schedulingFields)
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: `调度策略字段验证失败: ${validation.errors.join(', ')}`
+      })
+    }
 
     const group = await accountGroupService.createGroup({
       name,
       platform,
-      description
+      description,
+      schedulingStrategy,
+      schedulingWeight,
+      sequentialOrder
     })
 
     return res.json({ success: true, data: group })
@@ -1132,6 +1145,27 @@ router.put('/account-groups/:groupId', authenticateAdmin, async (req, res) => {
   try {
     const { groupId } = req.params
     const updates = req.body
+
+    // 验证调度策略字段（如果有更新）
+    const schedulingFields = {}
+    if (updates.schedulingStrategy !== undefined) {
+      schedulingFields.schedulingStrategy = updates.schedulingStrategy
+    }
+    if (updates.schedulingWeight !== undefined) {
+      schedulingFields.schedulingWeight = updates.schedulingWeight
+    }
+    if (updates.sequentialOrder !== undefined) {
+      schedulingFields.sequentialOrder = updates.sequentialOrder
+    }
+
+    if (Object.keys(schedulingFields).length > 0) {
+      const validation = schedulingValidator.validateSchedulingFields(schedulingFields)
+      if (!validation.valid) {
+        return res.status(400).json({
+          error: `调度策略字段验证失败: ${validation.errors.join(', ')}`
+        })
+      }
+    }
 
     const updatedGroup = await accountGroupService.updateGroup(groupId, updates)
     return res.json({ success: true, data: updatedGroup })
@@ -5645,6 +5679,76 @@ router.post('/migrate-api-keys-azure', authenticateAdmin, async (req, res) => {
       success: false,
       message: 'Failed to migrate API keys',
       error: error.message
+    })
+  }
+})
+
+// 🎯 系统调度配置管理
+
+// 获取系统调度配置
+router.get('/scheduling-config', authenticateAdmin, async (req, res) => {
+  try {
+    const schedulingConfig = await redis.getSystemSchedulingConfig()
+
+    return res.json({
+      success: true,
+      data: schedulingConfig
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get system scheduling config:', error)
+    return res.status(500).json({
+      error: 'Failed to get system scheduling config',
+      message: error.message
+    })
+  }
+})
+
+// 更新系统调度配置
+router.put('/scheduling-config', authenticateAdmin, async (req, res) => {
+  try {
+    const { defaultStrategy, enableAccountOverride, enableGroupOverride } = req.body
+
+    // 验证调度策略
+    if (defaultStrategy && !schedulingValidator.isValidSchedulingStrategy(defaultStrategy)) {
+      return res.status(400).json({
+        error: 'Invalid scheduling strategy',
+        message: `Must be one of: ${schedulingValidator.VALID_SCHEDULING_STRATEGIES.join(', ')}`
+      })
+    }
+
+    // 准备配置数据
+    const configData = {}
+
+    if (defaultStrategy !== undefined) {
+      configData.defaultStrategy = defaultStrategy
+    }
+
+    if (enableAccountOverride !== undefined) {
+      configData.enableAccountOverride = enableAccountOverride.toString()
+    }
+
+    if (enableGroupOverride !== undefined) {
+      configData.enableGroupOverride = enableGroupOverride.toString()
+    }
+
+    // 更新配置
+    await redis.setSystemSchedulingConfig(configData)
+
+    // 获取更新后的完整配置
+    const updatedConfig = await redis.getSystemSchedulingConfig()
+
+    logger.success(`✅ System scheduling configuration updated by admin`)
+
+    return res.json({
+      success: true,
+      message: 'System scheduling configuration updated successfully',
+      data: updatedConfig
+    })
+  } catch (error) {
+    logger.error('❌ Failed to update system scheduling config:', error)
+    return res.status(500).json({
+      error: 'Failed to update system scheduling config',
+      message: error.message
     })
   }
 })

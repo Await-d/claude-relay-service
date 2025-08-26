@@ -1419,6 +1419,44 @@ class RedisClient {
       return 0
     }
   }
+
+  // 🎯 系统配置管理
+  async setSystemSchedulingConfig(configData) {
+    const key = 'system:scheduling_config'
+    // 验证配置数据
+    if (!configData || typeof configData !== 'object' || Object.keys(configData).length === 0) {
+      throw new Error('Invalid configuration data provided')
+    }
+
+    // 使用hmset方法设置多个hash字段
+    await this.client.hmset(key, configData)
+    logger.info('📝 System scheduling configuration updated')
+  }
+
+  async getSystemSchedulingConfig() {
+    const key = 'system:scheduling_config'
+    const schedulingConfig = await this.client.hgetall(key)
+
+    // 返回默认配置如果没有存储的配置
+    if (!schedulingConfig || Object.keys(schedulingConfig).length === 0) {
+      const defaultConfig = {
+        defaultStrategy: 'least_recent',
+        enableAccountOverride: 'true',
+        enableGroupOverride: 'true'
+      }
+
+      // 保存默认配置到Redis
+      await this.setSystemSchedulingConfig(defaultConfig)
+      return defaultConfig
+    }
+
+    return schedulingConfig
+  }
+
+  async deleteSystemSchedulingConfig() {
+    const key = 'system:scheduling_config'
+    return await this.client.del(key)
+  }
 }
 
 const redisClient = new RedisClient()

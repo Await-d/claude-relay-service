@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid')
 const logger = require('../utils/logger')
 const redis = require('../models/redis')
+const schedulingValidator = require('../utils/schedulingValidator')
 
 class AccountGroupService {
   constructor() {
@@ -15,11 +16,21 @@ class AccountGroupService {
    * @param {string} groupData.name - 分组名称
    * @param {string} groupData.platform - 平台类型 (claude/gemini)
    * @param {string} groupData.description - 分组描述
+   * @param {string} groupData.schedulingStrategy - 调度策略
+   * @param {number} groupData.schedulingWeight - 调度权重
+   * @param {number} groupData.sequentialOrder - 顺序调度序号
    * @returns {Object} 创建的分组
    */
   async createGroup(groupData) {
     try {
-      const { name, platform, description = '' } = groupData
+      const {
+        name,
+        platform,
+        description = '',
+        schedulingStrategy,
+        schedulingWeight,
+        sequentialOrder
+      } = groupData
 
       // 验证必填字段
       if (!name || !platform) {
@@ -29,6 +40,18 @@ class AccountGroupService {
       // 验证平台类型
       if (!['claude', 'gemini', 'openai'].includes(platform)) {
         throw new Error('平台类型必须是 claude、gemini 或 openai')
+      }
+
+      // 验证和准备调度策略字段
+      const schedulingFields = {
+        schedulingStrategy,
+        schedulingWeight,
+        sequentialOrder
+      }
+
+      const validation = schedulingValidator.validateAndPrepareSchedulingFields(schedulingFields)
+      if (!validation.valid) {
+        throw new Error(`调度策略字段验证失败: ${validation.errors.join(', ')}`)
       }
 
       const client = redis.getClientSafe()
@@ -41,16 +64,26 @@ class AccountGroupService {
         platform,
         description,
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        // 添加调度策略字段
+        ...validation.fields
+      }
+
+      // 准备Redis存储格式（所有字段转为字符串）
+      const redisGroup = {
+        ...group,
+        ...schedulingValidator.prepareFieldsForRedis(group)
       }
 
       // 保存分组数据
-      await client.hmset(`${this.GROUP_PREFIX}${groupId}`, group)
+      await client.hmset(`${this.GROUP_PREFIX}${groupId}`, redisGroup)
 
       // 添加到分组集合
       await client.sadd(this.GROUPS_KEY, groupId)
 
-      logger.success(`✅ 创建账户分组成功: ${name} (${platform})`)
+      logger.success(
+        `✅ 创建账户分组成功: ${name} (${platform}) - 调度策略: ${validation.fields.schedulingStrategy}`
+      )
 
       return group
     } catch (error) {
@@ -84,6 +117,25 @@ class AccountGroupService {
         throw new Error('不能修改分组的平台类型')
       }
 
+      // 验证调度策略字段（如果有更新）
+      const schedulingFields = {}
+      if (updates.schedulingStrategy !== undefined) {
+        schedulingFields.schedulingStrategy = updates.schedulingStrategy
+      }
+      if (updates.schedulingWeight !== undefined) {
+        schedulingFields.schedulingWeight = updates.schedulingWeight
+      }
+      if (updates.sequentialOrder !== undefined) {
+        schedulingFields.sequentialOrder = updates.sequentialOrder
+      }
+
+      if (Object.keys(schedulingFields).length > 0) {
+        const validation = schedulingValidator.validateSchedulingFields(schedulingFields)
+        if (!validation.valid) {
+          throw new Error(`调度策略字段验证失败: ${validation.errors.join(', ')}`)
+        }
+      }
+
       // 准备更新数据
       const updateData = {
         ...updates,
@@ -95,11 +147,21 @@ class AccountGroupService {
       delete updateData.platform
       delete updateData.createdAt
 
+      // 将调度字段转换为Redis存储格式
+      if (Object.keys(schedulingFields).length > 0) {
+        const redisSchedulingFields = schedulingValidator.prepareFieldsForRedis(schedulingFields)
+        Object.assign(updateData, redisSchedulingFields)
+      }
+
       // 更新分组
       await client.hmset(groupKey, updateData)
 
-      // 返回更新后的完整数据
-      const updatedGroup = await client.hgetall(groupKey)
+      // 返回更新后的完整数据并规范化字段
+      const updatedGroupRaw = await client.hgetall(groupKey)
+      const updatedGroup = {
+        ...updatedGroupRaw,
+        ...schedulingValidator.normalizeSchedulingFields(updatedGroupRaw)
+      }
 
       logger.success(`✅ 更新账户分组成功: ${updatedGroup.name}`)
 
@@ -167,8 +229,12 @@ class AccountGroupService {
       // 获取成员数量
       const memberCount = await client.scard(`${this.GROUP_MEMBERS_PREFIX}${groupId}`)
 
+      // 规范化调度策略字段
+      const normalizedSchedulingFields = schedulingValidator.normalizeSchedulingFields(groupData)
+
       return {
         ...groupData,
+        ...normalizedSchedulingFields,
         memberCount: memberCount || 0
       }
     } catch (error) {

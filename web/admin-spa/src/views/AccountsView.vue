@@ -256,13 +256,40 @@
                       >
                         <i class="fas fa-share-alt mr-1" />共享
                       </span>
-                      <span
+                      <el-tooltip
                         v-if="account.groupInfo"
-                        class="ml-1 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-400"
-                        :title="`所属分组: ${account.groupInfo.name}`"
+                        :content="`分组: ${account.groupInfo.name}\n调度策略: ${getStrategyName(account.groupInfo.schedulingStrategy || 'least_recent')}\n${getGroupSchedulingDetails(account.groupInfo)}\n成员数量: ${account.groupInfo.memberCount || 0} 个账户`"
+                        effect="dark"
+                        placement="top"
+                        raw-content
                       >
-                        <i class="fas fa-folder mr-1" />{{ account.groupInfo.name }}
-                      </span>
+                        <span
+                          class="ml-1 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                        >
+                          <i class="fas fa-layer-group mr-1" />{{ account.groupInfo.name }}
+                          <div
+                            :class="[
+                              'ml-1 flex items-center gap-1 rounded px-1 text-xs',
+                              getStrategyColorCompact(
+                                account.groupInfo.schedulingStrategy || 'least_recent'
+                              )
+                            ]"
+                            :title="
+                              getStrategyName(
+                                account.groupInfo.schedulingStrategy || 'least_recent'
+                              )
+                            "
+                          >
+                            <i
+                              :class="
+                                getStrategyIconCompact(
+                                  account.groupInfo.schedulingStrategy || 'least_recent'
+                                )
+                              "
+                            />
+                          </div>
+                        </span>
+                      </el-tooltip>
                     </div>
                     <div
                       class="truncate text-xs text-gray-500 dark:text-gray-400"
@@ -1042,9 +1069,12 @@ const groupOptions = computed(() => {
     { value: 'ungrouped', label: '未分组账户', icon: 'fa-user' }
   ]
   accountGroups.value.forEach((group) => {
+    const strategyName = getStrategyNameShort(group.schedulingStrategy || 'least_recent')
+    const platformName =
+      group.platform === 'claude' ? 'Claude' : group.platform === 'gemini' ? 'Gemini' : 'OpenAI'
     options.push({
       value: group.id,
-      label: `${group.name} (${group.platform === 'claude' ? 'Claude' : group.platform === 'gemini' ? 'Gemini' : 'OpenAI'})`,
+      label: `${group.name} (${platformName} | ${strategyName})`,
       icon:
         group.platform === 'claude'
           ? 'fa-brain'
@@ -1779,6 +1809,57 @@ const getStrategyIcon = (strategy) => {
     sequential: 'fas fa-sort-numeric-down text-indigo-500'
   }
   return strategyIcons[strategy] || 'fas fa-question text-gray-400'
+}
+
+// 分组调度策略相关辅助函数
+const getStrategyNameShort = (strategy) => {
+  const names = {
+    round_robin: '轮询',
+    least_used: '最少使用',
+    least_recent: '最近最少',
+    random: '随机',
+    weighted_random: '加权随机',
+    sequential: '顺序'
+  }
+  return names[strategy] || '最近最少'
+}
+
+const getStrategyIconCompact = (strategy) => {
+  const icons = {
+    round_robin: 'fas fa-sync-alt',
+    least_used: 'fas fa-chart-bar',
+    least_recent: 'fas fa-clock',
+    random: 'fas fa-random',
+    weighted_random: 'fas fa-balance-scale',
+    sequential: 'fas fa-list-ol'
+  }
+  return icons[strategy] || 'fas fa-clock'
+}
+
+const getStrategyColorCompact = (strategy) => {
+  const colors = {
+    round_robin: 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400',
+    least_used: 'bg-green-100 text-green-600 dark:bg-green-900/50 dark:text-green-400',
+    least_recent: 'bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400',
+    random: 'bg-purple-100 text-purple-600 dark:bg-purple-900/50 dark:text-purple-400',
+    weighted_random: 'bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400',
+    sequential: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-400'
+  }
+  return (
+    colors[strategy] || 'bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400'
+  )
+}
+
+const getGroupSchedulingDetails = (groupInfo) => {
+  if (!groupInfo.schedulingStrategy) return ''
+
+  let details = ''
+  if (groupInfo.schedulingStrategy === 'weighted_random' && groupInfo.schedulingWeight) {
+    details = `默认权重: ${groupInfo.schedulingWeight}`
+  } else if (groupInfo.schedulingStrategy === 'sequential' && groupInfo.sequentialOrder) {
+    details = `起始位置: ${groupInfo.sequentialOrder}`
+  }
+  return details
 }
 
 const getStrategyColor = (strategy) => {

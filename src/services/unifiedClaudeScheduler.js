@@ -7,6 +7,7 @@ const azureOpenaiAccountService = require('./azureOpenaiAccountService')
 const accountGroupService = require('./accountGroupService')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
+const config = require('../../config/config')
 
 class UnifiedClaudeScheduler {
   constructor() {
@@ -34,6 +35,24 @@ class UnifiedClaudeScheduler {
     }
     // 明确设置为 false（布尔值）或 'false'（字符串）时不可调度
     return schedulable !== false && schedulable !== 'false'
+  }
+
+  // 🎯 获取系统默认调度策略
+  async _getSystemDefaultStrategy() {
+    try {
+      // 首先尝试从Redis获取动态配置
+      const systemConfig = await redis.getSystemSchedulingConfig()
+      if (systemConfig && systemConfig.defaultStrategy) {
+        return systemConfig.defaultStrategy
+      }
+
+      // 回退到配置文件中的默认值
+      return config.scheduling?.defaultStrategy || 'least_recent'
+    } catch (error) {
+      logger.debug('Failed to get system scheduling config, using fallback:', error)
+      // 出错时使用配置文件默认值或硬编码默认值
+      return config.scheduling?.defaultStrategy || 'least_recent'
+    }
   }
 
   // 🎯 统一调度Claude账号（官方和Console）
@@ -210,8 +229,14 @@ class UnifiedClaudeScheduler {
       }
 
       // 按优先级和调度策略排序（现在每个账户可以有自己的调度策略）
-      // 默认策略从API Key获取，但账户可以覆盖自己的策略
-      const defaultStrategy = apiKeyData.schedulingStrategy || 'least_recent'
+      // 优先级：API Key调度策略 > 系统默认策略
+      const systemDefaultStrategy = await this._getSystemDefaultStrategy()
+      const defaultStrategy = apiKeyData.schedulingStrategy || systemDefaultStrategy
+
+      logger.info(
+        `🎯 Using scheduling strategy for API Key ${apiKeyData.name}: ${defaultStrategy} ${apiKeyData.schedulingStrategy ? '(from API Key config)' : '(system default)'}`
+      )
+
       const sortedAccounts = await this._sortAccountsByPriorityAndStrategy(
         availableAccounts,
         defaultStrategy
@@ -276,7 +301,8 @@ class UnifiedClaudeScheduler {
               priority: parseInt(boundAccount.priority) || 50,
               lastUsedAt: boundAccount.lastUsedAt || '0',
               // 包含调度策略字段
-              schedulingStrategy: boundAccount.schedulingStrategy || 'least_recent',
+              schedulingStrategy:
+                boundAccount.schedulingStrategy || (await this._getSystemDefaultStrategy()),
               schedulingWeight: parseInt(boundAccount.schedulingWeight) || 1,
               sequentialOrder: parseInt(boundAccount.sequentialOrder) || 1,
               usageCount: parseInt(boundAccount.usageCount) || 0,
@@ -314,7 +340,8 @@ class UnifiedClaudeScheduler {
               priority: parseInt(boundConsoleAccount.priority) || 50,
               lastUsedAt: boundConsoleAccount.lastUsedAt || '0',
               // 包含调度策略字段
-              schedulingStrategy: boundConsoleAccount.schedulingStrategy || 'least_recent',
+              schedulingStrategy:
+                boundConsoleAccount.schedulingStrategy || (await this._getSystemDefaultStrategy()),
               schedulingWeight: parseInt(boundConsoleAccount.schedulingWeight) || 1,
               sequentialOrder: parseInt(boundConsoleAccount.sequentialOrder) || 1,
               usageCount: parseInt(boundConsoleAccount.usageCount) || 0,
@@ -346,7 +373,9 @@ class UnifiedClaudeScheduler {
             priority: parseInt(boundBedrockAccountResult.data.priority) || 50,
             lastUsedAt: boundBedrockAccountResult.data.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: boundBedrockAccountResult.data.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              boundBedrockAccountResult.data.schedulingStrategy ||
+              (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(boundBedrockAccountResult.data.schedulingWeight) || 1,
             sequentialOrder: parseInt(boundBedrockAccountResult.data.sequentialOrder) || 1,
             usageCount: parseInt(boundBedrockAccountResult.data.usageCount) || 0,
@@ -373,7 +402,8 @@ class UnifiedClaudeScheduler {
             priority: parseInt(boundGeminiAccount.priority) || 50,
             lastUsedAt: boundGeminiAccount.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: boundGeminiAccount.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              boundGeminiAccount.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(boundGeminiAccount.schedulingWeight) || 1,
             sequentialOrder: parseInt(boundGeminiAccount.sequentialOrder) || 1,
             usageCount: parseInt(boundGeminiAccount.usageCount) || 0,
@@ -402,7 +432,9 @@ class UnifiedClaudeScheduler {
             priority: parseInt(boundOpenAIAccountResult.data.priority) || 50,
             lastUsedAt: boundOpenAIAccountResult.data.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: boundOpenAIAccountResult.data.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              boundOpenAIAccountResult.data.schedulingStrategy ||
+              (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(boundOpenAIAccountResult.data.schedulingWeight) || 1,
             sequentialOrder: parseInt(boundOpenAIAccountResult.data.sequentialOrder) || 1,
             usageCount: parseInt(boundOpenAIAccountResult.data.usageCount) || 0,
@@ -435,7 +467,8 @@ class UnifiedClaudeScheduler {
             lastUsedAt: boundAzureOpenAIAccountResult.data.lastUsedAt || '0',
             // 包含调度策略字段
             schedulingStrategy:
-              boundAzureOpenAIAccountResult.data.schedulingStrategy || 'least_recent',
+              boundAzureOpenAIAccountResult.data.schedulingStrategy ||
+              (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(boundAzureOpenAIAccountResult.data.schedulingWeight) || 1,
             sequentialOrder: parseInt(boundAzureOpenAIAccountResult.data.sequentialOrder) || 1,
             usageCount: parseInt(boundAzureOpenAIAccountResult.data.usageCount) || 0,
@@ -500,7 +533,8 @@ class UnifiedClaudeScheduler {
             priority: parseInt(account.priority) || 50, // 默认优先级50
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(account.schedulingWeight) || 1,
             sequentialOrder: parseInt(account.sequentialOrder) || 1,
             usageCount: parseInt(account.usageCount) || 0,
@@ -566,7 +600,8 @@ class UnifiedClaudeScheduler {
             priority: parseInt(account.priority) || 50,
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(account.schedulingWeight) || 1,
             sequentialOrder: parseInt(account.sequentialOrder) || 1,
             usageCount: parseInt(account.usageCount) || 0,
@@ -610,7 +645,8 @@ class UnifiedClaudeScheduler {
             priority: parseInt(account.priority) || 50,
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(account.schedulingWeight) || 1,
             sequentialOrder: parseInt(account.sequentialOrder) || 1,
             usageCount: parseInt(account.usageCount) || 0,
@@ -652,7 +688,8 @@ class UnifiedClaudeScheduler {
             priority: parseInt(account.priority) || 50,
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(account.schedulingWeight) || 1,
             sequentialOrder: parseInt(account.sequentialOrder) || 1,
             usageCount: parseInt(account.usageCount) || 0,
@@ -694,7 +731,8 @@ class UnifiedClaudeScheduler {
             priority: parseInt(account.priority) || 50,
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(account.schedulingWeight) || 1,
             sequentialOrder: parseInt(account.sequentialOrder) || 1,
             usageCount: parseInt(account.usageCount) || 0,
@@ -736,7 +774,8 @@ class UnifiedClaudeScheduler {
             priority: parseInt(account.priority) || 50,
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
-            schedulingStrategy: account.schedulingStrategy || 'least_recent',
+            schedulingStrategy:
+              account.schedulingStrategy || (await this._getSystemDefaultStrategy()),
             schedulingWeight: parseInt(account.schedulingWeight) || 1,
             sequentialOrder: parseInt(account.sequentialOrder) || 1,
             usageCount: parseInt(account.usageCount) || 0,
@@ -807,7 +846,11 @@ class UnifiedClaudeScheduler {
   }
 
   // 🔢 按优先级和调度策略排序账户（支持个别账户的自定义策略）
-  async _sortAccountsByPriorityAndStrategy(accounts, defaultStrategy = 'least_recent') {
+  async _sortAccountsByPriorityAndStrategy(accounts, defaultStrategy = null) {
+    // 如果没有提供默认策略，从系统配置获取
+    if (!defaultStrategy) {
+      defaultStrategy = await this._getSystemDefaultStrategy()
+    }
     // 按优先级分组
     const groupsByPriority = {}
     for (const account of accounts) {
@@ -918,11 +961,16 @@ class UnifiedClaudeScheduler {
   }
 
   // 🔢 按优先级和调度策略排序账户（原有方法，保持向后兼容）
-  async _sortAccountsByPriority(accounts, strategy = 'least_recent') {
+  async _sortAccountsByPriority(accounts, strategy = null) {
+    // 如果没有提供策略，从系统配置获取
+    if (!strategy) {
+      strategy = await this._getSystemDefaultStrategy()
+    }
+
     // 验证调度策略
     if (!this.SUPPORTED_STRATEGIES.includes(strategy)) {
-      logger.warn(`⚠️ Unknown scheduling strategy: ${strategy}, falling back to least_recent`)
-      strategy = 'least_recent'
+      logger.warn(`⚠️ Unknown scheduling strategy: ${strategy}, falling back to system default`)
+      strategy = await this._getSystemDefaultStrategy()
     }
 
     // 按优先级分组
@@ -1521,9 +1569,14 @@ class UnifiedClaudeScheduler {
         throw new Error(`No available accounts in group ${group.name}`)
       }
 
-      // 使用现有的优先级排序逻辑（分组可以配置调度策略，默认least_recent）
-      const schedulingStrategy = group.schedulingStrategy || 'least_recent'
-      const sortedAccounts = await this._sortAccountsByPriority(
+      // 使用分组的调度策略，如果分组没有配置则使用系统默认策略
+      const schedulingStrategy =
+        group.schedulingStrategy || (await this._getSystemDefaultStrategy())
+      logger.info(
+        `🎯 Using scheduling strategy for Claude group ${group.name}: ${schedulingStrategy} ${group.schedulingStrategy ? '(from group config)' : '(system default)'}`
+      )
+
+      const sortedAccounts = await this._sortAccountsByPriorityAndStrategy(
         availableAccounts,
         schedulingStrategy
       )
