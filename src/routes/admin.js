@@ -1493,18 +1493,22 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // 为每个账户添加使用统计信息
+    // 为每个账户添加使用统计信息和限流状态
     const accountsWithStats = await Promise.all(
       accounts.map(async (account) => {
         try {
           const usageStats = await redis.getAccountUsageStats(account.id)
+          const rateLimitInfo = await claudeAccountService.getAccountRateLimitInfo(account.id)
+          const sessionWindowInfo = await claudeAccountService.getSessionWindowInfo(account.id)
           return {
             ...account,
             usage: {
               daily: usageStats.daily,
               total: usageStats.total,
               averages: usageStats.averages
-            }
+            },
+            rateLimitStatus: rateLimitInfo,
+            sessionWindow: sessionWindowInfo
           }
         } catch (statsError) {
           logger.warn(`⚠️ Failed to get usage stats for account ${account.id}:`, statsError.message)
@@ -1515,7 +1519,9 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
               daily: { tokens: 0, requests: 0, allTokens: 0 },
               total: { tokens: 0, requests: 0, allTokens: 0 },
               averages: { rpm: 0, tpm: 0 }
-            }
+            },
+            rateLimitStatus: null,
+            sessionWindow: null
           }
         }
       })
@@ -5706,16 +5712,16 @@ router.get('/scheduling/config', authenticateAdmin, async (req, res) => {
 // 更新系统调度配置
 router.post('/scheduling/config', authenticateAdmin, async (req, res) => {
   try {
-    const { 
-      globalDefaultStrategy, 
-      globalDefaultWeight, 
+    const {
+      globalDefaultStrategy,
+      globalDefaultWeight,
       globalDefaultOrder,
-      enableAccountOverride, 
+      enableAccountOverride,
       enableGroupOverride,
       // 支持旧格式
       defaultStrategy
     } = req.body
-    
+
     // 兼容新旧字段格式
     const strategy = globalDefaultStrategy || defaultStrategy
 
@@ -5733,11 +5739,11 @@ router.post('/scheduling/config', authenticateAdmin, async (req, res) => {
     if (strategy !== undefined) {
       configData.defaultStrategy = strategy
     }
-    
+
     if (globalDefaultWeight !== undefined) {
       configData.globalDefaultWeight = globalDefaultWeight.toString()
     }
-    
+
     if (globalDefaultOrder !== undefined) {
       configData.globalDefaultOrder = globalDefaultOrder.toString()
     }

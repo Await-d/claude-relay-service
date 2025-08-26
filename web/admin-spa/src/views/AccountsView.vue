@@ -412,24 +412,15 @@
                             : '异常'
                     }}
                   </span>
-                  <span
+                  <RateLimitCountdown
                     v-if="
                       (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
                       account.rateLimitStatus === 'limited'
                     "
-                    class="inline-flex items-center rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800"
-                  >
-                    <i class="fas fa-exclamation-triangle mr-1" />
-                    限流中
-                    <span
-                      v-if="
-                        account.rateLimitStatus &&
-                        typeof account.rateLimitStatus === 'object' &&
-                        account.rateLimitStatus.minutesRemaining > 0
-                      "
-                      >({{ account.rateLimitStatus.minutesRemaining }}分钟)</span
-                    >
-                  </span>
+                    :rate-limit-info="account.rateLimitStatus"
+                    @expired="handleRateLimitExpired(account)"
+                    @update="handleRateLimitUpdate"
+                  />
                   <span
                     v-if="account.schedulable === false"
                     class="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700"
@@ -851,6 +842,17 @@
 
           <!-- 状态信息 -->
           <div class="mb-3 space-y-2">
+            <!-- 限流状态 -->
+            <RateLimitCountdown
+              v-if="
+                (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
+                account.rateLimitStatus === 'limited'
+              "
+              :rate-limit-info="account.rateLimitStatus"
+              @expired="handleRateLimitExpired(account)"
+              @update="handleRateLimitUpdate"
+            />
+
             <!-- 会话窗口 -->
             <div
               v-if="
@@ -1022,6 +1024,7 @@ import { formatNumber, getAverageTokensPerRequest } from '@/utils/format'
 import AccountForm from '@/components/accounts/AccountForm.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
+import RateLimitCountdown from '@/components/common/RateLimitCountdown.vue'
 
 // 使用确认弹窗
 const { showConfirmModal, confirmOptions, showConfirm, handleConfirm, handleCancel } = useConfirm()
@@ -1881,6 +1884,60 @@ const getStrategyColor = (strategy) => {
     strategyColors[strategy] ||
     'bg-gray-100 text-gray-800 border border-gray-200 dark:bg-gray-900/30 dark:text-gray-200 dark:border-gray-700'
   )
+}
+
+// 处理限流过期
+const handleRateLimitExpired = (account) => {
+  // 限流已过期，刷新该账户的状态
+  loadAccounts()
+  showToast(`账户 ${account.name} 的限流状态已重置`, 'success')
+}
+
+// 处理限流时间更新
+const handleRateLimitUpdate = async () => {
+  try {
+    // 每分钟检查一次是否需要刷新账户状态
+    const now = Date.now()
+    const lastRefresh = handleRateLimitUpdate._lastRefresh || 0
+    const refreshInterval = 60 * 1000 // 60秒
+
+    if (now - lastRefresh > refreshInterval) {
+      handleRateLimitUpdate._lastRefresh = now
+
+      // 检查是否有限流状态即将过期的账户（5分钟内）
+      const accountsNearExpiry = accounts.value.filter((account) => {
+        if (!account.rateLimitStatus || !account.rateLimitStatus.isRateLimited) {
+          return false
+        }
+
+        const endTime = new Date(account.rateLimitStatus.rateLimitEndAt)
+        const remaining = endTime - new Date()
+        return remaining > 0 && remaining < 5 * 60 * 1000 // 5分钟
+      })
+
+      if (accountsNearExpiry.length > 0) {
+        logger.info(`即将有 ${accountsNearExpiry.length} 个账户解除限流`)
+
+        // 可以在这里添加更多的预处理逻辑
+        // 比如预加载下一批可用账户等
+      }
+
+      // 如果有账户限流状态变化，考虑局部刷新
+      const hasStatusChanges = accounts.value.some(
+        (account) =>
+          account.rateLimitStatus &&
+          account.rateLimitStatus.isRateLimited &&
+          account.rateLimitStatus.minutesRemaining <= 1
+      )
+
+      if (hasStatusChanges) {
+        // 静默刷新账户数据，不显示loading状态
+        await loadAccounts(false)
+      }
+    }
+  } catch (error) {
+    console.error('处理限流更新时出错:', error)
+  }
 }
 </script>
 
