@@ -1916,7 +1916,7 @@ const handleRateLimitUpdate = async () => {
       })
 
       if (accountsNearExpiry.length > 0) {
-        logger.info(`即将有 ${accountsNearExpiry.length} 个账户解除限流`)
+        console.info(`即将有 ${accountsNearExpiry.length} 个账户解除限流`)
 
         // 可以在这里添加更多的预处理逻辑
         // 比如预加载下一批可用账户等
