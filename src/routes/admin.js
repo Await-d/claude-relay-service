@@ -5709,6 +5709,56 @@ router.get('/scheduling/config', authenticateAdmin, async (req, res) => {
   }
 })
 
+// 获取系统调度统计信息
+router.get('/scheduling/stats', authenticateAdmin, async (req, res) => {
+  try {
+    // 获取所有Claude账户
+    const claudeAccounts = await claudeAccountService.getAllAccounts()
+
+    // 获取所有账户组
+    const accountGroupsResponse = await accountGroupService.getAccountGroups()
+    const accountGroups = accountGroupsResponse.success ? accountGroupsResponse.data : []
+
+    // 获取系统默认调度策略
+    const schedulingConfig = await redis.getSystemSchedulingConfig()
+    const globalDefaultStrategy = schedulingConfig?.defaultStrategy || 'least_recent'
+
+    // 计算使用全局策略的账户数量（没有设置自定义策略或策略为空）
+    const globalStrategyCount = claudeAccounts.filter(
+      (account) =>
+        !account.schedulingStrategy ||
+        account.schedulingStrategy === '' ||
+        account.schedulingStrategy === globalDefaultStrategy
+    ).length
+
+    // 计算使用自定义策略的账户数量
+    const customStrategyCount = claudeAccounts.filter(
+      (account) =>
+        account.schedulingStrategy &&
+        account.schedulingStrategy !== '' &&
+        account.schedulingStrategy !== globalDefaultStrategy
+    ).length
+
+    // 分组策略数量就是账户组的数量
+    const groupStrategyCount = accountGroups.length
+
+    return res.json({
+      success: true,
+      stats: {
+        globalStrategyCount,
+        customStrategyCount,
+        groupStrategyCount
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get scheduling stats:', error)
+    return res.status(500).json({
+      error: 'Failed to get scheduling stats',
+      message: error.message
+    })
+  }
+})
+
 // 更新系统调度配置
 router.post('/scheduling/config', authenticateAdmin, async (req, res) => {
   try {
