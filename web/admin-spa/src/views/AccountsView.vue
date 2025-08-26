@@ -421,6 +421,11 @@
                     @expired="handleRateLimitExpired(account)"
                     @update="handleRateLimitUpdate"
                   />
+                  <ClaudeResetCountdown
+                    v-if="account.platform === 'claude' || account.platform === 'claude-oauth'"
+                    :account="account"
+                    @update="handleClaudeResetUpdate"
+                  />
                   <span
                     v-if="account.schedulable === false"
                     class="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700"
@@ -853,6 +858,13 @@
               @update="handleRateLimitUpdate"
             />
 
+            <!-- Claude 5小时重置倒计时 -->
+            <ClaudeResetCountdown
+              v-if="account.platform === 'claude' || account.platform === 'claude-oauth'"
+              :account="account"
+              @update="handleClaudeResetUpdate"
+            />
+
             <!-- 会话窗口 -->
             <div
               v-if="
@@ -1025,6 +1037,7 @@ import AccountForm from '@/components/accounts/AccountForm.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
 import RateLimitCountdown from '@/components/common/RateLimitCountdown.vue'
+import ClaudeResetCountdown from '@/components/common/ClaudeResetCountdown.vue'
 
 // 使用确认弹窗
 const { showConfirmModal, confirmOptions, showConfirm, handleConfirm, handleCancel } = useConfirm()
@@ -1938,6 +1951,12 @@ const handleRateLimitUpdate = async () => {
   } catch (error) {
     console.error('处理限流更新时出错:', error)
   }
+}
+
+// 处理Claude重置时间更新
+const handleClaudeResetUpdate = () => {
+  // Claude 5小时重置倒计时更新，暂时无需特殊处理
+  // 可以在这里添加日志或其他逻辑
 }
 </script>
 

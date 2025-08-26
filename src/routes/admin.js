@@ -5716,8 +5716,7 @@ router.get('/scheduling/stats', authenticateAdmin, async (req, res) => {
     const claudeAccounts = await claudeAccountService.getAllAccounts()
 
     // 获取所有账户组
-    const accountGroupsResponse = await accountGroupService.getAccountGroups()
-    const accountGroups = accountGroupsResponse.success ? accountGroupsResponse.data : []
+    const accountGroups = await accountGroupService.getAllGroups()
 
     // 获取系统默认调度策略
     const schedulingConfig = await redis.getSystemSchedulingConfig()
