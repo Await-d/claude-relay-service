@@ -36,6 +36,21 @@ class ClaudeConsoleAccountService {
     )
   }
 
+  // Redis版本兼容的hset方法（处理多字段设置）
+  async _hsetCompat(client, key, data) {
+    if (typeof data === 'object' && data !== null) {
+      const fields = Object.keys(data)
+      const pipeline = client.pipeline()
+      for (const field of fields) {
+        pipeline.hset(key, field, data[field])
+      }
+      return await pipeline.exec()
+    } else {
+      // 如果不是对象，直接调用原生方法
+      return await client.hset(key, data)
+    }
+  }
+
   // 🏢 创建Claude Console账户
   async createAccount(options = {}) {
     const {
@@ -104,7 +119,7 @@ class ClaudeConsoleAccountService {
     )
     logger.debug(`[DEBUG] Account data to save: ${JSON.stringify(accountData, null, 2)}`)
 
-    await client.hset(`${this.ACCOUNT_KEY_PREFIX}${accountId}`, accountData)
+    await this._hsetCompat(client, `${this.ACCOUNT_KEY_PREFIX}${accountId}`, accountData)
 
     // 如果是共享账户，添加到共享账户集合
     if (accountType === 'shared') {
@@ -337,7 +352,7 @@ class ClaudeConsoleAccountService {
       logger.debug(`[DEBUG] Final updatedData to save: ${JSON.stringify(updatedData, null, 2)}`)
       logger.debug(`[DEBUG] Updating Redis key: ${this.ACCOUNT_KEY_PREFIX}${accountId}`)
 
-      await client.hset(`${this.ACCOUNT_KEY_PREFIX}${accountId}`, updatedData)
+      await this._hsetCompat(client, `${this.ACCOUNT_KEY_PREFIX}${accountId}`, updatedData)
 
       logger.success(`📝 Updated Claude Console account: ${accountId}`)
 
@@ -398,7 +413,7 @@ class ClaudeConsoleAccountService {
         rateLimitStatus: 'limited'
       }
 
-      await client.hset(`${this.ACCOUNT_KEY_PREFIX}${accountId}`, updates)
+      await this._hsetCompat(client, `${this.ACCOUNT_KEY_PREFIX}${accountId}`, updates)
 
       // 发送Webhook通知
       try {
@@ -501,7 +516,7 @@ class ClaudeConsoleAccountService {
         blockedAt: new Date().toISOString()
       }
 
-      await client.hset(`${this.ACCOUNT_KEY_PREFIX}${accountId}`, updates)
+      await this._hsetCompat(client, `${this.ACCOUNT_KEY_PREFIX}${accountId}`, updates)
 
       logger.warn(`🚫 Claude Console account blocked: ${accountId} - ${reason}`)
 
@@ -737,7 +752,7 @@ class ClaudeConsoleAccountService {
       // 添加更新时间
       processedUpdates.updatedAt = new Date().toISOString()
 
-      await client.hset(accountKey, processedUpdates)
+      await this._hsetCompat(client, accountKey, processedUpdates)
       logger.debug(`🔄 Updated Claude Console scheduling fields for account ${accountId}:`, updates)
       return { success: true }
     } catch (error) {
@@ -759,7 +774,7 @@ class ClaudeConsoleAccountService {
       const currentUsageCount = await client.hget(accountKey, 'usageCount')
       const usageCount = parseInt(currentUsageCount || '0') + 1
 
-      await client.hset(accountKey, {
+      await this._hsetCompat(client, accountKey, {
         usageCount: usageCount.toString(),
         lastScheduledAt: new Date().toISOString(),
         lastUsedAt: new Date().toISOString() // 也更新lastUsedAt

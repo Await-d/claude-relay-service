@@ -31,12 +31,35 @@ services:
       - ADMIN_USERNAME=${ADMIN_USERNAME:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       
+      # 💾 数据库配置（新增多数据库支持）
+      - DATABASE_TYPE=${DATABASE_TYPE:-redis}  # 数据库类型：redis, mongodb, postgresql, mysql
+      
       # 📊 Redis 配置
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
       - REDIS_ENABLE_TLS=${REDIS_ENABLE_TLS:-}
+      
+      # 📋 MongoDB 配置（可选）
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/claude_relay}
+      - MONGODB_OPTIONS=${MONGODB_OPTIONS:-}
+      
+      # 🐘 PostgreSQL 配置（可选）
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB:-claude_relay}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+      - POSTGRES_SSL=${POSTGRES_SSL:-false}
+      
+      # 🐬 MySQL 配置（可选）
+      - MYSQL_HOST=${MYSQL_HOST:-mysql}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-claude_relay}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+      - MYSQL_CHARSET=${MYSQL_CHARSET:-utf8mb4}
       
       # 🎯 Claude API 配置
       - CLAUDE_API_URL=${CLAUDE_API_URL:-https://api.anthropic.com/v1/messages}
@@ -80,7 +103,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # 📊 Redis Database
+  # 📊 Redis Database (默认)
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -100,6 +123,81 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # 📋 MongoDB Database (可选，使用 profile: mongodb)
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    expose:
+      - "27017"
+    # ports:
+    #   - "127.0.0.1:${MONGODB_PORT:-27017}:27017"
+    volumes:
+      - ./mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-root}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-}
+      - MONGO_INITDB_DATABASE=claude_relay
+    networks:
+      - claude-relay-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - mongodb
+
+  # 🐘 PostgreSQL Database (可选，使用 profile: postgresql)
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    expose:
+      - "5432"
+    # ports:
+    #   - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=claude_relay
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --locale=C
+    networks:
+      - claude-relay-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - postgresql
+
+  # 🐬 MySQL Database (可选，使用 profile: mysql)
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    expose:
+      - "3306"
+    # ports:
+    #   - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    environment:
+      - MYSQL_DATABASE=claude_relay
+      - MYSQL_USER=${MYSQL_USER:-claude}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    networks:
+      - claude-relay-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - mysql
 
   # 📈 Redis Monitoring (Optional)
   redis-commander:

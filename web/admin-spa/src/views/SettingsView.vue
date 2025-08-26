@@ -48,6 +48,18 @@
             <i class="fas fa-bell mr-2"></i>
             通知设置
           </button>
+          <button
+            :class="[
+              'border-b-2 pb-2 text-sm font-medium transition-colors',
+              activeSection === 'data-management'
+                ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            ]"
+            @click="activeSection = 'data-management'"
+          >
+            <i class="fas fa-database mr-2"></i>
+            数据管理
+          </button>
         </nav>
       </div>
 
@@ -238,22 +250,12 @@
                   class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                   @change="saveSchedulingConfig"
                 >
-                  <option value="round_robin">
-                    <i class="fas fa-sync-alt mr-2" />轮询调度 (Round Robin)
-                  </option>
-                  <option value="least_used">
-                    <i class="fas fa-chart-bar mr-2" />最少使用 (Least Used)
-                  </option>
-                  <option value="least_recent">
-                    <i class="fas fa-clock mr-2" />最近最少使用 (Least Recent)
-                  </option>
-                  <option value="random"><i class="fas fa-random mr-2" />随机调度 (Random)</option>
-                  <option value="weighted_random">
-                    <i class="fas fa-balance-scale mr-2" />加权随机 (Weighted Random)
-                  </option>
-                  <option value="sequential">
-                    <i class="fas fa-list-ol mr-2" />顺序调度 (Sequential)
-                  </option>
+                  <option value="round_robin">轮询调度 (Round Robin)</option>
+                  <option value="least_used">最少使用 (Least Used)</option>
+                  <option value="least_recent">最近最少使用 (Least Recent)</option>
+                  <option value="random">随机调度 (Random)</option>
+                  <option value="weighted_random">加权随机 (Weighted Random)</option>
+                  <option value="sequential">顺序调度 (Sequential)</option>
                 </select>
               </div>
 
@@ -664,6 +666,254 @@
             </button>
           </div>
         </div>
+
+        <!-- 数据管理部分 -->
+        <div v-show="activeSection === 'data-management'">
+          <!-- 数据概览 -->
+          <div class="overview-section mb-6 rounded-lg bg-white p-6 dark:bg-gray-800">
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-gray-200">数据概览</h2>
+
+            <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <div class="stat-card">
+                <div class="text-2xl font-bold text-blue-600">{{ dataOverview.apiKeys }}</div>
+                <div class="text-sm text-gray-600 dark:text-gray-400">API Keys</div>
+              </div>
+              <div class="stat-card">
+                <div class="text-2xl font-bold text-green-600">
+                  {{ dataOverview.claudeAccounts }}
+                </div>
+                <div class="text-sm text-gray-600 dark:text-gray-400">Claude账户</div>
+              </div>
+              <div class="stat-card">
+                <div class="text-2xl font-bold text-purple-600">
+                  {{ dataOverview.openaiAccounts }}
+                </div>
+                <div class="text-sm text-gray-600 dark:text-gray-400">OpenAI账户</div>
+              </div>
+              <div class="stat-card">
+                <div class="text-2xl font-bold text-orange-600">
+                  {{ dataOverview.systemConfig }}
+                </div>
+                <div class="text-sm text-gray-600 dark:text-gray-400">系统配置</div>
+              </div>
+            </div>
+
+            <div class="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                  <div class="flex items-center">
+                    <div
+                      class="mr-2 h-3 w-3 rounded-full"
+                      :class="dataOverview.is2FAEnabled ? 'bg-green-500' : 'bg-red-500'"
+                    ></div>
+                    <span class="text-sm text-gray-600 dark:text-gray-400">
+                      2FA状态: {{ dataOverview.is2FAEnabled ? '已启用' : '未启用' }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="dataOverview.lastExport" class="text-sm text-gray-500">
+                  最后导出: {{ formatDate(dataOverview.lastExport) }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2FA设置提醒 -->
+          <div v-if="!dataOverview.is2FAEnabled" class="mb-6">
+            <div
+              class="rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20"
+            >
+              <div class="flex items-center">
+                <svg class="mr-3 h-5 w-5 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path
+                    clip-rule="evenodd"
+                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                    fill-rule="evenodd"
+                  />
+                </svg>
+                <div>
+                  <h3 class="font-medium text-yellow-800 dark:text-yellow-200">需要启用2FA</h3>
+                  <p class="mt-1 text-sm text-yellow-700 dark:text-yellow-300">
+                    数据导出等敏感操作需要双因素认证保护，请先设置2FA。
+                  </p>
+                </div>
+              </div>
+              <div class="mt-3">
+                <button
+                  class="rounded-md bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
+                  @click="showSetup2FA"
+                >
+                  设置2FA
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 主功能区域 -->
+          <div class="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <!-- 数据导出 -->
+            <div class="feature-card">
+              <div class="mb-4 flex items-center">
+                <svg
+                  class="mr-3 h-8 w-8 text-blue-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                  />
+                </svg>
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">数据导出</h3>
+              </div>
+              <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                将当前数据库中的所有数据导出为加密的ZIP文件
+              </p>
+
+              <div class="mb-4 space-y-3">
+                <label class="flex items-center">
+                  <input
+                    v-model="exportOptions.includeStats"
+                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    type="checkbox"
+                  />
+                  <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">包含使用统计</span>
+                </label>
+              </div>
+
+              <button
+                class="w-full rounded-md bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-gray-400"
+                :disabled="!dataOverview.is2FAEnabled || exporting"
+                @click="initiateExport"
+              >
+                <span v-if="exporting">导出中...</span>
+                <span v-else>开始导出</span>
+              </button>
+            </div>
+
+            <!-- 数据导入 -->
+            <div class="feature-card">
+              <div class="mb-4 flex items-center">
+                <svg
+                  class="mr-3 h-8 w-8 text-green-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                  />
+                </svg>
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">数据导入</h3>
+              </div>
+              <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                从导出的ZIP文件恢复数据到当前数据库
+              </p>
+
+              <div class="mb-4 space-y-3">
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    冲突处理策略
+                  </label>
+                  <select
+                    v-model="importOptions.conflictStrategy"
+                    class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  >
+                    <option value="skip">跳过已存在的记录</option>
+                    <option value="overwrite">覆盖已存在的记录</option>
+                    <option value="merge">智能合并记录</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    选择文件
+                  </label>
+                  <input
+                    ref="importFileInput"
+                    accept=".zip,.json"
+                    class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    type="file"
+                    @change="handleImportFileSelect"
+                  />
+                </div>
+              </div>
+
+              <button
+                class="w-full rounded-md bg-green-600 px-4 py-2 font-medium text-white transition-colors hover:bg-green-700 disabled:bg-gray-400"
+                :disabled="!dataOverview.is2FAEnabled || !importFile || importing"
+                @click="initiateImport"
+              >
+                <span v-if="importing">导入中...</span>
+                <span v-else>开始导入</span>
+              </button>
+            </div>
+
+            <!-- 数据库迁移 -->
+            <div class="feature-card">
+              <div class="mb-4 flex items-center">
+                <svg
+                  class="mr-3 h-8 w-8 text-purple-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                  />
+                </svg>
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">数据库迁移</h3>
+              </div>
+              <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                将数据迁移到其他数据库系统（MongoDB、MySQL、PostgreSQL）
+              </p>
+
+              <div class="mb-4 space-y-3">
+                <label class="flex items-center">
+                  <input
+                    v-model="migrationOptions.validateOnly"
+                    class="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                    type="checkbox"
+                  />
+                  <span class="ml-2 text-sm text-gray-700 dark:text-gray-300"
+                    >仅验证（不执行迁移）</span
+                  >
+                </label>
+
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    目标数据库配置文件
+                  </label>
+                  <input
+                    ref="migrationConfigInput"
+                    accept=".json"
+                    class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    type="file"
+                    @change="handleMigrationConfigSelect"
+                  />
+                </div>
+              </div>
+
+              <button
+                class="w-full rounded-md bg-purple-600 px-4 py-2 font-medium text-white transition-colors hover:bg-purple-700 disabled:bg-gray-400"
+                :disabled="!dataOverview.is2FAEnabled || !migrationConfig || migrating"
+                @click="initiateMigration"
+              >
+                <span v-if="migrating">迁移中...</span>
+                <span v-else>开始迁移</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -899,6 +1149,163 @@
       </div>
     </div>
   </div>
+
+  <!-- 2FA设置模态框 -->
+  <div
+    v-if="show2FASetup"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+  >
+    <div class="mx-4 w-full max-w-md rounded-lg bg-white p-6 dark:bg-gray-800">
+      <div class="mb-4 flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">设置双因素认证</h3>
+        <button
+          class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          @click="show2FASetup = false"
+        >
+          <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              d="M6 18L18 6M6 6l12 12"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div v-if="setup2FAStep === 1">
+        <p class="mb-4 text-gray-600 dark:text-gray-400">
+          使用Google Authenticator或Authy扫描二维码：
+        </p>
+        <div v-if="twoFAQRCode" class="mb-4 text-center">
+          <img alt="2FA QR Code" class="mx-auto rounded border" :src="twoFAQRCode" />
+        </div>
+        <div v-if="twoFASecret" class="mb-4">
+          <p class="mb-2 text-sm text-gray-600 dark:text-gray-400">手动输入密钥：</p>
+          <code class="rounded bg-gray-100 px-2 py-1 text-sm dark:bg-gray-700">{{
+            twoFASecret
+          }}</code>
+        </div>
+        <button
+          class="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          @click="setup2FAStep = 2"
+        >
+          下一步
+        </button>
+      </div>
+
+      <div v-if="setup2FAStep === 2">
+        <p class="mb-4 text-gray-600 dark:text-gray-400">输入应用显示的6位验证码：</p>
+        <input
+          v-model="setup2FAToken"
+          class="mb-4 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-center font-mono text-2xl text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+          maxlength="6"
+          placeholder="000000"
+          type="text"
+        />
+        <div class="flex space-x-3">
+          <button
+            class="flex-1 rounded-md bg-gray-500 px-4 py-2 text-white hover:bg-gray-600"
+            @click="setup2FAStep = 1"
+          >
+            上一步
+          </button>
+          <button
+            class="flex-1 rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:bg-gray-400"
+            :disabled="!setup2FAToken || setup2FAToken.length !== 6"
+            @click="enable2FA"
+          >
+            启用2FA
+          </button>
+        </div>
+      </div>
+
+      <div v-if="setup2FAStep === 3 && twoFABackupCodes">
+        <p class="mb-4 text-gray-600 dark:text-gray-400">2FA设置成功！请保存以下备份码：</p>
+        <div class="mb-4 rounded-md bg-gray-100 p-4 dark:bg-gray-700">
+          <div class="grid grid-cols-2 gap-2 font-mono text-sm">
+            <div v-for="code in twoFABackupCodes" :key="code" class="text-center">
+              {{ code }}
+            </div>
+          </div>
+        </div>
+        <button
+          class="w-full rounded-md bg-green-600 px-4 py-2 text-white hover:bg-green-700"
+          @click="complete2FASetup"
+        >
+          完成设置
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 敏感操作验证模态框 -->
+  <div
+    v-if="showSensitiveAuth"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+  >
+    <div class="mx-4 w-full max-w-md rounded-lg bg-white p-6 dark:bg-gray-800">
+      <div class="mb-4 flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">敏感操作验证</h3>
+        <button
+          class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          @click="showSensitiveAuth = false"
+        >
+          <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              d="M6 18L18 6M6 6l12 12"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            管理员密码
+          </label>
+          <input
+            v-model="sensitiveAuth.password"
+            class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+            type="password"
+          />
+        </div>
+
+        <div>
+          <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            2FA验证码
+          </label>
+          <input
+            v-model="sensitiveAuth.token"
+            class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-center font-mono text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+            maxlength="8"
+            placeholder="6位验证码或8位备份码"
+            type="text"
+          />
+        </div>
+
+        <div class="flex space-x-3 pt-4">
+          <button
+            class="flex-1 rounded-md bg-gray-500 px-4 py-2 text-white hover:bg-gray-600"
+            @click="showSensitiveAuth = false"
+          >
+            取消
+          </button>
+          <button
+            class="flex-1 rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:bg-gray-400"
+            :disabled="!sensitiveAuth.password || !sensitiveAuth.token || verifying"
+            @click="verifySensitiveAuth"
+          >
+            <span v-if="verifying">验证中...</span>
+            <span v-else>验证</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -988,6 +1395,8 @@ const sectionWatcher = watch(activeSection, async (newSection) => {
     await loadWebhookConfig()
   } else if (newSection === 'scheduling') {
     await loadSchedulingConfig()
+  } else if (newSection === 'data-management') {
+    await loadDataOverview()
   }
 })
 
@@ -999,6 +1408,8 @@ onMounted(async () => {
       await loadWebhookConfig()
     } else if (activeSection.value === 'scheduling') {
       await loadSchedulingConfig()
+    } else if (activeSection.value === 'data-management') {
+      await loadDataOverview()
     }
   } catch (error) {
     showToast('加载设置失败', 'error')
@@ -1438,13 +1849,14 @@ const loadSchedulingConfig = async () => {
       signal: abortController.value.signal
     })
     if (response.success && isMounted.value) {
+      const config = response.data
       schedulingConfig.value = {
-        globalDefaultStrategy: response.config?.globalDefaultStrategy || 'least_recent',
-        globalDefaultWeight: response.config?.globalDefaultWeight || 5,
-        globalDefaultOrder: response.config?.globalDefaultOrder || 1,
-        enableAccountOverride: response.config?.enableAccountOverride ?? true,
-        enableGroupOverride: response.config?.enableGroupOverride ?? true,
-        updatedAt: response.config?.updatedAt
+        globalDefaultStrategy: config?.defaultStrategy || 'least_recent',
+        globalDefaultWeight: parseInt(config?.globalDefaultWeight || 5),
+        globalDefaultOrder: parseInt(config?.globalDefaultOrder || 1),
+        enableAccountOverride: config?.enableAccountOverride === 'true',
+        enableGroupOverride: config?.enableGroupOverride === 'true',
+        updatedAt: config?.updatedAt
       }
       // 加载使用统计
       await loadSchedulingStats()
@@ -1577,6 +1989,268 @@ const getStrategyDescription = (strategy) => {
   return descriptions[strategy] || '优先选择最长时间未被使用的账户'
 }
 
+// 数据管理相关变量
+const dataOverview = ref({
+  apiKeys: 0,
+  claudeAccounts: 0,
+  openaiAccounts: 0,
+  systemConfig: 0,
+  is2FAEnabled: false,
+  lastExport: null
+})
+
+// 2FA设置相关
+const show2FASetup = ref(false)
+const setup2FAStep = ref(1)
+const twoFAQRCode = ref('')
+const twoFASecret = ref('')
+const twoFABackupCodes = ref(null)
+const setup2FAToken = ref('')
+
+// 敏感操作验证相关
+const showSensitiveAuth = ref(false)
+const sensitiveAuth = ref({
+  password: '',
+  token: '',
+  sessionToken: ''
+})
+const verifying = ref(false)
+let pendingOperation = null
+
+// 导出相关
+const exportOptions = ref({
+  includeStats: true
+})
+const exporting = ref(false)
+
+// 导入相关
+const importOptions = ref({
+  conflictStrategy: 'skip'
+})
+const importing = ref(false)
+const importFile = ref(null)
+const importFileInput = ref()
+
+// 迁移相关
+const migrationOptions = ref({
+  validateOnly: false
+})
+const migrating = ref(false)
+const migrationConfig = ref(null)
+const migrationConfigInput = ref()
+
+// 数据管理相关函数
+
+// 获取数据概览
+const loadDataOverview = async () => {
+  try {
+    const response = await apiClient.get('/admin/data/overview')
+    Object.assign(dataOverview.value, response.data)
+  } catch (error) {
+    showToast('获取数据概览失败: ' + (error.response?.data?.error || error.message), 'error')
+  }
+}
+
+// 显示2FA设置
+const showSetup2FA = async () => {
+  try {
+    const response = await apiClient.post('/admin/data/2fa/generate')
+    const data = response.data
+
+    twoFAQRCode.value = data.qrCode
+    twoFASecret.value = data.manualEntryKey
+    twoFABackupCodes.value = data.backupCodes
+
+    show2FASetup.value = true
+    setup2FAStep.value = 1
+  } catch (error) {
+    showToast('生成2FA密钥失败: ' + (error.response?.data?.error || error.message), 'error')
+  }
+}
+
+// 启用2FA
+const enable2FA = async () => {
+  try {
+    await apiClient.post('/admin/data/2fa/enable', {
+      token: setup2FAToken.value
+    })
+
+    setup2FAStep.value = 3
+    showToast('2FA启用成功', 'success')
+  } catch (error) {
+    showToast('2FA启用失败: ' + (error.response?.data?.error || error.message), 'error')
+  }
+}
+
+// 完成2FA设置
+const complete2FASetup = () => {
+  show2FASetup.value = false
+  setup2FAStep.value = 1
+  setup2FAToken.value = ''
+  dataOverview.value.is2FAEnabled = true
+}
+
+// 验证敏感操作
+const verifySensitiveAuth = async () => {
+  verifying.value = true
+  try {
+    const response = await apiClient.post('/admin/data/2fa/verify', {
+      password: sensitiveAuth.value.password,
+      token: sensitiveAuth.value.token
+    })
+
+    sensitiveAuth.value.sessionToken = response.data.sessionToken
+    showSensitiveAuth.value = false
+
+    // 执行待处理的操作
+    if (pendingOperation) {
+      await pendingOperation()
+      pendingOperation = null
+    }
+
+    // 清空敏感信息
+    sensitiveAuth.value.password = ''
+    sensitiveAuth.value.token = ''
+  } catch (error) {
+    showToast('验证失败: ' + (error.response?.data?.error || error.message), 'error')
+  } finally {
+    verifying.value = false
+  }
+}
+
+// 发起导出
+const initiateExport = () => {
+  if (!sensitiveAuth.value.sessionToken) {
+    pendingOperation = performExport
+    showSensitiveAuth.value = true
+    return
+  }
+  performExport()
+}
+
+// 执行导出
+const performExport = async () => {
+  exporting.value = true
+  try {
+    const response = await apiClient.post(
+      '/admin/data/export',
+      {
+        sessionToken: sensitiveAuth.value.sessionToken,
+        includeStats: exportOptions.value.includeStats
+      },
+      {
+        responseType: 'blob'
+      }
+    )
+
+    // 创建下载链接
+    const blob = new Blob([response.data], { type: 'application/zip' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `claude-relay-data-${Date.now()}.zip`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+
+    showToast('数据导出成功', 'success')
+    loadDataOverview() // 刷新概览
+  } catch (error) {
+    showToast('数据导出失败: ' + (error.response?.data?.error || '网络错误'), 'error')
+  } finally {
+    exporting.value = false
+    sensitiveAuth.value.sessionToken = ''
+  }
+}
+
+// 处理导入文件选择
+const handleImportFileSelect = (event) => {
+  importFile.value = event.target.files[0]
+}
+
+// 发起导入
+const initiateImport = () => {
+  if (!sensitiveAuth.value.sessionToken) {
+    pendingOperation = performImport
+    showSensitiveAuth.value = true
+    return
+  }
+  performImport()
+}
+
+// 执行导入
+const performImport = async () => {
+  importing.value = true
+  try {
+    const formData = new FormData()
+    formData.append('dataFile', importFile.value)
+    formData.append('sessionToken', sensitiveAuth.value.sessionToken)
+    formData.append('conflictStrategy', importOptions.value.conflictStrategy)
+
+    const response = await apiClient.post('/admin/data/import', formData)
+
+    const result = response.data
+    showToast(
+      `数据导入成功: 导入${result.importedRecords}条记录，跳过${result.skippedRecords}条记录`,
+      'success'
+    )
+    loadDataOverview() // 刷新概览
+  } catch (error) {
+    showToast('数据导入失败: ' + (error.response?.data?.error || error.message), 'error')
+  } finally {
+    importing.value = false
+    sensitiveAuth.value.sessionToken = ''
+    importFile.value = null
+  }
+}
+
+// 处理迁移配置文件选择
+const handleMigrationConfigSelect = (event) => {
+  migrationConfig.value = event.target.files[0]
+}
+
+// 发起迁移
+const initiateMigration = () => {
+  if (!sensitiveAuth.value.sessionToken) {
+    pendingOperation = performMigration
+    showSensitiveAuth.value = true
+    return
+  }
+  performMigration()
+}
+
+// 执行迁移
+const performMigration = async () => {
+  migrating.value = true
+  try {
+    const formData = new FormData()
+    formData.append('configFile', migrationConfig.value)
+    formData.append('sessionToken', sensitiveAuth.value.sessionToken)
+    formData.append('validateOnly', migrationOptions.value.validateOnly)
+
+    const response = await apiClient.post('/admin/data/migrate', formData)
+
+    const result = response.data
+    const message = migrationOptions.value.validateOnly
+      ? `迁移验证完成: ${result.sourceDatabase} → ${result.targetDatabase}`
+      : `数据库迁移完成: ${result.totalRecords}条记录`
+
+    showToast(message, 'success')
+  } catch (error) {
+    showToast('迁移操作失败: ' + (error.response?.data?.error || error.message), 'error')
+  } finally {
+    migrating.value = false
+    sensitiveAuth.value.sessionToken = ''
+    migrationConfig.value = null
+  }
+}
+
+// 格式化日期
+const formatDate = (dateString) => {
+  return new Date(dateString).toLocaleString('zh-CN')
+}
+
 // 格式化日期时间
 const formatDateTime = settingsStore.formatDateTime
 </script>
@@ -1639,5 +2313,18 @@ const formatDateTime = settingsStore.formatDateTime
 
 .loading-spinner {
   @apply h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600;
+}
+
+/* 数据管理相关样式 */
+.stat-card {
+  @apply rounded-lg bg-gray-50 p-4 text-center dark:bg-gray-700;
+}
+
+.feature-card {
+  @apply rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800;
+}
+
+.feature-card h3 {
+  @apply text-lg font-semibold text-gray-800 dark:text-gray-200;
 }
 </style>

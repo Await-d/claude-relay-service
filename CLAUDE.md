@@ -98,6 +98,7 @@ npm run setup  # 自动生成密钥并创建管理员账户
 - **实时仪表板**: 系统统计、账户状态、使用量监控
 - **API Key管理**: 创建、配额设置、使用统计查看
 - **Claude账户管理**: OAuth账户添加、代理配置、状态监控
+- **数据管理**: 数据导出、导入、数据库迁移（需2FA验证）
 - **系统日志**: 实时日志查看，多级别过滤
 - **主题系统**: 支持明亮/暗黑模式切换，自动保存用户偏好设置
 
@@ -115,6 +116,16 @@ npm run setup  # 自动生成密钥并创建管理员账户
 - `POST /admin/claude-accounts/generate-auth-url` - 生成OAuth授权URL（含代理）
 - `POST /admin/claude-accounts/exchange-code` - 交换authorization code
 - `POST /admin/claude-accounts` - 创建OAuth账户
+
+### 数据管理端点
+
+- `GET /admin/data/overview` - 数据管理概览
+- `POST /admin/data/2fa/generate` - 生成2FA密钥
+- `POST /admin/data/2fa/enable` - 启用2FA验证
+- `POST /admin/data/2fa/verify` - 验证敏感操作
+- `POST /admin/data/export` - 数据导出（需2FA）
+- `POST /admin/data/import` - 数据导入（需2FA）
+- `POST /admin/data/migrate` - 数据库迁移（需2FA）
 
 ### 系统端点
 

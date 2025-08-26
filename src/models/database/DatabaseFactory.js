@@ -340,8 +340,34 @@ class DatabaseFactory {
 // 导出工厂单例实例
 const databaseFactory = new DatabaseFactory()
 
+/**
+ * 静态创建方法（兼容现有代码）
+ */
+class DatabaseFactoryStatic {
+  static create(config) {
+    // 从配置中提取数据库类型
+    const dbType = config.database?.type || 'redis'
+    
+    switch (dbType.toLowerCase()) {
+      case 'redis':
+        const RedisAdapter = require('./RedisAdapter')
+        return new RedisAdapter()
+      case 'mongodb':
+        throw new Error('MongoDB adapter is not implemented yet')
+      case 'mysql':
+        throw new Error('MySQL adapter is not implemented yet')
+      case 'postgresql':
+        throw new Error('PostgreSQL adapter is not implemented yet')
+      default:
+        // 默认使用 Redis
+        const DefaultRedisAdapter = require('./RedisAdapter')
+        return new DefaultRedisAdapter()
+    }
+  }
+}
+
 module.exports = {
-  DatabaseFactory,
+  DatabaseFactory: DatabaseFactoryStatic,
   databaseFactory,
   DATABASE_TYPES
 }

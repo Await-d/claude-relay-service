@@ -95,6 +95,27 @@ class RedisClient {
     return this.client
   }
 
+  // Redis版本兼容的hset方法（支持多字段设置）
+  async hsetCompat(key, ...args) {
+    const client = this.getClientSafe()
+
+    // 如果参数是对象形式 hset(key, {field1: value1, field2: value2})
+    if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+      const obj = args[0]
+      const fields = Object.keys(obj)
+
+      // 对于低版本Redis，使用pipeline逐一设置字段
+      const pipeline = client.pipeline()
+      for (const field of fields) {
+        pipeline.hset(key, field, obj[field])
+      }
+      return await pipeline.exec()
+    }
+
+    // 其他情况直接调用原生hset
+    return await client.hset(key, ...args)
+  }
+
   // 🔑 API Key 相关操作
   async setApiKey(keyId, keyData, hashedKey = null) {
     const key = `apikey:${keyId}`
@@ -106,7 +127,7 @@ class RedisClient {
       await client.hset('apikey:hash_map', hashedKey, keyId)
     }
 
-    await client.hset(key, keyData)
+    await this.hsetCompat(key, keyData)
     await client.expire(key, 86400 * 365) // 1年过期
   }
 

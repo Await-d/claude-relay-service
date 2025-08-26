@@ -35,6 +35,7 @@ const tabRouteMap = {
   dashboard: '/dashboard',
   apiKeys: '/api-keys',
   accounts: '/accounts',
+  'data-management': '/data-management',
   tutorial: '/tutorial',
   settings: '/settings'
 }
@@ -53,6 +54,7 @@ const initActiveTab = () => {
       Dashboard: 'dashboard',
       ApiKeys: 'apiKeys',
       Accounts: 'accounts',
+      DataManagement: 'data-management',
       Tutorial: 'tutorial',
       Settings: 'settings'
     }
@@ -82,6 +84,7 @@ watch(
         Dashboard: 'dashboard',
         ApiKeys: 'apiKeys',
         Accounts: 'accounts',
+        DataManagement: 'data-management',
         Tutorial: 'tutorial',
         Settings: 'settings'
       }

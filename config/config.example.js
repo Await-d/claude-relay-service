@@ -18,7 +18,113 @@ const config = {
     encryptionKey: process.env.ENCRYPTION_KEY || 'CHANGE-THIS-32-CHARACTER-KEY-NOW'
   },
 
-  // 📊 Redis配置
+  // 🗄️ 数据库配置 (Database Configuration)
+  database: {
+    // 数据库类型选择：redis, mongodb, postgresql, mysql
+    // Database type selection: redis, mongodb, postgresql, mysql
+    type: process.env.DATABASE_TYPE || 'redis',
+
+    // 默认数据库（当前为Redis，保持向后兼容）
+    // Default database (currently Redis for backward compatibility)
+    defaultAdapter: 'redis',
+
+    // Redis 配置（当前默认数据库）
+    // Redis configuration (current default database)
+    redis: {
+      host: process.env.REDIS_HOST || '127.0.0.1',
+      port: parseInt(process.env.REDIS_PORT) || 6379,
+      password: process.env.REDIS_PASSWORD || '',
+      db: parseInt(process.env.REDIS_DB) || 0,
+      connectTimeout: 10000,
+      commandTimeout: 5000,
+      retryDelayOnFailover: 100,
+      maxRetriesPerRequest: 3,
+      lazyConnect: true,
+      enableTLS: process.env.REDIS_ENABLE_TLS === 'true'
+    },
+
+    // MongoDB 配置模板（未来支持）
+    // MongoDB configuration template (future support)
+    // mongodb: {
+    //   uri: process.env.MONGODB_URI || 'mongodb://localhost:27017',
+    //   database: process.env.MONGODB_DATABASE || 'claude_relay',
+    //   options: {
+    //     useNewUrlParser: true,
+    //     useUnifiedTopology: true,
+    //     maxPoolSize: parseInt(process.env.MONGODB_MAX_POOL_SIZE) || 10,
+    //     serverSelectionTimeoutMS: parseInt(process.env.MONGODB_SERVER_SELECTION_TIMEOUT) || 5000,
+    //     socketTimeoutMS: parseInt(process.env.MONGODB_SOCKET_TIMEOUT) || 45000,
+    //     family: 4 // Use IPv4, skip trying IPv6
+    //   },
+    //   // 集合名称映射
+    //   collections: {
+    //     apiKeys: process.env.MONGODB_COLLECTION_API_KEYS || 'api_keys',
+    //     claudeAccounts: process.env.MONGODB_COLLECTION_CLAUDE_ACCOUNTS || 'claude_accounts',
+    //     openaiAccounts: process.env.MONGODB_COLLECTION_OPENAI_ACCOUNTS || 'openai_accounts',
+    //     sessions: process.env.MONGODB_COLLECTION_SESSIONS || 'sessions',
+    //     usageStats: process.env.MONGODB_COLLECTION_USAGE_STATS || 'usage_stats',
+    //     systemStats: process.env.MONGODB_COLLECTION_SYSTEM_STATS || 'system_stats',
+    //     concurrency: process.env.MONGODB_COLLECTION_CONCURRENCY || 'concurrency'
+    //   }
+    // },
+
+    // PostgreSQL 配置模板（未来支持）
+    // PostgreSQL configuration template (future support)
+    // postgresql: {
+    //   host: process.env.POSTGRES_HOST || 'localhost',
+    //   port: parseInt(process.env.POSTGRES_PORT) || 5432,
+    //   database: process.env.POSTGRES_DATABASE || 'claude_relay',
+    //   username: process.env.POSTGRES_USERNAME || 'claude_relay_user',
+    //   password: process.env.POSTGRES_PASSWORD || '',
+    //   ssl: process.env.POSTGRES_SSL === 'true',
+    //   // 连接池配置
+    //   pool: {
+    //     max: parseInt(process.env.POSTGRES_POOL_MAX) || 20,
+    //     min: parseInt(process.env.POSTGRES_POOL_MIN) || 5,
+    //     acquire: parseInt(process.env.POSTGRES_POOL_ACQUIRE) || 30000,
+    //     idle: parseInt(process.env.POSTGRES_POOL_IDLE) || 10000
+    //   },
+    //   // 表名映射
+    //   tables: {
+    //     apiKeys: process.env.POSTGRES_TABLE_API_KEYS || 'api_keys',
+    //     claudeAccounts: process.env.POSTGRES_TABLE_CLAUDE_ACCOUNTS || 'claude_accounts',
+    //     openaiAccounts: process.env.POSTGRES_TABLE_OPENAI_ACCOUNTS || 'openai_accounts',
+    //     sessions: process.env.POSTGRES_TABLE_SESSIONS || 'sessions',
+    //     usageStats: process.env.POSTGRES_TABLE_USAGE_STATS || 'usage_stats',
+    //     systemStats: process.env.POSTGRES_TABLE_SYSTEM_STATS || 'system_stats'
+    //   }
+    // },
+
+    // MySQL 配置模板（未来支持）
+    // MySQL configuration template (future support)
+    // mysql: {
+    //   host: process.env.MYSQL_HOST || 'localhost',
+    //   port: parseInt(process.env.MYSQL_PORT) || 3306,
+    //   database: process.env.MYSQL_DATABASE || 'claude_relay',
+    //   username: process.env.MYSQL_USERNAME || 'claude_relay_user',
+    //   password: process.env.MYSQL_PASSWORD || '',
+    //   charset: process.env.MYSQL_CHARSET || 'utf8mb4',
+    //   // 连接池配置
+    //   pool: {
+    //     max: parseInt(process.env.MYSQL_POOL_MAX) || 20,
+    //     min: parseInt(process.env.MYSQL_POOL_MIN) || 5,
+    //     acquire: parseInt(process.env.MYSQL_POOL_ACQUIRE) || 30000,
+    //     idle: parseInt(process.env.MYSQL_POOL_IDLE) || 10000
+    //   },
+    //   // 表名映射
+    //   tables: {
+    //     apiKeys: process.env.MYSQL_TABLE_API_KEYS || 'api_keys',
+    //     claudeAccounts: process.env.MYSQL_TABLE_CLAUDE_ACCOUNTS || 'claude_accounts',
+    //     openaiAccounts: process.env.MYSQL_TABLE_OPENAI_ACCOUNTS || 'openai_accounts',
+    //     sessions: process.env.MYSQL_TABLE_SESSIONS || 'sessions',
+    //     usageStats: process.env.MYSQL_TABLE_USAGE_STATS || 'usage_stats',
+    //     systemStats: process.env.MYSQL_TABLE_SYSTEM_STATS || 'system_stats'
+    //   }
+    // }
+  },
+
+  // 📊 Redis配置（保持向后兼容性）
+  // Redis configuration (maintained for backward compatibility)
   redis: {
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: parseInt(process.env.REDIS_PORT) || 6379,

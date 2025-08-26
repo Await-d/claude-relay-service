@@ -116,10 +116,30 @@ class ApiClient {
   // POST 请求
   async post(url, data = null, options = {}) {
     const fullUrl = createApiUrl(url)
+
+    // 处理 FormData - 不要 JSON 序列化，也不要设置 Content-Type
+    let body = undefined
+    let headers = {}
+
+    if (data) {
+      if (data instanceof FormData) {
+        body = data
+        // FormData 会自动设置正确的 Content-Type (multipart/form-data)
+        // 所以我们不设置 Content-Type header
+      } else {
+        body = JSON.stringify(data)
+        headers['Content-Type'] = 'application/json'
+      }
+    }
+
     const config = this.buildConfig({
       ...options,
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined
+      body,
+      headers: {
+        ...headers,
+        ...options.headers
+      }
     })
 
     try {
