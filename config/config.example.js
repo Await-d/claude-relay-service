@@ -41,7 +41,7 @@ const config = {
       maxRetriesPerRequest: 3,
       lazyConnect: true,
       enableTLS: process.env.REDIS_ENABLE_TLS === 'true'
-    },
+    }
 
     // MongoDB 配置模板（未来支持）
     // MongoDB configuration template (future support)
@@ -186,6 +186,159 @@ const config = {
     dirname: path.join(__dirname, '..', 'logs'),
     maxSize: process.env.LOG_MAX_SIZE || '10m',
     maxFiles: parseInt(process.env.LOG_MAX_FILES) || 5
+  },
+
+  // 📊 API Key 请求日志记录配置
+  // 基于性能优先设计，采用异步批量处理和智能采样策略
+  requestLogging: {
+    // 基础开关控制
+    enabled: process.env.REQUEST_LOGGING_ENABLED === 'true', // 默认禁用，确保向后兼容
+
+    // 记录模式：'basic' | 'detailed' | 'debug'
+    // basic: 记录基础信息（时间、状态码、响应时间）
+    // detailed: 记录详细信息（包括 User-Agent、IP、错误信息）
+    // debug: 记录调试信息（包括请求头、响应头摘要）
+    mode: process.env.REQUEST_LOGGING_MODE || 'basic',
+
+    // 智能采样配置 - 优化性能，避免记录所有请求
+    sampling: {
+      // 采样率：0.0-1.0，0.1 表示记录 10% 的请求
+      rate: parseFloat(process.env.REQUEST_LOGGING_SAMPLING_RATE) || 0.1,
+
+      // 错误请求优先记录（覆盖采样率限制）
+      alwaysLogErrors: process.env.REQUEST_LOGGING_ALWAYS_LOG_ERRORS !== 'false', // 默认启用
+
+      // 慢请求优先记录（响应时间超过阈值的请求）
+      slowRequestThreshold: parseInt(process.env.REQUEST_LOGGING_SLOW_THRESHOLD) || 5000, // 5秒
+      alwaysLogSlowRequests: process.env.REQUEST_LOGGING_ALWAYS_LOG_SLOW !== 'false', // 默认启用
+
+      // 基于 API Key 的采样控制（未来功能）
+      perKeyRateLimit: parseInt(process.env.REQUEST_LOGGING_PER_KEY_RATE_LIMIT) || 100, // 每个 API Key 每小时最多记录 100 条
+
+      // 动态采样：基于系统负载自动调整采样率（未来功能）
+      enableDynamicSampling: process.env.REQUEST_LOGGING_DYNAMIC_SAMPLING === 'true' // 默认禁用
+    },
+
+    // 异步批量处理配置 - 确保零阻塞关键路径
+    async: {
+      // 批量大小：积累多少条日志后批量写入
+      batchSize: parseInt(process.env.REQUEST_LOGGING_BATCH_SIZE) || 50,
+
+      // 批量超时：即使未达到批量大小，多长时间后强制写入（毫秒）
+      batchTimeout: parseInt(process.env.REQUEST_LOGGING_BATCH_TIMEOUT) || 5000, // 5秒
+
+      // 队列最大长度：防止内存溢出，超过此长度丢弃最旧的日志
+      maxQueueSize: parseInt(process.env.REQUEST_LOGGING_MAX_QUEUE_SIZE) || 1000,
+
+      // 队列满时的策略：'drop_oldest' | 'drop_newest' | 'block'
+      // drop_oldest: 丢弃最旧的日志（推荐）
+      // drop_newest: 丢弃最新的日志
+      // block: 阻塞直到有空间（不推荐生产环境）
+      queueFullStrategy: process.env.REQUEST_LOGGING_QUEUE_FULL_STRATEGY || 'drop_oldest',
+
+      // 写入失败重试次数
+      maxRetries: parseInt(process.env.REQUEST_LOGGING_MAX_RETRIES) || 3,
+
+      // 重试间隔（毫秒）
+      retryDelay: parseInt(process.env.REQUEST_LOGGING_RETRY_DELAY) || 1000
+    },
+
+    // 数据保留和清理配置
+    retention: {
+      // 日志数据保留时间（毫秒），默认7天
+      maxAge:
+        parseInt(process.env.REQUEST_LOGGING_RETENTION_DAYS) * 24 * 60 * 60 * 1000 ||
+        7 * 24 * 60 * 60 * 1000,
+
+      // 自动清理间隔（毫秒），默认每6小时清理一次
+      cleanupInterval: parseInt(process.env.REQUEST_LOGGING_CLEANUP_INTERVAL) || 6 * 60 * 60 * 1000,
+
+      // 单个 API Key 最大日志条数
+      maxLogsPerKey: parseInt(process.env.REQUEST_LOGGING_MAX_LOGS_PER_KEY) || 10000,
+
+      // 总体最大日志条数（所有 API Key）
+      maxTotalLogs: parseInt(process.env.REQUEST_LOGGING_MAX_TOTAL_LOGS) || 100000
+    },
+
+    // Redis 存储配置
+    storage: {
+      // 日志条目键前缀
+      keyPrefix: process.env.REQUEST_LOGGING_KEY_PREFIX || 'request_log',
+
+      // 索引键前缀（用于快速查询）
+      indexKeyPrefix: process.env.REQUEST_LOGGING_INDEX_KEY_PREFIX || 'request_log_index',
+
+      // 统计键前缀
+      statsKeyPrefix: process.env.REQUEST_LOGGING_STATS_KEY_PREFIX || 'request_log_stats',
+
+      // 使用压缩存储（节省内存）
+      enableCompression: process.env.REQUEST_LOGGING_ENABLE_COMPRESSION !== 'false', // 默认启用
+
+      // 数据序列化格式：'json' | 'msgpack'
+      serializationFormat: process.env.REQUEST_LOGGING_SERIALIZATION_FORMAT || 'json'
+    },
+
+    // 数据过滤配置 - 保护敏感信息
+    filtering: {
+      // 自动过滤敏感头信息
+      sensitiveHeaders: ['authorization', 'x-api-key', 'cookie', 'x-session-token'],
+
+      // 自动过滤的查询参数
+      sensitiveQueryParams: ['api_key', 'apikey', 'token', 'secret'],
+
+      // IP 地址脱敏（保留前三段）
+      maskIpAddress: process.env.REQUEST_LOGGING_MASK_IP === 'true',
+
+      // User-Agent 截断长度
+      maxUserAgentLength: parseInt(process.env.REQUEST_LOGGING_MAX_UA_LENGTH) || 200
+    },
+
+    // 性能监控配置
+    monitoring: {
+      // 启用内部性能监控
+      enabled: process.env.REQUEST_LOGGING_MONITORING_ENABLED === 'true',
+
+      // 监控指标收集间隔（毫秒）
+      metricsInterval: parseInt(process.env.REQUEST_LOGGING_METRICS_INTERVAL) || 60000, // 1分钟
+
+      // 监控指标保留时间（毫秒），默认24小时
+      metricsRetention:
+        parseInt(process.env.REQUEST_LOGGING_METRICS_RETENTION) || 24 * 60 * 60 * 1000,
+
+      // 性能警告阈值
+      thresholds: {
+        // 队列长度警告阈值
+        queueLength: parseInt(process.env.REQUEST_LOGGING_QUEUE_WARNING_THRESHOLD) || 800,
+
+        // 批量写入延迟警告阈值（毫秒）
+        batchWriteDelay: parseInt(process.env.REQUEST_LOGGING_WRITE_WARNING_THRESHOLD) || 1000,
+
+        // 内存使用警告阈值（MB）
+        memoryUsage: parseInt(process.env.REQUEST_LOGGING_MEMORY_WARNING_THRESHOLD) || 100
+      }
+    },
+
+    // 高级功能配置
+    advanced: {
+      // 启用实时日志流（WebSocket）
+      enableRealtimeStream: process.env.REQUEST_LOGGING_ENABLE_REALTIME === 'true',
+
+      // 启用日志导出功能
+      enableExport: process.env.REQUEST_LOGGING_ENABLE_EXPORT !== 'false', // 默认启用
+
+      // 支持的导出格式
+      exportFormats: ['json', 'csv', 'xlsx'],
+
+      // 导出文件大小限制（MB）
+      maxExportSize: parseInt(process.env.REQUEST_LOGGING_MAX_EXPORT_SIZE) || 50,
+
+      // 启用日志搜索功能
+      enableSearch: process.env.REQUEST_LOGGING_ENABLE_SEARCH !== 'false', // 默认启用
+
+      // 搜索索引更新频率（毫秒）
+      searchIndexUpdateInterval:
+        parseInt(process.env.REQUEST_LOGGING_SEARCH_INDEX_INTERVAL) || 300000 // 5分钟
+    }
   },
 
   // 🔧 系统配置

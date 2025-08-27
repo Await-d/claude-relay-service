@@ -3,6 +3,7 @@ const logger = require('../utils/logger')
 const database = require('../models/database')
 const { RateLimiterRedis } = require('rate-limiter-flexible')
 const config = require('../../config/config')
+const { requestLogger: requestLoggerService } = require('../services/requestLoggerService')
 
 // 🔑 API Key验证中间件（优化版）
 const authenticateApiKey = async (req, res, next) => {
@@ -504,7 +505,7 @@ const corsMiddleware = (req, res, next) => {
   }
 }
 
-// 📝 请求日志中间件（优化版）
+// 📝 请求日志中间件（集成高性能日志记录功能）
 const requestLogger = (req, res, next) => {
   const start = Date.now()
   const requestId = Math.random().toString(36).substring(2, 15)
@@ -518,17 +519,35 @@ const requestLogger = (req, res, next) => {
   const userAgent = req.get('User-Agent') || 'unknown'
   const referer = req.get('Referer') || 'none'
 
-  // 记录请求开始
+  // 🎯 轻量级数据收集 - 创建日志上下文（< 0.1ms）
+  req._logContext = {
+    requestId,
+    startTime: start,
+    method: req.method,
+    url: req.originalUrl,
+    ip: clientIP,
+    userAgent,
+    referer
+  }
+
+  // 记录请求开始（过滤健康检查）
   if (req.originalUrl !== '/health') {
-    // 避免健康检查日志过多
     logger.info(`▶️ [${requestId}] ${req.method} ${req.originalUrl} | IP: ${clientIP}`)
   }
 
-  res.on('finish', () => {
+  // 🚀 优化事件监听器 - 避免重复创建，使用单一监听器处理多种需求
+  let eventHandled = false
+
+  const handleRequestComplete = () => {
+    if (eventHandled) {
+      return
+    }
+    eventHandled = true
+
     const duration = Date.now() - start
     const contentLength = res.get('Content-Length') || '0'
 
-    // 构建日志元数据
+    // 构建完整日志元数据
     const logMetadata = {
       requestId,
       method: req.method,
@@ -541,7 +560,7 @@ const requestLogger = (req, res, next) => {
       referer
     }
 
-    // 根据状态码选择日志级别
+    // 标准 Winston 日志记录（保持现有功能）
     if (res.statusCode >= 500) {
       logger.error(
         `◀️ [${requestId}] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${duration}ms | ${contentLength}B`,
@@ -569,8 +588,60 @@ const requestLogger = (req, res, next) => {
         `🐌 [${requestId}] Slow request detected: ${duration}ms for ${req.method} ${req.originalUrl}`
       )
     }
-  })
 
+    // 🚀 高性能日志记录集成 - 异步非阻塞处理
+    if (config.requestLogging?.enabled && req.apiKey) {
+      // 使用 setImmediate 确保完全异步，零阻塞主请求流程
+      setImmediate(() => {
+        try {
+          // 确定请求类型用于智能采样
+          let requestType = 'normal'
+          if (res.statusCode >= 400) {
+            requestType = 'error'
+          } else if (duration >= (config.requestLogging.sampling?.slowRequestThreshold || 5000)) {
+            requestType = 'slow'
+          }
+
+          // 异步入队日志条目（性能要求：< 0.5ms）
+          requestLoggerService.enqueueLog({
+            // 从现有上下文复用数据
+            requestId: req._logContext.requestId,
+            method: req._logContext.method,
+            path: req._logContext.url,
+            statusCode: res.statusCode,
+            responseTime: duration,
+            userAgent: req._logContext.userAgent,
+            ipAddress: req._logContext.ip,
+
+            // API Key 信息
+            keyId: req.apiKey.id,
+            keyName: req.apiKey.name,
+
+            // 请求类型（用于采样决策）
+            requestType,
+
+            // 可选的模型和token信息（如果存在）
+            model: req.body?.model || '',
+            tokens: req._tokenUsage?.total || 0,
+            inputTokens: req._tokenUsage?.input || 0,
+            outputTokens: req._tokenUsage?.output || 0,
+
+            // 错误信息（如果存在）
+            error: res.statusCode >= 400 ? `HTTP ${res.statusCode}` : null
+          })
+        } catch (logError) {
+          // 静默处理日志错误，不影响主请求流程
+          logger.debug('High-performance logging error (non-critical):', logError.message)
+        }
+      })
+    }
+  }
+
+  // 优化的事件监听 - 使用 once 避免重复处理
+  res.once('finish', handleRequestComplete)
+  res.once('close', handleRequestComplete)
+
+  // 错误处理（独立监听器）
   res.on('error', (error) => {
     const duration = Date.now() - start
     logger.error(`💥 [${requestId}] Response error after ${duration}ms:`, error)

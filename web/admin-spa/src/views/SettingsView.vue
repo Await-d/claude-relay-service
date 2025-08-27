@@ -60,6 +60,18 @@
             <i class="fas fa-database mr-2"></i>
             数据管理
           </button>
+          <button
+            :class="[
+              'border-b-2 pb-2 text-sm font-medium transition-colors',
+              activeSection === 'request-logging'
+                ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            ]"
+            @click="activeSection = 'request-logging'"
+          >
+            <i class="fas fa-file-alt mr-2"></i>
+            请求日志
+          </button>
         </nav>
       </div>
 
@@ -914,6 +926,325 @@
             </div>
           </div>
         </div>
+
+        <!-- 请求日志配置部分 -->
+        <div v-show="activeSection === 'request-logging'">
+          <!-- 日志配置主开关 -->
+          <div
+            class="mb-6 rounded-lg bg-white/80 p-6 shadow-lg backdrop-blur-sm dark:bg-gray-800/80"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                  启用请求日志记录
+                </h2>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  记录所有API请求的详细信息，便于监控和调试
+                </p>
+              </div>
+              <label class="relative inline-flex cursor-pointer items-center">
+                <input
+                  v-model="requestLoggingConfig.enabled"
+                  class="peer sr-only"
+                  type="checkbox"
+                  @change="saveRequestLoggingConfig"
+                />
+                <div
+                  class="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:border-gray-600 dark:bg-gray-700 dark:peer-focus:ring-blue-800"
+                ></div>
+              </label>
+            </div>
+          </div>
+
+          <!-- 日志级别配置 -->
+          <div
+            class="mb-6 rounded-lg bg-white/80 p-6 shadow-lg backdrop-blur-sm dark:bg-gray-800/80"
+          >
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-gray-200">日志配置</h2>
+            <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <!-- 日志级别 -->
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  日志级别
+                </label>
+                <select
+                  v-model="requestLoggingConfig.level"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  @change="saveRequestLoggingConfig"
+                >
+                  <option value="error">错误 (Error)</option>
+                  <option value="warn">警告 (Warning)</option>
+                  <option value="info">信息 (Info)</option>
+                  <option value="debug">调试 (Debug)</option>
+                </select>
+              </div>
+
+              <!-- 保留天数 -->
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  日志保留天数
+                </label>
+                <input
+                  v-model.number="requestLoggingConfig.retentionDays"
+                  class="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  max="365"
+                  min="1"
+                  type="number"
+                  @change="saveRequestLoggingConfig"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  超过指定天数的日志将被自动清理
+                </p>
+              </div>
+
+              <!-- 最大文件大小 -->
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  单个日志文件最大大小 (MB)
+                </label>
+                <input
+                  v-model.number="requestLoggingConfig.maxFileSize"
+                  class="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  max="1000"
+                  min="1"
+                  type="number"
+                  @change="saveRequestLoggingConfig"
+                />
+              </div>
+
+              <!-- 最大文件数 -->
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  最大日志文件数
+                </label>
+                <input
+                  v-model.number="requestLoggingConfig.maxFiles"
+                  class="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  max="100"
+                  min="1"
+                  type="number"
+                  @change="saveRequestLoggingConfig"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 日志内容配置 -->
+          <div
+            class="mb-6 rounded-lg bg-white/80 p-6 shadow-lg backdrop-blur-sm dark:bg-gray-800/80"
+          >
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-gray-200">
+              记录内容配置
+            </h2>
+            <div class="space-y-4">
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="font-medium text-gray-700 dark:text-gray-300">请求头</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">记录HTTP请求头信息</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="requestLoggingConfig.includeHeaders"
+                      class="peer sr-only"
+                      type="checkbox"
+                      @change="saveRequestLoggingConfig"
+                    />
+                    <div
+                      class="peer h-5 w-9 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-green-600 peer-checked:after:translate-x-full peer-checked:after:border-white dark:border-gray-600 dark:bg-gray-700"
+                    ></div>
+                  </label>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="font-medium text-gray-700 dark:text-gray-300">请求体</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">记录请求体内容</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="requestLoggingConfig.includeBody"
+                      class="peer sr-only"
+                      type="checkbox"
+                      @change="saveRequestLoggingConfig"
+                    />
+                    <div
+                      class="peer h-5 w-9 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-green-600 peer-checked:after:translate-x-full peer-checked:after:border-white dark:border-gray-600 dark:bg-gray-700"
+                    ></div>
+                  </label>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="font-medium text-gray-700 dark:text-gray-300">响应数据</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">记录API响应内容</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="requestLoggingConfig.includeResponse"
+                      class="peer sr-only"
+                      type="checkbox"
+                      @change="saveRequestLoggingConfig"
+                    />
+                    <div
+                      class="peer h-5 w-9 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-green-600 peer-checked:after:translate-x-full peer-checked:after:border-white dark:border-gray-600 dark:bg-gray-700"
+                    ></div>
+                  </label>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="font-medium text-gray-700 dark:text-gray-300">错误详情</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">记录错误堆栈信息</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="requestLoggingConfig.includeErrors"
+                      class="peer sr-only"
+                      type="checkbox"
+                      @change="saveRequestLoggingConfig"
+                    />
+                    <div
+                      class="peer h-5 w-9 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-green-600 peer-checked:after:translate-x-full peer-checked:after:border-white dark:border-gray-600 dark:bg-gray-700"
+                    ></div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 敏感数据过滤 -->
+              <div class="mt-6 space-y-3">
+                <h3 class="font-medium text-gray-700 dark:text-gray-300">敏感数据过滤</h3>
+                <div
+                  class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800"
+                >
+                  <div class="flex items-center justify-between">
+                    <label class="flex cursor-pointer items-center">
+                      <input
+                        v-model="requestLoggingConfig.filterSensitiveData"
+                        class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0"
+                        type="checkbox"
+                        @change="saveRequestLoggingConfig"
+                      />
+                      <span
+                        class="ml-3 flex items-center text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        <i class="fas fa-shield-alt mr-2 text-gray-400"></i>
+                        启用敏感数据过滤
+                      </span>
+                    </label>
+                  </div>
+                  <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    自动过滤或脱敏API密钥、令牌、密码等敏感信息
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 统计信息 -->
+          <div
+            class="mb-6 rounded-lg bg-white/80 p-6 shadow-lg backdrop-blur-sm dark:bg-gray-800/80"
+          >
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-gray-200">
+              日志统计信息
+            </h2>
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">今日日志</p>
+                    <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                      {{ requestLoggingStats.todayLogs || 0 }}
+                    </p>
+                  </div>
+                  <i class="fas fa-calendar-day text-xl text-blue-500" />
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">条记录</p>
+              </div>
+
+              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">总日志数</p>
+                    <p class="text-2xl font-bold text-green-600 dark:text-green-400">
+                      {{ requestLoggingStats.totalLogs || 0 }}
+                    </p>
+                  </div>
+                  <i class="fas fa-file-alt text-xl text-green-500" />
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">条记录</p>
+              </div>
+
+              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">存储占用</p>
+                    <p class="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                      {{ formatFileSize(requestLoggingStats.storageUsed || 0) }}
+                    </p>
+                  </div>
+                  <i class="fas fa-hdd text-xl text-orange-500" />
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">磁盘使用</p>
+              </div>
+
+              <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">错误日志</p>
+                    <p class="text-2xl font-bold text-red-600 dark:text-red-400">
+                      {{ requestLoggingStats.errorLogs || 0 }}
+                    </p>
+                  </div>
+                  <i class="fas fa-exclamation-triangle text-xl text-red-500" />
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">条错误</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="flex items-center justify-between">
+            <div class="flex gap-3">
+              <button
+                class="btn btn-primary px-6 py-3"
+                :class="{ 'cursor-not-allowed opacity-50': savingLoggingConfig }"
+                :disabled="savingLoggingConfig"
+                @click="saveRequestLoggingConfig"
+              >
+                <div v-if="savingLoggingConfig" class="loading-spinner mr-2"></div>
+                <i v-else class="fas fa-save mr-2" />
+                {{ savingLoggingConfig ? '保存中...' : '保存配置' }}
+              </button>
+
+              <router-link
+                class="btn bg-green-600 px-6 py-3 text-white hover:bg-green-700 focus:ring-green-500"
+                to="/request-logs"
+              >
+                <i class="fas fa-eye mr-2" />
+                查看日志
+              </router-link>
+
+              <button
+                class="btn bg-yellow-600 px-6 py-3 text-white hover:bg-yellow-700 focus:ring-yellow-500"
+                :disabled="cleaningLogs"
+                @click="cleanupOldLogs"
+              >
+                <div v-if="cleaningLogs" class="loading-spinner mr-2"></div>
+                <i v-else class="fas fa-broom mr-2" />
+                {{ cleaningLogs ? '清理中...' : '清理旧日志' }}
+              </button>
+            </div>
+
+            <div
+              v-if="requestLoggingConfig.updatedAt"
+              class="text-sm text-gray-500 dark:text-gray-400"
+            >
+              <i class="fas fa-clock mr-1" />
+              最后更新：{{ formatDateTime(requestLoggingConfig.updatedAt) }}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1397,6 +1728,8 @@ const sectionWatcher = watch(activeSection, async (newSection) => {
     await loadSchedulingConfig()
   } else if (newSection === 'data-management') {
     await loadDataOverview()
+  } else if (newSection === 'request-logging') {
+    await loadRequestLoggingConfig()
   }
 })
 
@@ -1410,6 +1743,8 @@ onMounted(async () => {
       await loadSchedulingConfig()
     } else if (activeSection.value === 'data-management') {
       await loadDataOverview()
+    } else if (activeSection.value === 'request-logging') {
+      await loadRequestLoggingConfig()
     }
   } catch (error) {
     showToast('加载设置失败', 'error')
@@ -2039,6 +2374,31 @@ const migrating = ref(false)
 const migrationConfig = ref(null)
 const migrationConfigInput = ref()
 
+// 请求日志配置相关变量
+const requestLoggingConfig = ref({
+  enabled: false,
+  level: 'info',
+  retentionDays: 7,
+  maxFileSize: 10,
+  maxFiles: 10,
+  includeHeaders: true,
+  includeBody: false,
+  includeResponse: false,
+  includeErrors: true,
+  filterSensitiveData: true,
+  updatedAt: null
+})
+
+const requestLoggingStats = ref({
+  todayLogs: 0,
+  totalLogs: 0,
+  storageUsed: 0,
+  errorLogs: 0
+})
+
+const savingLoggingConfig = ref(false)
+const cleaningLogs = ref(false)
+
 // 数据管理相关函数
 
 // 获取数据概览
@@ -2290,6 +2650,115 @@ const performMigration = async () => {
 // 格式化日期
 const formatDate = (dateString) => {
   return new Date(dateString).toLocaleString('zh-CN')
+}
+
+// 请求日志配置相关函数
+
+// 加载请求日志配置
+const loadRequestLoggingConfig = async () => {
+  if (!isMounted.value) return
+  try {
+    const response = await apiClient.get('/admin/request-logs/config', {
+      signal: abortController.value.signal
+    })
+    if (response.success && isMounted.value) {
+      Object.assign(requestLoggingConfig.value, response.data)
+      // 加载统计信息
+      await loadRequestLoggingStats()
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    console.error('加载请求日志配置失败:', error)
+  }
+}
+
+// 保存请求日��配置
+const saveRequestLoggingConfig = async () => {
+  if (!isMounted.value) return
+  savingLoggingConfig.value = true
+  try {
+    const response = await apiClient.post(
+      '/admin/request-logs/config',
+      requestLoggingConfig.value,
+      {
+        signal: abortController.value.signal
+      }
+    )
+    if (response.success && isMounted.value) {
+      requestLoggingConfig.value.updatedAt = new Date().toISOString()
+      showToast('请求日志配置已保存', 'success')
+      await loadRequestLoggingStats()
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    showToast('保存配置失败', 'error')
+    console.error(error)
+  } finally {
+    if (isMounted.value) {
+      savingLoggingConfig.value = false
+    }
+  }
+}
+
+// 加载请求日志统计信息
+const loadRequestLoggingStats = async () => {
+  if (!isMounted.value) return
+  try {
+    const response = await apiClient.get('/admin/request-logs/stats', {
+      signal: abortController.value.signal
+    })
+    if (response.success && isMounted.value) {
+      Object.assign(requestLoggingStats.value, response.data)
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    console.error('加载请求日志统计失败:', error)
+  }
+}
+
+// 清理旧日志
+const cleanupOldLogs = async () => {
+  if (!isMounted.value) return
+
+  if (!confirm('确定要清理过期的日志文件吗？\n\n这将删除超过保留期限的所有日志记录。')) {
+    return
+  }
+
+  cleaningLogs.value = true
+  try {
+    const response = await apiClient.post(
+      '/admin/request-logs/cleanup',
+      {},
+      {
+        signal: abortController.value.signal
+      }
+    )
+    if (response.success && isMounted.value) {
+      showToast(`清理完成，删除了 ${response.data.deletedFiles} 个文件`, 'success')
+      await loadRequestLoggingStats()
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') return
+    if (!isMounted.value) return
+    showToast('清理失败', 'error')
+    console.error(error)
+  } finally {
+    if (isMounted.value) {
+      cleaningLogs.value = false
+    }
+  }
+}
+
+// 格式化文件大小
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 // 格式化日期时间

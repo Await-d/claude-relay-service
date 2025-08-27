@@ -532,6 +532,93 @@ class DatabaseAdapter {
   async deleteSystemSchedulingConfig() {
     throw new Error('deleteSystemSchedulingConfig method must be implemented by subclass')
   }
+
+  // ==================== 请求日志管理 (8个方法) ====================
+
+  /**
+   * 记录请求日志
+   * @param {string} keyId API Key ID
+   * @param {Object} logData 日志数据
+   * @param {number} ttl 过期时间（秒），默认7天
+   * @returns {Promise<string>} 日志ID
+   */
+  async logRequest(keyId, logData, ttl = 604800) {
+    throw new Error('logRequest method must be implemented by subclass')
+  }
+
+  /**
+   * 搜索请求日志
+   * @param {Object} query 查询条件
+   * @param {Object} options 查询选项（分页、排序等）
+   * @returns {Promise<Array>} 日志数组
+   */
+  async searchLogs(query = {}, options = {}) {
+    throw new Error('searchLogs method must be implemented by subclass')
+  }
+
+  /**
+   * 计算符合条件的日志数量
+   * @param {Object} query 查询条件
+   * @returns {Promise<number>} 日志数量
+   */
+  async countLogs(query = {}) {
+    throw new Error('countLogs method must be implemented by subclass')
+  }
+
+  /**
+   * 删除符合条件的日志
+   * @param {Object} query 删除条件
+   * @returns {Promise<number>} 删除的日志数量
+   */
+  async deleteLogs(query = {}) {
+    throw new Error('deleteLogs method must be implemented by subclass')
+  }
+
+  /**
+   * 聚合统计日志数据
+   * @param {Object} query 统计条件
+   * @returns {Promise<Object>} 统计结果
+   */
+  async aggregateLogs(query = {}) {
+    throw new Error('aggregateLogs method must be implemented by subclass')
+  }
+
+  /**
+   * 导出日志数据
+   * @param {Object} query 导出条件
+   * @param {string} format 导出格式（json/csv）
+   * @param {string} filename 文件名
+   * @returns {Promise<string>} 导出文件路径
+   */
+  async exportLogs(query = {}, format = 'json', filename = 'logs') {
+    throw new Error('exportLogs method must be implemented by subclass')
+  }
+
+  /**
+   * 删除过期的日志记录
+   * @param {string} cutoffDate 截止日期（ISO字符串）
+   * @returns {Promise<number>} 删除的日志数量
+   */
+  async deleteExpiredLogs(cutoffDate) {
+    throw new Error('deleteExpiredLogs method must be implemented by subclass')
+  }
+
+  /**
+   * 获取请求日志配置
+   * @returns {Promise<Object>} 日志配置对象
+   */
+  async getRequestLogsConfig() {
+    throw new Error('getRequestLogsConfig method must be implemented by subclass')
+  }
+
+  /**
+   * 设置请求日志配置
+   * @param {Object} config 配置对象
+   * @returns {Promise<void>}
+   */
+  async setRequestLogsConfig(config) {
+    throw new Error('setRequestLogsConfig method must be implemented by subclass')
+  }
 }
 
 module.exports = DatabaseAdapter

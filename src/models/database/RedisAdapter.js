@@ -233,22 +233,14 @@ class RedisAdapter extends DatabaseAdapter {
     // 如果参数是对象形式 hset(key, {field1: value1, field2: value2})
     if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
       const obj = args[0]
+      const fields = Object.keys(obj)
 
-      // 将对象转换为键值对数组格式，适用于现代hset
-      const fields = []
-      for (const [field, value] of Object.entries(obj)) {
-        // 确保所有值都转换为字符串，避免undefined或null导致HSET参数不完整
-        const stringValue = value === null || value === undefined ? '' : String(value)
-        fields.push(field, stringValue)
+      // 对于低版本Redis，使用pipeline逐一设置字段
+      const pipeline = client.pipeline()
+      for (const field of fields) {
+        pipeline.hset(key, field, obj[field])
       }
-
-      // 调试输出
-      logger.debug(`hsetCompat: key=${key}, fields=${JSON.stringify(fields)}, length=${fields.length}`)
-
-      if (fields.length > 0) {
-        return await client.hset(key, ...fields)
-      }
-      return 0
+      return await pipeline.exec()
     }
 
     // 其他情况直接调用原生hset
@@ -2042,6 +2034,832 @@ class RedisAdapter extends DatabaseAdapter {
   async deleteSystemSchedulingConfig() {
     const key = 'system:scheduling_config'
     return await this.client.del(key)
+  }
+
+  /**
+   * 记录请求日志到Redis（优化索引版本）
+   * @param {string} keyId API Key ID
+   * @param {Object} logData 日志数据对象
+   * @param {number} ttl 过期时间（秒），默认604800秒（7天）
+   * @returns {Promise<string>} 日志唯一ID
+   */
+  async logRequest(keyId, logData, ttl = 604800) {
+    try {
+      const now = new Date()
+      const today = getDateStringInTimezone(now)
+      const timestamp = now.getTime()
+      const logId = `request_log:${keyId}:${timestamp}`
+
+      const defaultData = {
+        timestamp,
+        keyId,
+        path: '',
+        method: '',
+        status: 0,
+        model: '',
+        tokens: 0,
+        responseTime: 0,
+        error: null
+      }
+
+      const finalLogData = { ...defaultData, ...logData }
+
+      const client = this.getClientSafe()
+
+      // 使用Pipeline批量操作提升性能
+      const pipeline = client.pipeline()
+
+      // 1. 存储日志数据
+      pipeline.hmset(logId, finalLogData)
+      pipeline.expire(logId, ttl)
+
+      // 2. 建立多维度索引以优化查询
+      const dailyIndex = `request_log_index:${keyId}:${today}`
+      pipeline.sadd(dailyIndex, logId)
+      pipeline.expire(dailyIndex, ttl)
+
+      // 3. 按状态码索引（用于快速查找错误日志）
+      if (finalLogData.status) {
+        const statusIndex = `request_log_status:${finalLogData.status}:${today}`
+        pipeline.sadd(statusIndex, logId)
+        pipeline.expire(statusIndex, ttl)
+      }
+
+      // 4. 按模型索引（用于模型使用统计）
+      if (finalLogData.model) {
+        const modelIndex = `request_log_model:${finalLogData.model}:${today}`
+        pipeline.sadd(modelIndex, logId)
+        pipeline.expire(modelIndex, ttl)
+      }
+
+      // 5. 全局时间索引（用于时间范围查询优化）
+      const hourKey = `request_log_time:${Math.floor(timestamp / 3600000)}`
+      pipeline.sadd(hourKey, logId)
+      pipeline.expire(hourKey, ttl)
+
+      // 6. 错误日志特殊索引
+      if (finalLogData.error && finalLogData.error !== 'null') {
+        const errorIndex = `request_log_errors:${today}`
+        pipeline.sadd(errorIndex, logId)
+        pipeline.expire(errorIndex, ttl)
+      }
+
+      await pipeline.exec()
+
+      return logId
+    } catch (error) {
+      logger.error('Failed to log request:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 搜索请求日志（优化版本）
+   * @param {Object} query 查询条件
+   * @param {Object} options 查询选项（分页、排序等）
+   * @returns {Promise<Array>} 日志数组
+   */
+  async searchLogs(query = {}, options = {}) {
+    const { offset = 0, limit = 20, sortBy = 'timestamp', sortOrder = 'desc' } = options
+
+    try {
+      const client = this.getClientSafe()
+      let matchingLogs = []
+
+      // 优化策略：基于查询条件选择最佳搜索方法
+      if (query.status && query.dateRange) {
+        // 优先使用状态码索引
+        matchingLogs = await this._searchLogsByStatusAndDate(client, query.status, query.dateRange)
+      } else if (query.model && query.dateRange) {
+        // 使用模型索引
+        matchingLogs = await this._searchLogsByModelAndDate(client, query.model, query.dateRange)
+      } else if (query.hasError && query.dateRange) {
+        // 使用错误索引
+        matchingLogs = await this._searchErrorLogsByDate(client, query.dateRange)
+      } else if (query.keyId && query.dateRange) {
+        // 如果有 keyId 和日期范围，使用日志索引
+        matchingLogs = await this._searchLogsByKeyIdAndDate(client, query.keyId, query.dateRange)
+      } else if (query.keyId) {
+        // 如果只有 keyId，使用更精确的模式匹配
+        const pattern = `request_log:${query.keyId}:*`
+        matchingLogs = await client.keys(pattern)
+      } else if (query.dateRange) {
+        // 如果只有日期范围，使用日志索引
+        matchingLogs = await this._searchLogsByDateRange(client, query.dateRange)
+      } else if (query.status) {
+        // 仅状态码查询，使用今日状态码索引
+        const today = getDateStringInTimezone()
+        const statusIndex = `request_log_status:${query.status}:${today}`
+        try {
+          matchingLogs = await client.smembers(statusIndex)
+        } catch (error) {
+          matchingLogs = []
+        }
+      } else if (query.model) {
+        // 仅模型查询，使用今日模型索引
+        const today = getDateStringInTimezone()
+        const modelIndex = `request_log_model:${query.model}:${today}`
+        try {
+          matchingLogs = await client.smembers(modelIndex)
+        } catch (error) {
+          matchingLogs = []
+        }
+      } else {
+        // 降级到全量扫描，但限制数量
+        const allKeys = await client.keys('request_log:*')
+        // 按时间戳排序并截取最近的记录，避免内存溢出
+        matchingLogs = allKeys
+          .sort((a, b) => {
+            const timestampA = parseInt(a.split(':')[2]) || 0
+            const timestampB = parseInt(b.split(':')[2]) || 0
+            return sortOrder === 'desc' ? timestampB - timestampA : timestampA - timestampB
+          })
+          .slice(0, Math.min(1000, offset + limit * 5)) // 限制最大扫描量
+      }
+
+      // 应用其他过滤条件
+      if (Object.keys(query).length > 0) {
+        matchingLogs = await this._filterLogsByQuery(client, matchingLogs, query)
+      }
+
+      // 排序（如果还未排序）
+      if (!query.keyId || Object.keys(query).length > 1) {
+        matchingLogs.sort((a, b) => {
+          const timestampA = parseInt(a.split(':')[2]) || 0
+          const timestampB = parseInt(b.split(':')[2]) || 0
+          return sortOrder === 'desc' ? timestampB - timestampA : timestampA - timestampB
+        })
+      }
+
+      // 分页
+      const paginatedLogs = matchingLogs.slice(offset, offset + limit)
+
+      // 批量获取日志详情
+      const pipeline = client.pipeline()
+      paginatedLogs.forEach((logKey) => pipeline.hgetall(logKey))
+
+      const results = await pipeline.exec()
+      const logs = results
+        .map(([err, logData], index) => {
+          if (err || !logData || Object.keys(logData).length === 0) return null
+          return {
+            ...logData,
+            logId: paginatedLogs[index],
+            timestamp: parseInt(logData.timestamp) || 0
+          }
+        })
+        .filter(Boolean)
+
+      return logs
+    } catch (error) {
+      logger.error('Failed to search logs:', error)
+      return []
+    }
+  }
+
+  /**
+   * 统计日志数量（优化版本）
+   * @param {Object} query 查询条件
+   * @returns {Promise<number>} 匹配的日志数量
+   */
+  async countLogs(query = {}) {
+    try {
+      const client = this.getClientSafe()
+      let matchingLogs = []
+
+      // 使用与 searchLogs 相同的优化策略
+      if (query.status && query.dateRange) {
+        matchingLogs = await this._searchLogsByStatusAndDate(client, query.status, query.dateRange)
+      } else if (query.model && query.dateRange) {
+        matchingLogs = await this._searchLogsByModelAndDate(client, query.model, query.dateRange)
+      } else if (query.hasError && query.dateRange) {
+        matchingLogs = await this._searchErrorLogsByDate(client, query.dateRange)
+      } else if (query.keyId && query.dateRange) {
+        matchingLogs = await this._searchLogsByKeyIdAndDate(client, query.keyId, query.dateRange)
+      } else if (query.keyId) {
+        const pattern = `request_log:${query.keyId}:*`
+        matchingLogs = await client.keys(pattern)
+      } else if (query.dateRange) {
+        matchingLogs = await this._searchLogsByDateRange(client, query.dateRange)
+      } else if (query.status) {
+        const today = getDateStringInTimezone()
+        const statusIndex = `request_log_status:${query.status}:${today}`
+        try {
+          matchingLogs = await client.smembers(statusIndex)
+        } catch (error) {
+          matchingLogs = []
+        }
+      } else if (query.model) {
+        const today = getDateStringInTimezone()
+        const modelIndex = `request_log_model:${query.model}:${today}`
+        try {
+          matchingLogs = await client.smembers(modelIndex)
+        } catch (error) {
+          matchingLogs = []
+        }
+      } else {
+        // 全量扫描时，可以直接返回键数量而不需要获取内容
+        matchingLogs = await client.keys('request_log:*')
+      }
+
+      // 应用其他过滤条件
+      if (Object.keys(query).length > 0 && !(query.keyId && Object.keys(query).length === 1)) {
+        matchingLogs = await this._filterLogsByQuery(client, matchingLogs, query)
+      }
+
+      return matchingLogs.length
+    } catch (error) {
+      logger.error('Failed to count logs:', error)
+      return 0
+    }
+  }
+
+  /**
+   * 聚合日志统计
+   * @param {Object} query 查询条件
+   * @returns {Promise<Object>} 聚合统计结果
+   */
+  async aggregateLogs(query = {}) {
+    try {
+      const client = this.getClientSafe()
+      let matchingLogs = []
+
+      // 使用与 searchLogs 相同的优化策略
+      if (query.status && query.dateRange) {
+        matchingLogs = await this._searchLogsByStatusAndDate(client, query.status, query.dateRange)
+      } else if (query.model && query.dateRange) {
+        matchingLogs = await this._searchLogsByModelAndDate(client, query.model, query.dateRange)
+      } else if (query.hasError && query.dateRange) {
+        matchingLogs = await this._searchErrorLogsByDate(client, query.dateRange)
+      } else if (query.keyId && query.dateRange) {
+        matchingLogs = await this._searchLogsByKeyIdAndDate(client, query.keyId, query.dateRange)
+      } else if (query.keyId) {
+        const pattern = `request_log:${query.keyId}:*`
+        matchingLogs = await client.keys(pattern)
+      } else if (query.dateRange) {
+        matchingLogs = await this._searchLogsByDateRange(client, query.dateRange)
+      } else {
+        matchingLogs = await client.keys('request_log:*')
+      }
+
+      // 应用其他过滤条件
+      if (Object.keys(query).length > 0) {
+        matchingLogs = await this._filterLogsByQuery(client, matchingLogs, query)
+      }
+
+      const pipeline = client.pipeline()
+      matchingLogs.forEach((logKey) => pipeline.hgetall(logKey))
+
+      const results = await pipeline.exec()
+
+      const stats = {
+        totalRequests: 0,
+        totalTokens: 0,
+        totalResponseTime: 0,
+        statusCodes: {},
+        models: {},
+        apiKeys: {}
+      }
+
+      results.forEach(([err, logData]) => {
+        if (err || !logData) return
+
+        stats.totalRequests++
+        stats.totalTokens += parseInt(logData.tokens) || 0
+        stats.totalResponseTime += parseFloat(logData.responseTime) || 0
+
+        // 状态码统计
+        const status = logData.status || 'unknown'
+        stats.statusCodes[status] = (stats.statusCodes[status] || 0) + 1
+
+        // 模型统计
+        const model = logData.model || 'unknown'
+        stats.models[model] = (stats.models[model] || 0) + 1
+
+        // API Key统计
+        const keyId = logData.keyId || 'unknown'
+        stats.apiKeys[keyId] = (stats.apiKeys[keyId] || 0) + 1
+      })
+
+      return stats
+    } catch (error) {
+      logger.error('Failed to aggregate logs:', error)
+      return {}
+    }
+  }
+
+  /**
+   * 通过 keyId 和日期范围搜索日志
+   * @private
+   * @param {Object} client Redis客户端
+   * @param {string} keyId API Key ID
+   * @param {Object} dateRange 日期范围 {start, end}
+   * @returns {Promise<Array>} 匹配的日志键数组
+   */
+  async _searchLogsByKeyIdAndDate(client, keyId, dateRange) {
+    const { start, end } = dateRange
+    const startTimestamp = new Date(start).getTime()
+    const endTimestamp = new Date(end).getTime()
+
+    // 使用更精确的模式匹配
+    const pattern = `request_log:${keyId}:*`
+    const logs = await client.keys(pattern)
+
+    // 过滤时间范围
+    return logs.filter((logKey) => {
+      const timestamp = parseInt(logKey.split(':')[2]) || 0
+      return timestamp >= startTimestamp && timestamp <= endTimestamp
+    })
+  }
+
+  /**
+   * 通过日期范围搜索日志（索引优化版本）
+   * @private
+   * @param {Object} client Redis客户端
+   * @param {Object} dateRange 日期范围 {start, end}
+   * @returns {Promise<Array>} 匹配的日志键数组
+   */
+  async _searchLogsByDateRange(client, dateRange) {
+    const { start, end } = dateRange
+    const startTimestamp = new Date(start).getTime()
+    const endTimestamp = new Date(end).getTime()
+
+    // 优化策略：使用时间索引而不是全量扫描
+    const startHour = Math.floor(startTimestamp / 3600000)
+    const endHour = Math.floor(endTimestamp / 3600000)
+
+    const allLogs = new Set()
+
+    // 如果时间范围跨度不大（少于24小时），使用小时索引
+    if (endHour - startHour <= 24) {
+      for (let hour = startHour; hour <= endHour; hour++) {
+        const hourKey = `request_log_time:${hour}`
+        try {
+          const hourLogs = await client.smembers(hourKey)
+          hourLogs.forEach((logKey) => allLogs.add(logKey))
+        } catch (error) {
+          // 索引不存在时忽略错误
+        }
+      }
+
+      // 转换为数组并进行精确时间过滤
+      return Array.from(allLogs).filter((logKey) => {
+        const timestamp = parseInt(logKey.split(':')[2]) || 0
+        return timestamp >= startTimestamp && timestamp <= endTimestamp
+      })
+    } else {
+      // 长时间范围降级到传统方法
+      const allLogKeys = await client.keys('request_log:*')
+      return allLogKeys.filter((logKey) => {
+        const timestamp = parseInt(logKey.split(':')[2]) || 0
+        return timestamp >= startTimestamp && timestamp <= endTimestamp
+      })
+    }
+  }
+
+  /**
+   * 通过状态码和日期范围搜索日志
+   * @private
+   * @param {Object} client Redis客户端
+   * @param {string} status 状态码
+   * @param {Object} dateRange 日期范围
+   * @returns {Promise<Array>} 匹配的日志键数组
+   */
+  async _searchLogsByStatusAndDate(client, status, dateRange) {
+    const { start, end } = dateRange
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    const results = new Set()
+
+    // 遍历日期范围内的每一天
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = getDateStringInTimezone(d)
+      const statusIndex = `request_log_status:${status}:${dateStr}`
+
+      try {
+        const dayLogs = await client.smembers(statusIndex)
+        dayLogs.forEach((logKey) => results.add(logKey))
+      } catch (error) {
+        // 索引不存在时忽略
+      }
+    }
+
+    return Array.from(results)
+  }
+
+  /**
+   * 通过模型和日期范围搜索日志
+   * @private
+   * @param {Object} client Redis客户端
+   * @param {string} model 模型名称
+   * @param {Object} dateRange 日期范围
+   * @returns {Promise<Array>} 匹配的日志键数组
+   */
+  async _searchLogsByModelAndDate(client, model, dateRange) {
+    const { start, end } = dateRange
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    const results = new Set()
+
+    // 遍历日期范围内的每一天
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = getDateStringInTimezone(d)
+      const modelIndex = `request_log_model:${model}:${dateStr}`
+
+      try {
+        const dayLogs = await client.smembers(modelIndex)
+        dayLogs.forEach((logKey) => results.add(logKey))
+      } catch (error) {
+        // 索引不存在时忽略
+      }
+    }
+
+    return Array.from(results)
+  }
+
+  /**
+   * 通过日期范围搜索错误日志
+   * @private
+   * @param {Object} client Redis客户端
+   * @param {Object} dateRange 日期范围
+   * @returns {Promise<Array>} 匹配的错误日志键数组
+   */
+  async _searchErrorLogsByDate(client, dateRange) {
+    const { start, end } = dateRange
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    const results = new Set()
+
+    // 遍历日期范围内的每一天
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = getDateStringInTimezone(d)
+      const errorIndex = `request_log_errors:${dateStr}`
+
+      try {
+        const dayLogs = await client.smembers(errorIndex)
+        dayLogs.forEach((logKey) => results.add(logKey))
+      } catch (error) {
+        // 索引不存在时忽略
+      }
+    }
+
+    return Array.from(results)
+  }
+
+  /**
+   * 通过查询条件过滤日志
+   * @private
+   * @param {Object} client Redis客户端
+   * @param {Array} logKeys 要过滤的日志键数组
+   * @param {Object} query 查询条件
+   * @returns {Promise<Array>} 过滤后的日志键数组
+   */
+  async _filterLogsByQuery(client, logKeys, query) {
+    if (logKeys.length === 0) return []
+
+    // 批量获取日志数据以支持复杂过滤
+    const pipeline = client.pipeline()
+    logKeys.forEach((logKey) => pipeline.hgetall(logKey))
+
+    const results = await pipeline.exec()
+    const filteredKeys = []
+
+    results.forEach(([err, logData], index) => {
+      if (err || !logData) return
+
+      const logKey = logKeys[index]
+      let matches = true
+
+      // 应用各种过滤条件
+      for (const [key, value] of Object.entries(query)) {
+        if (!this._checkLogFieldMatch(logData, logKey, key, value)) {
+          matches = false
+          break
+        }
+      }
+
+      if (matches) {
+        filteredKeys.push(logKey)
+      }
+    })
+
+    return filteredKeys
+  }
+
+  /**
+   * 检查日志字段是否匹配查询条件（增强版本）
+   * @private
+   * @param {Object} logData 日志数据
+   * @param {string} logKey 日志键
+   * @param {string} fieldName 字段名
+   * @param {*} value 期望值
+   * @returns {boolean} 是否匹配
+   */
+  _checkLogFieldMatch(logData, logKey, fieldName, value) {
+    switch (fieldName) {
+      case 'keyId':
+        return logKey.includes(`:${value}:`) || logData.keyId === value
+
+      case 'status':
+        return logData.status === String(value)
+
+      case 'method':
+        return logData.method === value
+
+      case 'path':
+        return logData.path && logData.path.includes(value)
+
+      case 'model':
+        return logData.model === value
+
+      case 'dateRange':
+        // 日期范围已在上层方法中处理
+        return true
+
+      case 'minTokens':
+        return parseInt(logData.tokens) >= parseInt(value)
+
+      case 'maxTokens':
+        return parseInt(logData.tokens) <= parseInt(value)
+
+      case 'minResponseTime':
+        return parseFloat(logData.responseTime) >= parseFloat(value)
+
+      case 'maxResponseTime':
+        return parseFloat(logData.responseTime) <= parseFloat(value)
+
+      case 'hasError':
+        return value
+          ? logData.error && logData.error !== 'null'
+          : !logData.error || logData.error === 'null'
+
+      default:
+        // 通用字段匹配
+        return logData[fieldName] === value
+    }
+  }
+
+  /**
+   * 导出日志到文件
+   * @param {Object} query 查询条件
+   * @param {string} format 导出格式（csv/json）
+   * @param {string} filename 导出文件名
+   * @returns {Promise<string>} 导出文件路径
+   */
+  async exportLogs(query = {}, format = 'csv', filename) {
+    const path = require('path')
+    const fs = require('fs')
+
+    try {
+      // 搜索日志
+      const logs = await this.searchLogs(query)
+
+      // 确定导出目录
+      const exportDir = path.join(__dirname, '../../../logs/exports')
+      fs.mkdirSync(exportDir, { recursive: true })
+
+      const exportPath = path.join(exportDir, filename)
+
+      if (format === 'json') {
+        fs.writeFileSync(exportPath, JSON.stringify(logs, null, 2))
+      } else {
+        // CSV导出
+        const csvHeader = [
+          'logId',
+          'timestamp',
+          'keyId',
+          'path',
+          'method',
+          'status',
+          'model',
+          'tokens',
+          'responseTime',
+          'error'
+        ]
+        const csvContent = [
+          csvHeader.join(','),
+          ...logs.map((log) =>
+            csvHeader
+              .map((header) => `"${String(log[header] || '').replace(/"/g, '""')}"`)
+              .join(',')
+          )
+        ].join('\n')
+
+        fs.writeFileSync(exportPath, csvContent)
+      }
+
+      return exportPath
+    } catch (error) {
+      logger.error('Failed to export logs:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 删除指定条件的日志（优化版本）
+   * @param {Object} query 查询条件
+   * @returns {Promise<number>} 删除的日志数量
+   */
+  async deleteLogs(query = {}) {
+    try {
+      const client = this.getClientSafe()
+      let matchingLogs = []
+
+      // 使用优化的搜索策略
+      if (query.status && query.dateRange) {
+        matchingLogs = await this._searchLogsByStatusAndDate(client, query.status, query.dateRange)
+      } else if (query.model && query.dateRange) {
+        matchingLogs = await this._searchLogsByModelAndDate(client, query.model, query.dateRange)
+      } else if (query.hasError && query.dateRange) {
+        matchingLogs = await this._searchErrorLogsByDate(client, query.dateRange)
+      } else if (query.keyId && query.dateRange) {
+        matchingLogs = await this._searchLogsByKeyIdAndDate(client, query.keyId, query.dateRange)
+      } else if (query.keyId) {
+        const pattern = `request_log:${query.keyId}:*`
+        matchingLogs = await client.keys(pattern)
+      } else if (query.dateRange) {
+        matchingLogs = await this._searchLogsByDateRange(client, query.dateRange)
+      } else if (query.status) {
+        const today = getDateStringInTimezone()
+        const statusIndex = `request_log_status:${query.status}:${today}`
+        try {
+          matchingLogs = await client.smembers(statusIndex)
+        } catch (error) {
+          matchingLogs = []
+        }
+      } else if (query.model) {
+        const today = getDateStringInTimezone()
+        const modelIndex = `request_log_model:${query.model}:${today}`
+        try {
+          matchingLogs = await client.smembers(modelIndex)
+        } catch (error) {
+          matchingLogs = []
+        }
+      } else {
+        matchingLogs = await client.keys('request_log:*')
+      }
+
+      // 应用其他过滤条件
+      if (Object.keys(query).length > 0 && !(query.keyId && Object.keys(query).length === 1)) {
+        matchingLogs = await this._filterLogsByQuery(client, matchingLogs, query)
+      }
+
+      // 分批删除以避免Redis命令过长
+      let totalDeleted = 0
+      const batchSize = 100 // 每批删除100个key
+
+      for (let i = 0; i < matchingLogs.length; i += batchSize) {
+        const batch = matchingLogs.slice(i, i + batchSize)
+        if (batch.length > 0) {
+          await client.del(...batch)
+          totalDeleted += batch.length
+        }
+      }
+
+      // 同时清理相关索引
+      await this._cleanupLogIndexes(client, matchingLogs)
+
+      logger.info(`成功删除 ${totalDeleted} 条日志记录`)
+      return totalDeleted
+    } catch (error) {
+      logger.error('Failed to delete logs:', error)
+      return 0
+    }
+  }
+
+  /**
+   * 删除过期的日志记录（内存优化版本）
+   * @param {string} cutoffDate 截止日期（ISO字符串）
+   * @returns {Promise<number>} 删除的日志数量
+   */
+  async deleteExpiredLogs(cutoffDate) {
+    try {
+      const client = this.getClientSafe()
+      const cutoffTimestamp = new Date(cutoffDate).getTime()
+
+      logger.info(`开始清理 ${cutoffDate} 之前的过期日志`)
+
+      // 获取所有请求日志键
+      const allLogKeys = await client.keys('request_log:*')
+      logger.info(`发现 ${allLogKeys.length} 个日志文件`)
+
+      // 分批处理以减少内存使用
+      const batchSize = 500
+      const expiredLogs = []
+
+      for (let i = 0; i < allLogKeys.length; i += batchSize) {
+        const batch = allLogKeys.slice(i, i + batchSize)
+
+        // 首先从key中提取时间戳进行快速筛选
+        const potentialExpired = batch.filter((logKey) => {
+          const keyTimestamp = parseInt(logKey.split(':')[2]) || 0
+          return keyTimestamp > 0 && keyTimestamp < cutoffTimestamp
+        })
+
+        // 对于可能过期的日志，批量获取详细信息确认
+        if (potentialExpired.length > 0) {
+          const pipeline = client.pipeline()
+          potentialExpired.forEach((logKey) => pipeline.hget(logKey, 'timestamp'))
+
+          const results = await pipeline.exec()
+
+          results.forEach(([err, timestamp], index) => {
+            if (!err && timestamp && parseInt(timestamp) < cutoffTimestamp) {
+              expiredLogs.push(potentialExpired[index])
+            }
+          })
+        }
+
+        // 进度报告
+        if (i + batchSize < allLogKeys.length) {
+          logger.debug(
+            `已处理 ${Math.min(i + batchSize, allLogKeys.length)}/${allLogKeys.length} 个日志，发现 ${expiredLogs.length} 个过期日志`
+          )
+        }
+      }
+
+      // 分批删除过期日志
+      let totalDeleted = 0
+      const deleteBatchSize = 100
+
+      for (let i = 0; i < expiredLogs.length; i += deleteBatchSize) {
+        const batch = expiredLogs.slice(i, i + deleteBatchSize)
+        if (batch.length > 0) {
+          await client.del(...batch)
+          totalDeleted += batch.length
+        }
+      }
+
+      // 清理相关索引
+      await this._cleanupLogIndexes(client, expiredLogs)
+
+      logger.info(`清理过期日志完成: 删除 ${totalDeleted} 条记录`)
+      return totalDeleted
+    } catch (error) {
+      logger.error('Failed to delete expired logs:', error)
+      return 0
+    }
+  }
+
+  /**
+   * 清理日志索引
+   * @private
+   * @param {Object} client Redis客户端
+   * @param {Array} deletedLogKeys 已删除的日志键数组
+   * @returns {Promise<void>}
+   */
+  async _cleanupLogIndexes(client, deletedLogKeys) {
+    if (deletedLogKeys.length === 0) return
+
+    try {
+      // 获取所有索引键
+      const indexKeys = await client.keys('request_log_index:*')
+
+      if (indexKeys.length > 0) {
+        const pipeline = client.pipeline()
+
+        // 批量清理索引
+        indexKeys.forEach((indexKey) => {
+          deletedLogKeys.forEach((logKey) => {
+            pipeline.srem(indexKey, logKey)
+          })
+        })
+
+        await pipeline.exec()
+        logger.debug(`清理了 ${indexKeys.length} 个索引中的 ${deletedLogKeys.length} 条记录`)
+      }
+    } catch (error) {
+      logger.warn('索引清理失败，但不影响日志删除:', error.message)
+    }
+  }
+
+  /**
+   * 获取请求日志配置
+   * @returns {Promise<Object>} 日志配置对象
+   */
+  async getRequestLogsConfig() {
+    try {
+      const configStr = await this.get('request_logs_config')
+      return configStr ? JSON.parse(configStr) : null
+    } catch (error) {
+      logger.error('Failed to get request logs config:', error)
+      return null
+    }
+  }
+
+  /**
+   * 设置请求日志配置
+   * @param {Object} config 配置对象
+   * @returns {Promise<void>}
+   */
+  async setRequestLogsConfig(config) {
+    try {
+      await this.set('request_logs_config', JSON.stringify(config))
+      logger.info('请求日志配置已更新')
+    } catch (error) {
+      logger.error('Failed to set request logs config:', error)
+      throw error
+    }
   }
 }
 

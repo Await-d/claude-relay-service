@@ -35,7 +35,7 @@ const tabRouteMap = {
   dashboard: '/dashboard',
   apiKeys: '/api-keys',
   accounts: '/accounts',
-  'data-management': '/data-management',
+  requestLogs: '/request-logs',
   tutorial: '/tutorial',
   settings: '/settings'
 }
