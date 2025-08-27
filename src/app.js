@@ -24,6 +24,7 @@ const openaiRoutes = require('./routes/openaiRoutes')
 const azureOpenaiRoutes = require('./routes/azureOpenaiRoutes')
 const webhookRoutes = require('./routes/webhook')
 const dataManagementRoutes = require('./routes/dataManagement')
+const requestLogsRoutes = require('./routes/requestLogs')
 
 // Import middleware
 const {
@@ -246,6 +247,7 @@ class Application {
       this.app.use('/azure', azureOpenaiRoutes)
       this.app.use('/admin/webhook', webhookRoutes)
       this.app.use('/admin/data', dataManagementRoutes)
+      this.app.use('/admin/request-logs', requestLogsRoutes)
 
       // 🏠 根路径重定向到新版管理界面
       this.app.get('/', (req, res) => {
