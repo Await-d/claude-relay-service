@@ -5,7 +5,7 @@ const geminiAccountService = require('./geminiAccountService')
 const openaiAccountService = require('./openaiAccountService')
 const azureOpenaiAccountService = require('./azureOpenaiAccountService')
 const accountGroupService = require('./accountGroupService')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 
@@ -41,7 +41,7 @@ class UnifiedClaudeScheduler {
   async _getSystemDefaultStrategy() {
     try {
       // 首先尝试从Redis获取动态配置
-      const systemConfig = await redis.getSystemSchedulingConfig()
+      const systemConfig = await database.getSystemSchedulingConfig()
       if (systemConfig && systemConfig.defaultStrategy) {
         return systemConfig.defaultStrategy
       }
@@ -70,7 +70,7 @@ class UnifiedClaudeScheduler {
         }
 
         // 普通专属账户
-        const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId)
+        const boundAccount = await database.getClaudeAccount(apiKeyData.claudeAccountId)
         if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
           logger.info(
             `🎯 Using bound dedicated Claude OAuth account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`
@@ -281,7 +281,7 @@ class UnifiedClaudeScheduler {
     // 如果API Key绑定了专属账户，优先返回
     // 1. 检查Claude OAuth账户绑定
     if (apiKeyData.claudeAccountId) {
-      const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId)
+      const boundAccount = await database.getClaudeAccount(apiKeyData.claudeAccountId)
       if (
         boundAccount &&
         boundAccount.isActive === 'true' &&
@@ -483,7 +483,7 @@ class UnifiedClaudeScheduler {
     }
 
     // 获取官方Claude账户（共享池）
-    const claudeAccounts = await redis.getAllClaudeAccounts()
+    const claudeAccounts = await database.getAllClaudeAccounts()
     for (const account of claudeAccounts) {
       if (
         account.isActive === 'true' &&
@@ -817,7 +817,7 @@ class UnifiedClaudeScheduler {
       }
 
       // 保持原有的统计逻辑用于调度器内部统计
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const statsKey = `${this.USAGE_STATS_PREFIX}${accountType}:${accountId}`
 
       // 增加使用次数
@@ -835,7 +835,7 @@ class UnifiedClaudeScheduler {
   // 📈 获取账户使用统计
   async getAccountUsageCount(accountId, accountType) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const statsKey = `${this.USAGE_STATS_PREFIX}${accountType}:${accountId}`
       const count = await client.get(statsKey)
       return parseInt(count) || 0
@@ -1039,7 +1039,7 @@ class UnifiedClaudeScheduler {
   // 🔄 轮询调度策略
   async _roundRobinStrategy(accounts, priority = null) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 为每个优先级组使用独立的轮询键
       const roundRobinKey =
@@ -1198,7 +1198,7 @@ class UnifiedClaudeScheduler {
         return a.accountId.localeCompare(b.accountId)
       })
 
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 为每个优先级组使用独立的顺序键
       const sequentialKey =
@@ -1237,7 +1237,7 @@ class UnifiedClaudeScheduler {
   async _isAccountAvailable(accountId, accountType) {
     try {
       if (accountType === 'claude-official') {
-        const account = await redis.getClaudeAccount(accountId)
+        const account = await database.getClaudeAccount(accountId)
         if (!account || account.isActive !== 'true' || account.status === 'error') {
           return false
         }
@@ -1316,7 +1316,7 @@ class UnifiedClaudeScheduler {
 
   // 🔗 获取会话映射
   async _getSessionMapping(sessionHash) {
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     const mappingData = await client.get(`${this.SESSION_MAPPING_PREFIX}${sessionHash}`)
 
     if (mappingData) {
@@ -1333,7 +1333,7 @@ class UnifiedClaudeScheduler {
 
   // 💾 设置会话映射
   async _setSessionMapping(sessionHash, accountId, accountType) {
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     const mappingData = JSON.stringify({ accountId, accountType })
 
     // 设置1小时过期
@@ -1342,7 +1342,7 @@ class UnifiedClaudeScheduler {
 
   // 🗑️ 删除会话映射
   async _deleteSessionMapping(sessionHash) {
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     await client.del(`${this.SESSION_MAPPING_PREFIX}${sessionHash}`)
   }
 
@@ -1503,7 +1503,7 @@ class UnifiedClaudeScheduler {
         // 根据平台类型获取账户
         if (group.platform === 'claude') {
           // 先尝试官方账户
-          account = await redis.getClaudeAccount(memberId)
+          account = await database.getClaudeAccount(memberId)
           if (account?.id) {
             accountType = 'claude-official'
           } else {

@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs')
 const crypto = require('crypto')
 const path = require('path')
 const fs = require('fs')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 
@@ -30,7 +30,7 @@ router.post('/auth/login', async (req, res) => {
     }
 
     // 从Redis获取管理员信息
-    let adminData = await redis.getSession('admin_credentials')
+    let adminData = await database.getSession('admin_credentials')
 
     // 如果Redis中没有管理员凭据，尝试从init.json重新加载
     if (!adminData || Object.keys(adminData).length === 0) {
@@ -50,8 +50,8 @@ router.post('/auth/login', async (req, res) => {
             updatedAt: initData.updatedAt || null
           }
 
-          // 重新存储到Redis，不设置过期时间
-          await redis.getClient().hmset('session:admin_credentials', adminData)
+          // 重新存储到Redis，不设置过期时间，使用统一的setSession方法
+          await database.setSession('admin_credentials', adminData, 0) // 0表示不过期
 
           logger.info('✅ Admin credentials reloaded from init.json')
         } catch (error) {
@@ -91,7 +91,7 @@ router.post('/auth/login', async (req, res) => {
       lastActivity: new Date().toISOString()
     }
 
-    await redis.setSession(sessionId, sessionData, config.security.adminSessionTimeout)
+    await database.setSession(sessionId, sessionData, config.security.adminSessionTimeout)
 
     // 不再更新 Redis 中的最后登录时间，因为 Redis 只是缓存
     // init.json 是唯一真实数据源
@@ -119,7 +119,7 @@ router.post('/auth/logout', async (req, res) => {
     const token = req.headers['authorization']?.replace('Bearer ', '') || req.cookies?.adminToken
 
     if (token) {
-      await redis.deleteSession(token)
+      await database.deleteSession(token)
       logger.success('🚪 Admin logout successful')
     }
 
@@ -163,7 +163,7 @@ router.post('/auth/change-password', async (req, res) => {
     }
 
     // 获取当前会话
-    const sessionData = await redis.getSession(token)
+    const sessionData = await database.getSession(token)
     if (!sessionData) {
       return res.status(401).json({
         error: 'Invalid token',
@@ -172,7 +172,7 @@ router.post('/auth/change-password', async (req, res) => {
     }
 
     // 获取当前管理员信息
-    const adminData = await redis.getSession('admin_credentials')
+    const adminData = await database.getSession('admin_credentials')
     if (!adminData) {
       return res.status(500).json({
         error: 'Admin data not found',
@@ -227,7 +227,7 @@ router.post('/auth/change-password', async (req, res) => {
         updatedAt: new Date().toISOString()
       }
 
-      await redis.setSession('admin_credentials', updatedAdminData)
+      await database.setSession('admin_credentials', updatedAdminData)
     } catch (fileError) {
       logger.error('❌ Failed to update init.json:', fileError)
       return res.status(500).json({
@@ -237,7 +237,7 @@ router.post('/auth/change-password', async (req, res) => {
     }
 
     // 清除当前会话（强制用户重新登录）
-    await redis.deleteSession(token)
+    await database.deleteSession(token)
 
     logger.success(`🔐 Admin password changed successfully for user: ${updatedUsername}`)
 
@@ -268,7 +268,7 @@ router.get('/auth/user', async (req, res) => {
     }
 
     // 获取当前会话
-    const sessionData = await redis.getSession(token)
+    const sessionData = await database.getSession(token)
     if (!sessionData) {
       return res.status(401).json({
         error: 'Invalid token',
@@ -277,7 +277,7 @@ router.get('/auth/user', async (req, res) => {
     }
 
     // 获取管理员信息
-    const adminData = await redis.getSession('admin_credentials')
+    const adminData = await database.getSession('admin_credentials')
     if (!adminData) {
       return res.status(500).json({
         error: 'Admin data not found',
@@ -314,7 +314,7 @@ router.post('/auth/refresh', async (req, res) => {
       })
     }
 
-    const sessionData = await redis.getSession(token)
+    const sessionData = await database.getSession(token)
 
     if (!sessionData) {
       return res.status(401).json({
@@ -325,7 +325,7 @@ router.post('/auth/refresh', async (req, res) => {
 
     // 更新最后活动时间
     sessionData.lastActivity = new Date().toISOString()
-    await redis.setSession(token, sessionData, config.security.adminSessionTimeout)
+    await database.setSession(token, sessionData, config.security.adminSessionTimeout)
 
     return res.json({
       success: true,

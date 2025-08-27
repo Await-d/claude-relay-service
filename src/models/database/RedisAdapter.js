@@ -55,6 +55,7 @@ class RedisAdapter extends DatabaseAdapter {
   constructor() {
     super()
     this.client = null
+    this._reconnecting = false // 重连锁标志
   }
 
   // ==================== 连接管理 (4个方法) ====================
@@ -66,6 +67,26 @@ class RedisAdapter extends DatabaseAdapter {
    */
   async connect() {
     try {
+      // 如果已经连接且连接状态正常，则直接返回
+      if (this.client && this.isConnected && this.client.status === 'ready') {
+        return this.client
+      }
+
+      // 如果有旧的client，先清理
+      if (this.client) {
+        try {
+          // 移除所有事件监听器，避免重复绑定
+          this.client.removeAllListeners()
+          // 安全断开连接
+          if (this.client.status !== 'end') {
+            await this.client.quit()
+          }
+        } catch (error) {
+          // 忽略quit错误
+          logger.debug('Failed to quit old Redis client:', error)
+        }
+      }
+
       this.client = new Redis({
         host: config.redis.host,
         port: config.redis.port,
@@ -74,22 +95,42 @@ class RedisAdapter extends DatabaseAdapter {
         retryDelayOnFailover: config.redis.retryDelayOnFailover,
         maxRetriesPerRequest: config.redis.maxRetriesPerRequest,
         lazyConnect: config.redis.lazyConnect,
-        tls: config.redis.enableTLS ? {} : false
+        tls: config.redis.enableTLS ? {} : false,
+        // 添加连接保活和重连配置
+        keepAlive: 30000, // 30秒保活
+        connectTimeout: 10000, // 10秒连接超时
+        commandTimeout: 5000, // 5秒命令超时
+        retryDelayOnClusterDown: 300 // 集群故障重试延迟
       })
 
-      this.client.on('connect', () => {
+      // 使用once而不是on，避免重复绑定事件监听器
+      this.client.once('connect', () => {
         this.isConnected = true
         logger.info('🔗 Redis connected successfully')
       })
 
       this.client.on('error', (err) => {
-        this.isConnected = false
-        logger.error('❌ Redis connection error:', err)
+        // 避免频繁的错误日志
+        if (this.isConnected) {
+          this.isConnected = false
+          logger.error('❌ Redis connection error:', err)
+        }
       })
 
       this.client.on('close', () => {
-        this.isConnected = false
-        logger.warn('⚠️  Redis connection closed')
+        // 只在连接状态改变时记录日志
+        if (this.isConnected) {
+          this.isConnected = false
+          logger.warn('⚠️ Redis connection closed')
+        }
+      })
+
+      // 添加重连成功监听器
+      this.client.on('ready', () => {
+        if (!this.isConnected) {
+          this.isConnected = true
+          logger.info('🔄 Redis reconnected successfully')
+        }
       })
 
       await this.client.connect()
@@ -117,8 +158,14 @@ class RedisAdapter extends DatabaseAdapter {
    * @returns {any|null} Redis客户端实例或null
    */
   getClient() {
-    if (!this.client || !this.isConnected) {
-      logger.warn('⚠️ Redis client is not connected')
+    // 检查客户端存在性和连接状态
+    if (!this.client || !this.isConnected || this.client.status !== 'ready') {
+      // 避免频繁的警告日志，只在状态真正改变时记录
+      if (this.isConnected && this.client && this.client.status !== 'ready') {
+        logger.warn('⚠️ Redis client status is not ready:', this.client.status)
+      } else if (!this.client) {
+        logger.warn('⚠️ Redis client is not initialized')
+      }
       return null
     }
     return this.client
@@ -130,10 +177,222 @@ class RedisAdapter extends DatabaseAdapter {
    * @throws {Error} 客户端不存在时抛出错误
    */
   getClientSafe() {
-    if (!this.client || !this.isConnected) {
-      throw new Error('Redis client is not connected')
+    const client = this.getClient()
+    if (!client) {
+      throw new Error('Redis client is not available')
     }
-    return this.client
+    return client
+  }
+
+  /**
+   * 自动重连并获取客户端（新增）
+   * @returns {Promise<any>} Redis客户端实例
+   * @throws {Error} 重连失败时抛出错误
+   */
+  async getClientWithReconnect() {
+    // 如果连接正常且状态为ready，直接返回
+    if (this.client && this.isConnected && this.client.status === 'ready') {
+      return this.client
+    }
+
+    // 避免并发重连，使用简单的锁机制
+    if (this._reconnecting) {
+      logger.debug('⏳ Reconnection already in progress, waiting...')
+      // 等待重连完成
+      let attempts = 0
+      while (this._reconnecting && attempts < 50) {
+        // 最多等待5秒
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        attempts++
+      }
+
+      if (this.client && this.isConnected && this.client.status === 'ready') {
+        return this.client
+      }
+    }
+
+    this._reconnecting = true
+    logger.warn('⚠️ Redis connection lost, attempting to reconnect...')
+
+    try {
+      // 尝试重连
+      await this.connect()
+      this._reconnecting = false
+      return this.client
+    } catch (error) {
+      this._reconnecting = false
+      logger.error('💥 Failed to reconnect to Redis:', error)
+      throw new Error(`Redis reconnection failed: ${error.message}`)
+    }
+  }
+
+  // Redis版本兼容的hset方法（支持多字段设置）
+  async hsetCompat(key, ...args) {
+    const client = await this.getClientWithReconnect()
+
+    // 如果参数是对象形式 hset(key, {field1: value1, field2: value2})
+    if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+      const obj = args[0]
+
+      // 将对象转换为键值对数组格式，适用于现代hset
+      const fields = []
+      for (const [field, value] of Object.entries(obj)) {
+        // 确保所有值都转换为字符串，避免undefined或null导致HSET参数不完整
+        const stringValue = value === null || value === undefined ? '' : String(value)
+        fields.push(field, stringValue)
+      }
+
+      // 调试输出
+      logger.debug(`hsetCompat: key=${key}, fields=${JSON.stringify(fields)}, length=${fields.length}`)
+
+      if (fields.length > 0) {
+        return await client.hset(key, ...fields)
+      }
+      return 0
+    }
+
+    // 其他情况直接调用原生hset
+    return await client.hset(key, ...args)
+  }
+
+  // ==================== Redis基础操作方法 ====================
+
+  /**
+   * Redis keys命令 - 获取匹配模式的所有键
+   * @param {string} pattern 匹配模式
+   * @returns {Promise<Array>} 键数组
+   */
+  async keys(pattern) {
+    const client = this.getClientSafe()
+    return await client.keys(pattern)
+  }
+
+  /**
+   * Redis get命令 - 获取字符串值
+   * @param {string} key 键名
+   * @returns {Promise<string>} 值
+   */
+  async get(key) {
+    const client = this.getClientSafe()
+    return await client.get(key)
+  }
+
+  /**
+   * Redis set命令 - 设置字符串值
+   * @param {string} key 键名
+   * @param {string} value 值
+   * @param {string} mode 设置模式 (EX, PX等)
+   * @param {number} time 过期时间
+   * @returns {Promise<string>} 结果
+   */
+  async set(key, value, ...args) {
+    const client = this.getClientSafe()
+    return await client.set(key, value, ...args)
+  }
+
+  /**
+   * Redis del命令 - 删除键
+   * @param {...string} keys 要删除的键
+   * @returns {Promise<number>} 删除的键数量
+   */
+  async del(...keys) {
+    const client = this.getClientSafe()
+    return await client.del(...keys)
+  }
+
+  /**
+   * Redis hget命令 - 获取哈希字段值
+   * @param {string} key 键名
+   * @param {string} field 字段名
+   * @returns {Promise<string>} 字段值
+   */
+  async hget(key, field) {
+    const client = this.getClientSafe()
+    return await client.hget(key, field)
+  }
+
+  /**
+   * Redis hset命令 - 设置哈希字段值
+   * @param {string} key 键名
+   * @param {...any} args 字段和值
+   * @returns {Promise<number>} 设置的字段数量
+   */
+  async hset(key, ...args) {
+    const client = this.getClientSafe()
+    return await client.hset(key, ...args)
+  }
+
+  /**
+   * Redis hgetall命令 - 获取所有哈希字段和值
+   * @param {string} key 键名
+   * @returns {Promise<Object>} 哈希对象
+   */
+  async hgetall(key) {
+    const client = this.getClientSafe()
+    return await client.hgetall(key)
+  }
+
+  /**
+   * Redis hdel命令 - 删除哈希字段
+   * @param {string} key 键名
+   * @param {...string} fields 字段名
+   * @returns {Promise<number>} 删除的字段数量
+   */
+  async hdel(key, ...fields) {
+    const client = this.getClientSafe()
+    return await client.hdel(key, ...fields)
+  }
+
+  /**
+   * Redis hmset命令 - 设置多个哈希字段 (为了兼容性)
+   * @param {string} key 键名
+   * @param {Object|Array} hash 哈希数据
+   * @returns {Promise<string>} 结果
+   */
+  async hmset(key, hash) {
+    const client = this.getClientSafe()
+    return await client.hmset(key, hash)
+  }
+
+  /**
+   * Redis expire命令 - 设置键过期时间
+   * @param {string} key 键名
+   * @param {number} seconds 过期秒数
+   * @returns {Promise<number>} 结果
+   */
+  async expire(key, seconds) {
+    const client = this.getClientSafe()
+    return await client.expire(key, seconds)
+  }
+
+  /**
+   * Redis incr命令 - 递增数值
+   * @param {string} key 键名
+   * @returns {Promise<number>} 递增后的值
+   */
+  async incr(key) {
+    const client = this.getClientSafe()
+    return await client.incr(key)
+  }
+
+  /**
+   * Redis decr命令 - 递减数值
+   * @param {string} key 键名
+   * @returns {Promise<number>} 递减后的值
+   */
+  async decr(key) {
+    const client = this.getClientSafe()
+    return await client.decr(key)
+  }
+
+  /**
+   * Redis type命令 - 获取键的数据类型
+   * @param {string} key 键名
+   * @returns {Promise<string>} 数据类型
+   */
+  async type(key) {
+    const client = this.getClientSafe()
+    return await client.type(key)
   }
 
   // ==================== API Key 操作 (5个方法) ====================
@@ -155,7 +414,7 @@ class RedisAdapter extends DatabaseAdapter {
       await client.hset('apikey:hash_map', hashedKey, keyId)
     }
 
-    await client.hmset(key, keyData)
+    await this.hsetCompat(key, keyData)
     await client.expire(key, 86400 * 365) // 1年过期
   }
 
@@ -1348,10 +1607,25 @@ class RedisAdapter extends DatabaseAdapter {
    * @returns {Promise<void>}
    */
   async setSession(sessionId, sessionData, ttl = 86400) {
-    const key = `session:${sessionId}`
-    const client = this.getClientSafe()
-    await client.hmset(key, sessionData)
-    await client.expire(key, ttl)
+    try {
+      const key = `session:${sessionId}`
+      const client = await this.getClientWithReconnect()
+
+      logger.info(`🔧 Setting session: ${sessionId}`) // 使用info级别确保能看到
+
+      // 使用hmset方法，这是Redis兼容性最好的方式
+      await client.hmset(key, sessionData)
+
+      // 只有当ttl大于0时才设置过期时间
+      if (ttl > 0) {
+        await client.expire(key, ttl)
+      }
+
+      logger.info(`✅ Session set successfully: ${sessionId}`)
+    } catch (error) {
+      logger.error('❌ Failed to set session:', error)
+      throw error
+    }
   }
 
   /**
@@ -1360,8 +1634,14 @@ class RedisAdapter extends DatabaseAdapter {
    * @returns {Promise<Object>} 会话数据对象
    */
   async getSession(sessionId) {
-    const key = `session:${sessionId}`
-    return await this.client.hgetall(key)
+    try {
+      const client = await this.getClientWithReconnect()
+      const key = `session:${sessionId}`
+      return await client.hgetall(key)
+    } catch (error) {
+      logger.error('❌ Failed to get session:', error)
+      return {}
+    }
   }
 
   /**
@@ -1370,8 +1650,14 @@ class RedisAdapter extends DatabaseAdapter {
    * @returns {Promise<number>} 删除的记录数
    */
   async deleteSession(sessionId) {
-    const key = `session:${sessionId}`
-    return await this.client.del(key)
+    try {
+      const key = `session:${sessionId}`
+      const client = await this.getClientWithReconnect()
+      return await client.del(key)
+    } catch (error) {
+      logger.error('❌ Failed to delete session:', error)
+      throw error
+    }
   }
 
   /**

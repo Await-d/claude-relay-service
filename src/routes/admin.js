@@ -7,7 +7,7 @@ const geminiAccountService = require('../services/geminiAccountService')
 const openaiAccountService = require('../services/openaiAccountService')
 const azureOpenaiAccountService = require('../services/azureOpenaiAccountService')
 const accountGroupService = require('../services/accountGroupService')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const { authenticateAdmin } = require('../middleware/auth')
 const logger = require('../utils/logger')
 const oauthHelper = require('../utils/oauthHelper')
@@ -31,12 +31,12 @@ const router = express.Router()
 router.get('/api-keys/:keyId/cost-debug', authenticateAdmin, async (req, res) => {
   try {
     const { keyId } = req.params
-    const costStats = await redis.getCostStats(keyId)
-    const dailyCost = await redis.getDailyCost(keyId)
-    const today = redis.getDateStringInTimezone()
-    const client = redis.getClientSafe()
+    const costStats = await database.getCostStats(keyId)
+    const dailyCost = await database.getDailyCost(keyId)
+    const today = database.getDateStringInTimezone()
+    const client = database.getClient()
 
-    // 获取所有相关的Redis键
+    // 获取所有相关的数据库键
     const costKeys = await client.keys(`usage:cost:*:${keyId}:*`)
     const keyValues = {}
 
@@ -70,31 +70,31 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
 
     if (timeRange === 'today') {
       // 今日 - 使用时区日期
-      const redisClient = require('../models/redis')
-      const tzDate = redisClient.getDateInTimezone(now)
+      const databaseClient = require('../models/database')
+      const tzDate = databaseClient.getDateInTimezone(now)
       const dateStr = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}-${String(tzDate.getUTCDate()).padStart(2, '0')}`
       searchPatterns.push(`usage:daily:*:${dateStr}`)
     } else if (timeRange === '7days') {
       // 最近7天
-      const redisClient = require('../models/redis')
+      const databaseClient = require('../models/database')
       for (let i = 0; i < 7; i++) {
         const date = new Date(now)
         date.setDate(date.getDate() - i)
-        const tzDate = redisClient.getDateInTimezone(date)
+        const tzDate = databaseClient.getDateInTimezone(date)
         const dateStr = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}-${String(tzDate.getUTCDate()).padStart(2, '0')}`
         searchPatterns.push(`usage:daily:*:${dateStr}`)
       }
     } else if (timeRange === 'monthly') {
       // 本月
-      const redisClient = require('../models/redis')
-      const tzDate = redisClient.getDateInTimezone(now)
+      const databaseClient = require('../models/database')
+      const tzDate = databaseClient.getDateInTimezone(now)
       const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
       searchPatterns.push(`usage:monthly:*:${currentMonth}`)
     }
 
     // 为每个API Key计算准确的费用和统计数据
     for (const apiKey of apiKeys) {
-      const client = redis.getClientSafe()
+      const client = database.getClient()
 
       if (timeRange === 'all') {
         // 全部时间：保持原有逻辑
@@ -187,7 +187,7 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
           for (const key of keys) {
             const data = await client.hgetall(key)
             if (data && Object.keys(data).length > 0) {
-              // 使用与 redis.js incrementTokenUsage 中相同的字段名
+              // 使用与 database.js incrementTokenUsage 中相同的字段名
               tempUsage.requests += parseInt(data.totalRequests) || parseInt(data.requests) || 0
               tempUsage.tokens += parseInt(data.totalTokens) || parseInt(data.tokens) || 0
               tempUsage.allTokens += parseInt(data.totalAllTokens) || parseInt(data.allTokens) || 0 // 读取包含所有Token的字段
@@ -205,9 +205,9 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
 
         // 计算指定时间范围的费用
         let totalCost = 0
-        const redisClient = require('../models/redis')
-        const tzToday = redisClient.getDateStringInTimezone(now)
-        const tzDate = redisClient.getDateInTimezone(now)
+        const databaseClient = require('../models/database')
+        const tzToday = databaseClient.getDateStringInTimezone(now)
+        const tzDate = databaseClient.getDateInTimezone(now)
         const tzMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
 
         const modelKeys =
@@ -657,7 +657,7 @@ router.put('/api-keys/batch', authenticateAdmin, async (req, res) => {
     for (const keyId of keyIds) {
       try {
         // 获取当前API Key信息
-        const currentKey = await redis.getApiKey(keyId)
+        const currentKey = await database.getApiKey(keyId)
         if (!currentKey || Object.keys(currentKey).length === 0) {
           results.failedCount++
           results.errors.push(`API key ${keyId} not found`)
@@ -1015,7 +1015,7 @@ router.delete('/api-keys/batch', authenticateAdmin, async (req, res) => {
     for (const keyId of keyIds) {
       try {
         // 检查API Key是否存在
-        const apiKey = await redis.getApiKey(keyId)
+        const apiKey = await database.getApiKey(keyId)
         if (!apiKey || Object.keys(apiKey).length === 0) {
           results.failedCount++
           results.errors.push({ keyId, error: 'API Key 不存在' })
@@ -1237,9 +1237,9 @@ router.post('/claude-accounts/generate-auth-url', authenticateAdmin, async (req,
     const { proxy } = req.body // 接收代理配置
     const oauthParams = await oauthHelper.generateOAuthParams()
 
-    // 将codeVerifier和state临时存储到Redis，用于后续验证
+    // 将codeVerifier和state临时存储到数据库，用于后续验证
     const sessionId = require('crypto').randomUUID()
-    await redis.setOAuthSession(sessionId, {
+    await database.setOAuthSession(sessionId, {
       codeVerifier: oauthParams.codeVerifier,
       state: oauthParams.state,
       codeChallenge: oauthParams.codeChallenge,
@@ -1280,15 +1280,15 @@ router.post('/claude-accounts/exchange-code', authenticateAdmin, async (req, res
         .json({ error: 'Session ID and authorization code (or callback URL) are required' })
     }
 
-    // 从Redis获取OAuth会话信息
-    const oauthSession = await redis.getOAuthSession(sessionId)
+    // 从数据库获取OAuth会话信息
+    const oauthSession = await database.getOAuthSession(sessionId)
     if (!oauthSession) {
       return res.status(400).json({ error: 'Invalid or expired OAuth session' })
     }
 
     // 检查会话是否过期
     if (new Date() > new Date(oauthSession.expiresAt)) {
-      await redis.deleteOAuthSession(sessionId)
+      await database.deleteOAuthSession(sessionId)
       return res
         .status(400)
         .json({ error: 'OAuth session has expired, please generate a new authorization URL' })
@@ -1315,7 +1315,7 @@ router.post('/claude-accounts/exchange-code', authenticateAdmin, async (req, res
     )
 
     // 清理OAuth会话
-    await redis.deleteOAuthSession(sessionId)
+    await database.deleteOAuthSession(sessionId)
 
     logger.success('🎉 Successfully exchanged authorization code for tokens')
     return res.json({
@@ -1352,9 +1352,9 @@ router.post('/claude-accounts/generate-setup-token-url', authenticateAdmin, asyn
     const { proxy } = req.body // 接收代理配置
     const setupTokenParams = await oauthHelper.generateSetupTokenParams()
 
-    // 将codeVerifier和state临时存储到Redis，用于后续验证
+    // 将codeVerifier和state临时存储到数据库，用于后续验证
     const sessionId = require('crypto').randomUUID()
-    await redis.setOAuthSession(sessionId, {
+    await database.setOAuthSession(sessionId, {
       type: 'setup-token', // 标记为setup-token类型
       codeVerifier: setupTokenParams.codeVerifier,
       state: setupTokenParams.state,
@@ -1397,8 +1397,8 @@ router.post('/claude-accounts/exchange-setup-token-code', authenticateAdmin, asy
         .json({ error: 'Session ID and authorization code (or callback URL) are required' })
     }
 
-    // 从Redis获取OAuth会话信息
-    const oauthSession = await redis.getOAuthSession(sessionId)
+    // 从数据库获取OAuth会话信息
+    const oauthSession = await database.getOAuthSession(sessionId)
     if (!oauthSession) {
       return res.status(400).json({ error: 'Invalid or expired OAuth session' })
     }
@@ -1410,7 +1410,7 @@ router.post('/claude-accounts/exchange-setup-token-code', authenticateAdmin, asy
 
     // 检查会话是否过期
     if (new Date() > new Date(oauthSession.expiresAt)) {
-      await redis.deleteOAuthSession(sessionId)
+      await database.deleteOAuthSession(sessionId)
       return res
         .status(400)
         .json({ error: 'OAuth session has expired, please generate a new authorization URL' })
@@ -1437,7 +1437,7 @@ router.post('/claude-accounts/exchange-setup-token-code', authenticateAdmin, asy
     )
 
     // 清理OAuth会话
-    await redis.deleteOAuthSession(sessionId)
+    await database.deleteOAuthSession(sessionId)
 
     logger.success('🎉 Successfully exchanged setup token authorization code for tokens')
     return res.json({
@@ -1497,7 +1497,7 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
     const accountsWithStats = await Promise.all(
       accounts.map(async (account) => {
         try {
-          const usageStats = await redis.getAccountUsageStats(account.id)
+          const usageStats = await database.getAccountUsageStats(account.id)
           const rateLimitInfo = await claudeAccountService.getAccountRateLimitInfo(account.id)
           const sessionWindowInfo = await claudeAccountService.getSessionWindowInfo(account.id)
           return {
@@ -1881,7 +1881,7 @@ router.get('/claude-console-accounts', authenticateAdmin, async (req, res) => {
     const accountsWithStats = await Promise.all(
       accounts.map(async (account) => {
         try {
-          const usageStats = await redis.getAccountUsageStats(account.id)
+          const usageStats = await database.getAccountUsageStats(account.id)
           return {
             ...account,
             usage: {
@@ -2171,7 +2171,7 @@ router.get('/bedrock-accounts', authenticateAdmin, async (req, res) => {
     const accountsWithStats = await Promise.all(
       accounts.map(async (account) => {
         try {
-          const usageStats = await redis.getAccountUsageStats(account.id)
+          const usageStats = await database.getAccountUsageStats(account.id)
           return {
             ...account,
             usage: {
@@ -2460,7 +2460,7 @@ router.post('/gemini-accounts/generate-auth-url', authenticateAdmin, async (req,
 
     // 创建 OAuth 会话，包含 codeVerifier 和代理配置
     const sessionId = authState
-    await redis.setOAuthSession(sessionId, {
+    await database.setOAuthSession(sessionId, {
       state: authState,
       type: 'gemini',
       redirectUri: finalRedirectUri,
@@ -2521,7 +2521,7 @@ router.post('/gemini-accounts/exchange-code', authenticateAdmin, async (req, res
 
     // 如果提供了 sessionId，从 OAuth 会话中获取信息
     if (sessionId) {
-      const sessionData = await redis.getOAuthSession(sessionId)
+      const sessionData = await database.getOAuthSession(sessionId)
       if (sessionData) {
         const {
           redirectUri: sessionRedirectUri,
@@ -2554,7 +2554,7 @@ router.post('/gemini-accounts/exchange-code', authenticateAdmin, async (req, res
 
     // 清理 OAuth 会话
     if (sessionId) {
-      await redis.deleteOAuthSession(sessionId)
+      await database.deleteOAuthSession(sessionId)
     }
 
     logger.success('✅ Successfully exchanged Gemini authorization code')
@@ -2594,7 +2594,7 @@ router.get('/gemini-accounts', authenticateAdmin, async (req, res) => {
     const accountsWithStats = await Promise.all(
       accounts.map(async (account) => {
         try {
-          const usageStats = await redis.getAccountUsageStats(account.id)
+          const usageStats = await database.getAccountUsageStats(account.id)
           return {
             ...account,
             usage: {
@@ -2811,7 +2811,7 @@ router.put(
 // 获取所有账户的使用统计
 router.get('/accounts/usage-stats', authenticateAdmin, async (req, res) => {
   try {
-    const accountsStats = await redis.getAllAccountsUsageStats()
+    const accountsStats = await database.getAllAccountsUsageStats()
 
     return res.json({
       success: true,
@@ -2844,7 +2844,7 @@ router.get('/accounts/usage-stats', authenticateAdmin, async (req, res) => {
 router.get('/accounts/:accountId/usage-stats', authenticateAdmin, async (req, res) => {
   try {
     const { accountId } = req.params
-    const accountStats = await redis.getAccountUsageStats(accountId)
+    const accountStats = await database.getAccountUsageStats(accountId)
 
     // 获取账户基本信息
     const accountData = await claudeAccountService.getAccount(accountId)
@@ -2896,16 +2896,16 @@ router.get('/dashboard', authenticateAdmin, async (req, res) => {
       systemAverages,
       realtimeMetrics
     ] = await Promise.all([
-      redis.getSystemStats(),
+      database.getSystemStats(),
       apiKeyService.getAllApiKeys(),
       claudeAccountService.getAllAccounts(),
       claudeConsoleAccountService.getAllAccounts(),
       geminiAccountService.getAllAccounts(),
       bedrockAccountService.getAllAccounts(),
-      redis.getAllOpenAIAccounts(),
-      redis.getTodayStats(),
-      redis.getSystemAverages(),
-      redis.getRealtimeSystemMetrics()
+      database.getAllOpenAIAccounts(),
+      database.getTodayStats(),
+      database.getSystemAverages(),
+      database.getRealtimeSystemMetrics()
     ])
 
     // 处理Bedrock账户数据
@@ -3187,7 +3187,7 @@ router.get('/dashboard', authenticateAdmin, async (req, res) => {
         isHistorical: realtimeMetrics.windowMinutes === 0 // 标识是否使用了历史数据
       },
       systemHealth: {
-        redisConnected: redis.isConnected,
+        redisConnected: database.isConnected,
         claudeAccountsHealthy: normalClaudeAccounts + normalClaudeConsoleAccounts > 0,
         geminiAccountsHealthy: normalGeminiAccounts > 0,
         uptime: process.uptime()
@@ -3227,15 +3227,15 @@ router.get('/usage-stats', authenticateAdmin, async (req, res) => {
 router.get('/model-stats', authenticateAdmin, async (req, res) => {
   try {
     const { period = 'daily', startDate, endDate } = req.query // daily, monthly, 支持自定义时间范围
-    const today = redis.getDateStringInTimezone()
-    const tzDate = redis.getDateInTimezone()
+    const today = database.getDateStringInTimezone()
+    const tzDate = database.getDateInTimezone()
     const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
 
     logger.info(
       `📊 Getting global model stats, period: ${period}, startDate: ${startDate}, endDate: ${endDate}, today: ${today}, currentMonth: ${currentMonth}`
     )
 
-    const client = redis.getClientSafe()
+    const client = database.getClient()
 
     // 获取所有模型的统计数据
     let searchPatterns = []
@@ -3259,7 +3259,7 @@ router.get('/model-stats', authenticateAdmin, async (req, res) => {
       // 生成日期范围内所有日期的搜索模式
       const currentDate = new Date(start)
       while (currentDate <= end) {
-        const dateStr = redis.getDateStringInTimezone(currentDate)
+        const dateStr = database.getDateStringInTimezone(currentDate)
         searchPatterns.push(`usage:model:daily:*:${dateStr}`)
         currentDate.setDate(currentDate.getDate() + 1)
       }
@@ -3285,7 +3285,7 @@ router.get('/model-stats', authenticateAdmin, async (req, res) => {
 
     logger.info(`📊 Found ${allKeys.length} matching keys in total`)
 
-    // 模型名标准化函数（与redis.js保持一致）
+    // 模型名标准化函数（与database.js保持一致）
     const normalizeModelName = (model) => {
       if (!model || model === 'unknown') {
         return model
@@ -3407,7 +3407,7 @@ router.post('/cleanup', authenticateAdmin, async (req, res) => {
       claudeAccountService.cleanupErrorAccounts()
     ])
 
-    await redis.cleanup()
+    await database.cleanup()
 
     logger.success(
       `🧹 Admin triggered cleanup: ${expiredKeys} expired keys, ${errorAccounts} error accounts`
@@ -3431,7 +3431,7 @@ router.post('/cleanup', authenticateAdmin, async (req, res) => {
 router.get('/usage-trend', authenticateAdmin, async (req, res) => {
   try {
     const { days = 7, granularity = 'day', startDate, endDate } = req.query
-    const client = redis.getClientSafe()
+    const client = database.getClient()
 
     const trendData = []
 
@@ -3472,8 +3472,8 @@ router.get('/usage-trend', authenticateAdmin, async (req, res) => {
       while (currentHour <= endTime) {
         // 注意：前端发送的时间已经是UTC时间，不需要再次转换
         // 直接从currentHour生成对应系统时区的日期和小时
-        const tzCurrentHour = redis.getDateInTimezone(currentHour)
-        const dateStr = redis.getDateStringInTimezone(currentHour)
+        const tzCurrentHour = database.getDateInTimezone(currentHour)
+        const dateStr = database.getDateStringInTimezone(currentHour)
         const hour = String(tzCurrentHour.getUTCHours()).padStart(2, '0')
         const hourKey = `${dateStr}:${hour}`
 
@@ -3548,7 +3548,7 @@ router.get('/usage-trend', authenticateAdmin, async (req, res) => {
         }
 
         // 格式化时间标签 - 使用系统时区的显示
-        const tzDateForLabel = redis.getDateInTimezone(currentHour)
+        const tzDateForLabel = database.getDateInTimezone(currentHour)
         const month = String(tzDateForLabel.getUTCMonth() + 1).padStart(2, '0')
         const day = String(tzDateForLabel.getUTCDate()).padStart(2, '0')
         const hourStr = String(tzDateForLabel.getUTCHours()).padStart(2, '0')
@@ -3579,7 +3579,7 @@ router.get('/usage-trend', authenticateAdmin, async (req, res) => {
       for (let i = 0; i < daysCount; i++) {
         const date = new Date(today)
         date.setDate(date.getDate() - i)
-        const dateStr = redis.getDateStringInTimezone(date)
+        const dateStr = database.getDateStringInTimezone(date)
 
         // 汇总当天所有API Key的使用数据
         const pattern = `usage:daily:*:${dateStr}`
@@ -3697,9 +3697,9 @@ router.get('/api-keys/:keyId/model-stats', authenticateAdmin, async (req, res) =
       `📊 Getting model stats for API key: ${keyId}, period: ${period}, startDate: ${startDate}, endDate: ${endDate}`
     )
 
-    const client = redis.getClientSafe()
-    const today = redis.getDateStringInTimezone()
-    const tzDate = redis.getDateInTimezone()
+    const client = database.getClient()
+    const today = database.getDateStringInTimezone()
+    const tzDate = database.getDateInTimezone()
     const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
 
     let searchPatterns = []
@@ -3722,7 +3722,7 @@ router.get('/api-keys/:keyId/model-stats', authenticateAdmin, async (req, res) =
 
       // 生成日期范围内所有日期的搜索模式
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = redis.getDateStringInTimezone(d)
+        const dateStr = database.getDateStringInTimezone(d)
         searchPatterns.push(`usage:${keyId}:model:daily:*:${dateStr}`)
       }
 
@@ -3900,7 +3900,7 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
 
     logger.info(`📊 Getting API keys usage trend, granularity: ${granularity}, days: ${days}`)
 
-    const client = redis.getClientSafe()
+    const client = database.getClient()
     const trendData = []
 
     // 获取所有API Keys
@@ -3927,8 +3927,8 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
 
       while (currentHour <= endTime) {
         // 使用时区转换后的时间来生成键
-        const tzCurrentHour = redis.getDateInTimezone(currentHour)
-        const dateStr = redis.getDateStringInTimezone(currentHour)
+        const tzCurrentHour = database.getDateInTimezone(currentHour)
+        const dateStr = database.getDateStringInTimezone(currentHour)
         const hour = String(tzCurrentHour.getUTCHours()).padStart(2, '0')
         const hourKey = `${dateStr}:${hour}`
 
@@ -3937,7 +3937,7 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
         const keys = await client.keys(pattern)
 
         // 格式化时间标签
-        const tzDateForLabel = redis.getDateInTimezone(currentHour)
+        const tzDateForLabel = database.getDateInTimezone(currentHour)
         const monthLabel = String(tzDateForLabel.getUTCMonth() + 1).padStart(2, '0')
         const dayLabel = String(tzDateForLabel.getUTCDate()).padStart(2, '0')
         const hourLabel = String(tzDateForLabel.getUTCHours()).padStart(2, '0')
@@ -4048,7 +4048,7 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
       for (let i = 0; i < daysCount; i++) {
         const date = new Date(today)
         date.setDate(date.getDate() - i)
-        const dateStr = redis.getDateStringInTimezone(date)
+        const dateStr = database.getDateStringInTimezone(date)
 
         // 获取这一天所有API Key的数据
         const pattern = `usage:daily:*:${dateStr}`
@@ -4194,7 +4194,7 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
 
     logger.info(`💰 Calculating usage costs for period: ${period}`)
 
-    // 模型名标准化函数（与redis.js保持一致）
+    // 模型名标准化函数（与database.js保持一致）
     const normalizeModelName = (model) => {
       if (!model || model === 'unknown') {
         return model
@@ -4228,9 +4228,9 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
     const modelCosts = {}
 
     // 按模型统计费用
-    const client = redis.getClientSafe()
-    const today = redis.getDateStringInTimezone()
-    const tzDate = redis.getDateInTimezone()
+    const client = database.getClient()
+    const today = database.getDateStringInTimezone()
+    const tzDate = database.getDateInTimezone()
     const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
 
     let pattern
@@ -4246,7 +4246,7 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
       for (let i = 0; i < 7; i++) {
         const date = new Date()
         date.setDate(date.getDate() - i)
-        const currentTzDate = redis.getDateInTimezone(date)
+        const currentTzDate = database.getDateInTimezone(date)
         const dateStr = `${currentTzDate.getUTCFullYear()}-${String(currentTzDate.getUTCMonth() + 1).padStart(2, '0')}-${String(currentTzDate.getUTCDate()).padStart(2, '0')}`
         const dayPattern = `usage:model:daily:*:${dateStr}`
 
@@ -4583,7 +4583,7 @@ router.get('/check-updates', authenticateAdmin, async (req, res) => {
   try {
     // 从缓存获取
     const cacheKey = 'version_check_cache'
-    const cached = await redis.getClient().get(cacheKey)
+    const cached = await database.getClient().get(cacheKey)
 
     if (cached && !req.query.force) {
       const cachedData = JSON.parse(cached)
@@ -4631,7 +4631,7 @@ router.get('/check-updates', authenticateAdmin, async (req, res) => {
     }
 
     // 缓存结果（不缓存 hasUpdate，因为它应该实时计算）
-    await redis.getClient().set(
+    await database.getClient().set(
       cacheKey,
       JSON.stringify({
         latest: latestVersion,
@@ -4691,7 +4691,7 @@ router.get('/check-updates', authenticateAdmin, async (req, res) => {
     // 如果是网络错误，尝试返回缓存的数据
     if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
       const cacheKey = 'version_check_cache'
-      const cached = await redis.getClient().get(cacheKey)
+      const cached = await database.getClient().get(cacheKey)
 
       if (cached) {
         const cachedData = JSON.parse(cached)
@@ -4760,7 +4760,7 @@ function compareVersions(current, latest) {
 // 获取OEM设置（公开接口，用于显示）
 router.get('/oem-settings', async (req, res) => {
   try {
-    const client = redis.getClient()
+    const client = database.getClient()
     const oemSettings = await client.get('oem:settings')
 
     // 默认设置
@@ -4827,7 +4827,7 @@ router.put('/oem-settings', authenticateAdmin, async (req, res) => {
       updatedAt: new Date().toISOString()
     }
 
-    const client = redis.getClient()
+    const client = database.getClient()
     await client.set('oem:settings', JSON.stringify(settings))
 
     logger.info(`✅ OEM settings updated: ${siteName}`)
@@ -4878,8 +4878,8 @@ router.post('/openai-accounts/generate-auth-url', authenticateAdmin, async (req,
     // 创建会话 ID
     const sessionId = crypto.randomUUID()
 
-    // 将 PKCE 参数和代理配置存储到 Redis
-    await redis.setOAuthSession(sessionId, {
+    // 将 PKCE 参数和代理配置存储到数据库
+    await database.setOAuthSession(sessionId, {
       codeVerifier: pkce.codeVerifier,
       codeChallenge: pkce.codeChallenge,
       state,
@@ -4942,8 +4942,8 @@ router.post('/openai-accounts/exchange-code', authenticateAdmin, async (req, res
       })
     }
 
-    // 从 Redis 获取会话数据
-    const sessionData = await redis.getOAuthSession(sessionId)
+    // 从数据库获取会话数据
+    const sessionData = await database.getOAuthSession(sessionId)
     if (!sessionData) {
       return res.status(400).json({
         success: false,
@@ -5010,8 +5010,8 @@ router.post('/openai-accounts/exchange-code', authenticateAdmin, async (req, res
     const organizationRole = defaultOrg.role || ''
     const organizationTitle = defaultOrg.title || ''
 
-    // 清理 Redis 会话
-    await redis.deleteOAuthSession(sessionId)
+    // 清理数据库会话
+    await database.deleteOAuthSession(sessionId)
 
     logger.success('✅ OpenAI OAuth token exchange successful')
 
@@ -5077,7 +5077,7 @@ router.get('/openai-accounts', authenticateAdmin, async (req, res) => {
     const accountsWithStats = await Promise.all(
       accounts.map(async (account) => {
         try {
-          const usageStats = await redis.getAccountUsageStats(account.id)
+          const usageStats = await database.getAccountUsageStats(account.id)
           return {
             ...account,
             usage: {
@@ -5309,7 +5309,7 @@ router.put('/openai-accounts/:id/toggle', authenticateAdmin, async (req, res) =>
   try {
     const { id } = req.params
 
-    const account = await redis.getOpenAiAccount(id)
+    const account = await database.getOpenAiAccount(id)
     if (!account) {
       return res.status(404).json({
         success: false,
@@ -5322,7 +5322,7 @@ router.put('/openai-accounts/:id/toggle', authenticateAdmin, async (req, res) =>
     account.updatedAt = new Date().toISOString()
 
     // TODO: 更新方法
-    // await redis.updateOpenAiAccount(id, account)
+    // await database.updateOpenAiAccount(id, account)
 
     logger.success(
       `✅ ${account.enabled ? '启用' : '禁用'} OpenAI 账户: ${account.name} (ID: ${id})`
@@ -5355,7 +5355,7 @@ router.put(
       // 如果账号被禁用，发送webhook通知
       if (!result.schedulable) {
         // 获取账号信息
-        const account = await redis.getOpenAiAccount(accountId)
+        const account = await database.getOpenAiAccount(accountId)
         if (account) {
           await webhookNotifier.sendAccountAnomalyNotification({
             accountId: account.id,
@@ -5694,7 +5694,7 @@ router.post('/migrate-api-keys-azure', authenticateAdmin, async (req, res) => {
 // 获取系统调度配置
 router.get('/scheduling/config', authenticateAdmin, async (req, res) => {
   try {
-    const schedulingConfig = await redis.getSystemSchedulingConfig()
+    const schedulingConfig = await database.getSystemSchedulingConfig()
 
     return res.json({
       success: true,
@@ -5719,7 +5719,7 @@ router.get('/scheduling/stats', authenticateAdmin, async (req, res) => {
     const accountGroups = await accountGroupService.getAllGroups()
 
     // 获取系统默认调度策略
-    const schedulingConfig = await redis.getSystemSchedulingConfig()
+    const schedulingConfig = await database.getSystemSchedulingConfig()
     const globalDefaultStrategy = schedulingConfig?.defaultStrategy || 'least_recent'
 
     // 计算使用全局策略的账户数量（没有设置自定义策略或策略为空）
@@ -5806,10 +5806,10 @@ router.post('/scheduling/config', authenticateAdmin, async (req, res) => {
     }
 
     // 更新配置
-    await redis.setSystemSchedulingConfig(configData)
+    await database.setSystemSchedulingConfig(configData)
 
     // 获取更新后的完整配置
-    const updatedConfig = await redis.getSystemSchedulingConfig()
+    const updatedConfig = await database.getSystemSchedulingConfig()
 
     logger.success(`✅ System scheduling configuration updated by admin`)
 
@@ -5831,10 +5831,10 @@ router.post('/scheduling/config', authenticateAdmin, async (req, res) => {
 router.post('/scheduling/config/reset', authenticateAdmin, async (req, res) => {
   try {
     // 删除现有配置，让系统使用默认值
-    await redis.deleteSystemSchedulingConfig()
+    await database.deleteSystemSchedulingConfig()
 
     // 获取重置后的配置（会返回默认配置）
-    const defaultConfig = await redis.getSystemSchedulingConfig()
+    const defaultConfig = await database.getSystemSchedulingConfig()
 
     logger.success(`✅ System scheduling configuration reset to defaults by admin`)
 

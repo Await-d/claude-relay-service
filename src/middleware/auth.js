@@ -1,6 +1,6 @@
 const apiKeyService = require('../services/apiKeyService')
 const logger = require('../utils/logger')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const { RateLimiterRedis } = require('rate-limiter-flexible')
 const config = require('../../config/config')
 
@@ -110,14 +110,14 @@ const authenticateApiKey = async (req, res, next) => {
     // 检查并发限制
     const concurrencyLimit = validation.keyData.concurrencyLimit || 0
     if (concurrencyLimit > 0) {
-      const currentConcurrency = await redis.incrConcurrency(validation.keyData.id)
+      const currentConcurrency = await database.incrConcurrency(validation.keyData.id)
       logger.api(
         `📈 Incremented concurrency for key: ${validation.keyData.id} (${validation.keyData.name}), current: ${currentConcurrency}, limit: ${concurrencyLimit}`
       )
 
       if (currentConcurrency > concurrencyLimit) {
         // 如果超过限制，立即减少计数
-        await redis.decrConcurrency(validation.keyData.id)
+        await database.decrConcurrency(validation.keyData.id)
         logger.security(
           `🚦 Concurrency limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name}), current: ${currentConcurrency - 1}, limit: ${concurrencyLimit}`
         )
@@ -136,7 +136,7 @@ const authenticateApiKey = async (req, res, next) => {
         if (!concurrencyDecremented) {
           concurrencyDecremented = true
           try {
-            const newCount = await redis.decrConcurrency(validation.keyData.id)
+            const newCount = await database.decrConcurrency(validation.keyData.id)
             logger.api(
               `📉 Decremented concurrency for key: ${validation.keyData.id} (${validation.keyData.name}), new count: ${newCount}`
             )
@@ -191,84 +191,92 @@ const authenticateApiKey = async (req, res, next) => {
       const now = Date.now()
       const windowDuration = rateLimitWindow * 60 * 1000 // 转换为毫秒
 
-      // 获取窗口开始时间
-      let windowStart = await redis.getClient().get(windowStartKey)
-
-      if (!windowStart) {
-        // 第一次请求，设置窗口开始时间
-        await redis.getClient().set(windowStartKey, now, 'PX', windowDuration)
-        await redis.getClient().set(requestCountKey, 0, 'PX', windowDuration)
-        await redis.getClient().set(tokenCountKey, 0, 'PX', windowDuration)
-        windowStart = now
+      // 获取数据库客户端，避免重复连接检查
+      const dbClient = database.getClient()
+      if (!dbClient) {
+        logger.warn('⚠️ database client not available for rate limiter')
+        // 如果数据库客户端不可用，跳过限流检查
+        logger.debug('Skipping rate limit check due to database unavailability')
       } else {
-        windowStart = parseInt(windowStart)
+        // 获取窗口开始时间
+        let windowStart = await dbClient.get(windowStartKey)
 
-        // 检查窗口是否已过期
-        if (now - windowStart >= windowDuration) {
-          // 窗口已过期，重置
-          await redis.getClient().set(windowStartKey, now, 'PX', windowDuration)
-          await redis.getClient().set(requestCountKey, 0, 'PX', windowDuration)
-          await redis.getClient().set(tokenCountKey, 0, 'PX', windowDuration)
+        if (!windowStart) {
+          // 第一次请求，设置窗口开始时间
+          await dbClient.set(windowStartKey, now, 'PX', windowDuration)
+          await dbClient.set(requestCountKey, 0, 'PX', windowDuration)
+          await dbClient.set(tokenCountKey, 0, 'PX', windowDuration)
           windowStart = now
+        } else {
+          windowStart = parseInt(windowStart)
+
+          // 检查窗口是否已过期
+          if (now - windowStart >= windowDuration) {
+            // 窗口已过期，重置
+            await dbClient.set(windowStartKey, now, 'PX', windowDuration)
+            await dbClient.set(requestCountKey, 0, 'PX', windowDuration)
+            await dbClient.set(tokenCountKey, 0, 'PX', windowDuration)
+            windowStart = now
+          }
         }
-      }
 
-      // 获取当前计数
-      const currentRequests = parseInt((await redis.getClient().get(requestCountKey)) || '0')
-      const currentTokens = parseInt((await redis.getClient().get(tokenCountKey)) || '0')
+        // 获取当前计数
+        const currentRequests = parseInt((await dbClient.get(requestCountKey)) || '0')
+        const currentTokens = parseInt((await dbClient.get(tokenCountKey)) || '0')
 
-      // 检查请求次数限制
-      if (rateLimitRequests > 0 && currentRequests >= rateLimitRequests) {
-        const resetTime = new Date(windowStart + windowDuration)
-        const remainingMinutes = Math.ceil((resetTime - now) / 60000)
+        // 检查请求次数限制
+        if (rateLimitRequests > 0 && currentRequests >= rateLimitRequests) {
+          const resetTime = new Date(windowStart + windowDuration)
+          const remainingMinutes = Math.ceil((resetTime - now) / 60000)
 
-        logger.security(
-          `🚦 Rate limit exceeded (requests) for key: ${validation.keyData.id} (${validation.keyData.name}), requests: ${currentRequests}/${rateLimitRequests}`
-        )
+          logger.security(
+            `🚦 Rate limit exceeded (requests) for key: ${validation.keyData.id} (${validation.keyData.name}), requests: ${currentRequests}/${rateLimitRequests}`
+          )
 
-        return res.status(429).json({
-          error: 'Rate limit exceeded',
-          message: `已达到请求次数限制 (${rateLimitRequests} 次)，将在 ${remainingMinutes} 分钟后重置`,
-          currentRequests,
-          requestLimit: rateLimitRequests,
-          resetAt: resetTime.toISOString(),
-          remainingMinutes
-        })
-      }
+          return res.status(429).json({
+            error: 'Rate limit exceeded',
+            message: `已达到请求次数限制 (${rateLimitRequests} 次)，将在 ${remainingMinutes} 分钟后重置`,
+            currentRequests,
+            requestLimit: rateLimitRequests,
+            resetAt: resetTime.toISOString(),
+            remainingMinutes
+          })
+        }
 
-      // 检查Token使用量限制
-      const tokenLimit = parseInt(validation.keyData.tokenLimit)
-      if (tokenLimit > 0 && currentTokens >= tokenLimit) {
-        const resetTime = new Date(windowStart + windowDuration)
-        const remainingMinutes = Math.ceil((resetTime - now) / 60000)
+        // 检查Token使用量限制
+        const tokenLimit = parseInt(validation.keyData.tokenLimit)
+        if (tokenLimit > 0 && currentTokens >= tokenLimit) {
+          const resetTime = new Date(windowStart + windowDuration)
+          const remainingMinutes = Math.ceil((resetTime - now) / 60000)
 
-        logger.security(
-          `🚦 Rate limit exceeded (tokens) for key: ${validation.keyData.id} (${validation.keyData.name}), tokens: ${currentTokens}/${tokenLimit}`
-        )
+          logger.security(
+            `🚦 Rate limit exceeded (tokens) for key: ${validation.keyData.id} (${validation.keyData.name}), tokens: ${currentTokens}/${tokenLimit}`
+          )
 
-        return res.status(429).json({
-          error: 'Rate limit exceeded',
-          message: `已达到 Token 使用限制 (${tokenLimit} tokens)，将在 ${remainingMinutes} 分钟后重置`,
+          return res.status(429).json({
+            error: 'Rate limit exceeded',
+            message: `已达到 Token 使用限制 (${tokenLimit} tokens)，将在 ${remainingMinutes} 分钟后重置`,
+            currentTokens,
+            tokenLimit,
+            resetAt: resetTime.toISOString(),
+            remainingMinutes
+          })
+        }
+
+        // 增加请求计数
+        await dbClient.incr(requestCountKey)
+
+        // 存储限流信息到请求对象
+        req.rateLimitInfo = {
+          windowStart,
+          windowDuration,
+          requestCountKey,
+          tokenCountKey,
+          currentRequests: currentRequests + 1,
           currentTokens,
-          tokenLimit,
-          resetAt: resetTime.toISOString(),
-          remainingMinutes
-        })
-      }
-
-      // 增加请求计数
-      await redis.getClient().incr(requestCountKey)
-
-      // 存储限流信息到请求对象
-      req.rateLimitInfo = {
-        windowStart,
-        windowDuration,
-        requestCountKey,
-        tokenCountKey,
-        currentRequests: currentRequests + 1,
-        currentTokens,
-        rateLimitRequests,
-        tokenLimit
+          rateLimitRequests,
+          tokenLimit
+        }
       }
     }
 
@@ -376,7 +384,7 @@ const authenticateAdmin = async (req, res, next) => {
 
     // 获取管理员会话（带超时处理）
     const adminSession = await Promise.race([
-      redis.getSession(token),
+      database.getSession(token),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Session lookup timeout')), 5000)
       )
@@ -400,7 +408,7 @@ const authenticateAdmin = async (req, res, next) => {
       logger.security(
         `🔒 Expired admin session for ${adminSession.username} from ${req.ip || 'unknown'}`
       )
-      await redis.deleteSession(token) // 清理过期会话
+      await database.deleteSession(token) // 清理过期会话
       return res.status(401).json({
         error: 'Session expired',
         message: 'Admin session has expired due to inactivity'
@@ -408,7 +416,7 @@ const authenticateAdmin = async (req, res, next) => {
     }
 
     // 更新最后活动时间（异步，不阻塞请求）
-    redis
+    database
       .setSession(
         token,
         {
@@ -716,14 +724,25 @@ const errorHandler = (error, req, res, _next) => {
 let rateLimiter = null
 
 const getRateLimiter = () => {
-  if (!rateLimiter) {
-    try {
-      const client = redis.getClient()
-      if (!client) {
-        logger.warn('⚠️ Redis client not available for rate limiter')
-        return null
-      }
+  try {
+    const client = database.getClient()
+    if (!client) {
+      logger.warn('⚠️ database client not available for rate limiter')
+      // 重置 rateLimiter，下次重新初始化
+      rateLimiter = null
+      return null
+    }
 
+    // 检查现有 rateLimiter 的连接状态
+    if (rateLimiter) {
+      // 检查Redis连接状态，如果断开则重新初始化
+      if (client.status !== 'ready') {
+        logger.warn('⚠️ Redis connection not ready, reinitializing rate limiter')
+        rateLimiter = null
+      }
+    }
+
+    if (!rateLimiter) {
       rateLimiter = new RateLimiterRedis({
         storeClient: client,
         keyPrefix: 'global_rate_limit',
@@ -733,11 +752,13 @@ const getRateLimiter = () => {
       })
 
       logger.info('✅ Rate limiter initialized successfully')
-    } catch (error) {
-      logger.warn('⚠️ Rate limiter initialization failed, using fallback', { error: error.message })
-      return null
     }
+  } catch (error) {
+    logger.warn('⚠️ Rate limiter initialization failed, using fallback', { error: error.message })
+    rateLimiter = null
+    return null
   }
+
   return rateLimiter
 }
 
@@ -749,7 +770,7 @@ const globalRateLimit = async (req, res, next) => {
 
   const limiter = getRateLimiter()
   if (!limiter) {
-    // 如果Redis不可用，直接跳过速率限制
+    // 如果数据库不可用，直接跳过速率限制
     return next()
   }
 

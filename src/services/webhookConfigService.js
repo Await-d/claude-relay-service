@@ -1,4 +1,4 @@
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const { v4: uuidv4 } = require('uuid')
 
@@ -13,7 +13,7 @@ class WebhookConfigService {
    */
   async getConfig() {
     try {
-      const configStr = await redis.client.get(this.DEFAULT_CONFIG_KEY)
+      const configStr = await database.client.get(this.DEFAULT_CONFIG_KEY)
       if (!configStr) {
         // 返回默认配置
         return this.getDefaultConfig()
@@ -36,7 +36,7 @@ class WebhookConfigService {
       // 添加更新时间
       config.updatedAt = new Date().toISOString()
 
-      await redis.client.set(this.DEFAULT_CONFIG_KEY, JSON.stringify(config))
+      await database.client.set(this.DEFAULT_CONFIG_KEY, JSON.stringify(config))
       logger.info('✅ Webhook配置已保存')
 
       return config

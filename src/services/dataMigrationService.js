@@ -11,7 +11,7 @@
 const logger = require('../utils/logger')
 const DataExportService = require('./dataExportService')
 const DataImportService = require('./dataImportService')
-const DatabaseFactory = require('../models/database/DatabaseFactory')
+const { DatabaseFactory } = require('../models/database/DatabaseFactory')
 const path = require('path')
 const fs = require('fs').promises
 

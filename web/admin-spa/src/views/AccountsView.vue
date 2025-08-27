@@ -547,7 +547,7 @@
               <td class="whitespace-nowrap px-3 py-4">
                 <div
                   v-if="
-                    account.platform === 'claude' &&
+                    ['claude', 'claude-console'].includes(account.platform) &&
                     account.sessionWindow &&
                     account.sessionWindow.hasActiveWindow
                   "
@@ -581,11 +581,24 @@
                     </div>
                   </div>
                 </div>
-                <div v-else-if="account.platform === 'claude'" class="text-sm text-gray-400">
-                  <i class="fas fa-minus" />
+                <div
+                  v-else-if="['claude', 'claude-console'].includes(account.platform)"
+                  class="flex items-center gap-1.5"
+                >
+                  <div
+                    class="flex items-center gap-1.5 rounded-lg bg-gray-50 px-2.5 py-1.5 dark:bg-gray-700/50"
+                  >
+                    <i class="fas fa-clock text-xs text-gray-500 dark:text-gray-400" />
+                    <span class="text-xs font-medium text-gray-600 dark:text-gray-300">未使用</span>
+                  </div>
                 </div>
-                <div v-else class="text-sm text-gray-400">
-                  <span class="text-xs">N/A</span>
+                <div v-else class="flex items-center gap-1.5">
+                  <div
+                    class="flex items-center gap-1.5 rounded-lg bg-gray-50 px-2.5 py-1.5 dark:bg-gray-700/50"
+                  >
+                    <i class="fas fa-ban text-xs text-gray-400" />
+                    <span class="text-xs font-medium text-gray-500 dark:text-gray-400">不适用</span>
+                  </div>
                 </div>
               </td>
               <td class="whitespace-nowrap px-3 py-4 text-sm">
@@ -867,26 +880,55 @@
 
             <!-- 会话窗口 -->
             <div
-              v-if="
-                account.platform === 'claude' &&
-                account.sessionWindow &&
-                account.sessionWindow.hasActiveWindow
-              "
+              v-if="['claude', 'claude-console'].includes(account.platform)"
               class="space-y-1.5 rounded-lg bg-gray-50 p-2 dark:bg-gray-700"
             >
               <div class="flex items-center justify-between text-xs">
                 <span class="font-medium text-gray-600 dark:text-gray-300">会话窗口</span>
-                <span class="font-medium text-gray-700 dark:text-gray-200">
+                <span
+                  v-if="
+                    account.sessionWindow &&
+                    account.sessionWindow.hasActiveWindow &&
+                    account.sessionWindow.progress
+                  "
+                  class="font-medium text-gray-700 dark:text-gray-200"
+                >
                   {{ account.sessionWindow.progress }}%
                 </span>
+                <span v-else class="font-medium text-gray-500 dark:text-gray-400"> 未使用 </span>
               </div>
-              <div class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-600">
+              <div
+                v-if="
+                  account.sessionWindow &&
+                  account.sessionWindow.hasActiveWindow &&
+                  account.sessionWindow.progress
+                "
+                class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-600"
+              >
                 <div
                   class="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-300"
                   :style="{ width: account.sessionWindow.progress + '%' }"
                 />
               </div>
-              <div class="flex items-center justify-between text-xs">
+              <div
+                v-else
+                class="flex items-center justify-center rounded-full bg-gray-200 py-2 dark:bg-gray-600"
+              >
+                <div class="flex items-center gap-1.5">
+                  <i class="fas fa-clock text-xs text-gray-500 dark:text-gray-400" />
+                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400"
+                    >等待首次使用</span
+                  >
+                </div>
+              </div>
+              <div
+                v-if="
+                  account.sessionWindow &&
+                  account.sessionWindow.hasActiveWindow &&
+                  account.sessionWindow.progress
+                "
+                class="flex items-center justify-between text-xs"
+              >
                 <span class="text-gray-500 dark:text-gray-400">
                   {{
                     formatSessionWindow(
@@ -902,6 +944,9 @@
                   剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
                 </span>
                 <span v-else class="text-gray-500"> 已结束 </span>
+              </div>
+              <div v-else class="text-center text-xs text-gray-400 dark:text-gray-500">
+                Claude 账户会话窗口在首次使用后开始计时
               </div>
             </div>
 

@@ -108,7 +108,7 @@ class TwoFactorAuthService {
       }
 
       // 启用2FA
-      twoFAConfig.isEnabled = true
+      twoFAConfig.isEnabled = 'true' // 明确存储为字符串，确保Redis兼容性
       twoFAConfig.enabledAt = new Date().toISOString()
 
       // 保存到永久存储
@@ -194,8 +194,22 @@ class TwoFactorAuthService {
    */
   async is2FAEnabled(adminId) {
     try {
+      logger.debug(`🔍 检查2FA配置键: 2fa_config:${adminId}`)
       const twoFAConfig = await database.getSession(`2fa_config:${adminId}`)
-      return twoFAConfig && twoFAConfig.isEnabled === true
+      logger.debug(`🔍 2FA配置数据:`, twoFAConfig)
+
+      // 检查配置是否存在且有内容
+      if (!twoFAConfig || Object.keys(twoFAConfig).length === 0) {
+        logger.debug(`🔍 2FA配置不存在或为空`)
+        return false
+      }
+
+      // Redis哈希存储的值都是字符串，需要转换
+      const isEnabled = twoFAConfig.isEnabled === 'true' || twoFAConfig.isEnabled === true
+      logger.debug(
+        `🔍 2FA启用状态: ${isEnabled} (原始值: ${twoFAConfig.isEnabled}, 类型: ${typeof twoFAConfig.isEnabled})`
+      )
+      return isEnabled
     } catch (error) {
       logger.error('❌ 检查2FA状态失败:', error)
       return false

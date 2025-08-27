@@ -13,7 +13,7 @@
  */
 
 require('dotenv').config()
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 const logger = require('../src/utils/logger')
 
 // 解析命令行参数
@@ -27,11 +27,8 @@ async function fixUsageStats() {
       logger.info('📝 DRY RUN 模式 - 不会实际修改数据')
     }
 
-    // 连接到 Redis
-    await redis.connect()
-    logger.success('✅ 已连接到 Redis')
-
-    const client = redis.getClientSafe()
+    // 数据库会自动初始化和连接
+    logger.success('✅ 已连接到数据库')
 
     // 统计信息
     const stats = {
@@ -46,7 +43,7 @@ async function fixUsageStats() {
     // 1. 修复 API Key 级别的总统计
     logger.info('\n📊 修复 API Key 总统计数据...')
     const apiKeyPattern = 'apikey:*'
-    const apiKeys = await client.keys(apiKeyPattern)
+    const apiKeys = await database.keys(apiKeyPattern)
     stats.totalKeys = apiKeys.length
 
     for (const apiKeyKey of apiKeys) {
@@ -54,7 +51,7 @@ async function fixUsageStats() {
       const usageKey = `usage:${keyId}`
 
       try {
-        const usageData = await client.hgetall(usageKey)
+        const usageData = await database.hgetall(usageKey)
         if (usageData && Object.keys(usageData).length > 0) {
           const inputTokens = parseInt(usageData.totalInputTokens) || 0
           const outputTokens = parseInt(usageData.totalOutputTokens) || 0
@@ -69,7 +66,7 @@ async function fixUsageStats() {
             logger.info(`  修复 ${keyId}: ${currentAllTokens} -> ${correctAllTokens}`)
 
             if (!isDryRun) {
-              await client.hset(usageKey, 'totalAllTokens', correctAllTokens)
+              await database.hset(usageKey, 'totalAllTokens', correctAllTokens)
             }
             stats.fixedTotalKeys++
           }
@@ -83,11 +80,11 @@ async function fixUsageStats() {
     // 2. 修复每日统计数据
     logger.info('\n📅 修复每日统计数据...')
     const dailyPattern = 'usage:daily:*'
-    const dailyKeys = await client.keys(dailyPattern)
+    const dailyKeys = await database.keys(dailyPattern)
 
     for (const dailyKey of dailyKeys) {
       try {
-        const data = await client.hgetall(dailyKey)
+        const data = await database.hgetall(dailyKey)
         if (data && Object.keys(data).length > 0) {
           const inputTokens = parseInt(data.inputTokens) || 0
           const outputTokens = parseInt(data.outputTokens) || 0
@@ -99,7 +96,7 @@ async function fixUsageStats() {
 
           if (currentAllTokens !== correctAllTokens && correctAllTokens > 0) {
             if (!isDryRun) {
-              await client.hset(dailyKey, 'allTokens', correctAllTokens)
+              await database.hset(dailyKey, 'allTokens', correctAllTokens)
             }
             stats.fixedDailyKeys++
           }
@@ -113,11 +110,11 @@ async function fixUsageStats() {
     // 3. 修复每月统计数据
     logger.info('\n📆 修复每月统计数据...')
     const monthlyPattern = 'usage:monthly:*'
-    const monthlyKeys = await client.keys(monthlyPattern)
+    const monthlyKeys = await database.keys(monthlyPattern)
 
     for (const monthlyKey of monthlyKeys) {
       try {
-        const data = await client.hgetall(monthlyKey)
+        const data = await database.hgetall(monthlyKey)
         if (data && Object.keys(data).length > 0) {
           const inputTokens = parseInt(data.inputTokens) || 0
           const outputTokens = parseInt(data.outputTokens) || 0
@@ -129,7 +126,7 @@ async function fixUsageStats() {
 
           if (currentAllTokens !== correctAllTokens && correctAllTokens > 0) {
             if (!isDryRun) {
-              await client.hset(monthlyKey, 'allTokens', correctAllTokens)
+              await database.hset(monthlyKey, 'allTokens', correctAllTokens)
             }
             stats.fixedMonthlyKeys++
           }
@@ -150,11 +147,11 @@ async function fixUsageStats() {
     ]
 
     for (const pattern of modelPatterns) {
-      const modelKeys = await client.keys(pattern)
+      const modelKeys = await database.keys(pattern)
 
       for (const modelKey of modelKeys) {
         try {
-          const data = await client.hgetall(modelKey)
+          const data = await database.hgetall(modelKey)
           if (data && Object.keys(data).length > 0) {
             const inputTokens = parseInt(data.inputTokens) || 0
             const outputTokens = parseInt(data.outputTokens) || 0
@@ -167,7 +164,7 @@ async function fixUsageStats() {
 
             if (currentAllTokens !== correctAllTokens && correctAllTokens > 0) {
               if (!isDryRun) {
-                await client.hset(modelKey, 'allTokens', correctAllTokens)
+                await database.hset(modelKey, 'allTokens', correctAllTokens)
               }
               stats.fixedModelKeys++
             }
@@ -188,7 +185,7 @@ async function fixUsageStats() {
       for (let i = 0; i < sampleSize; i++) {
         const randomIndex = Math.floor(Math.random() * apiKeys.length)
         const keyId = apiKeys[randomIndex].replace('apikey:', '')
-        const usage = await redis.getUsageStats(keyId)
+        const usage = await database.getUsageStats(keyId)
 
         logger.info(`  样本 ${keyId}:`)
         logger.info(`    Total tokens: ${usage.total.tokens}`)
@@ -216,7 +213,9 @@ async function fixUsageStats() {
     logger.error('❌ 修复过程出错:', error)
     process.exit(1)
   } finally {
-    await redis.disconnect()
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
   }
 }
 

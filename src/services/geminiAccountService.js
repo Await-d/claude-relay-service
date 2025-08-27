@@ -1,4 +1,4 @@
-const redisClient = require('../models/redis')
+const database = require('../models/database')
 const { v4: uuidv4 } = require('uuid')
 const crypto = require('crypto')
 const config = require('../../config/config')
@@ -169,7 +169,7 @@ async function generateAuthUrl(state = null, redirectUri = null) {
 // 轮询检查 OAuth 授权状态
 async function pollAuthorizationStatus(sessionId, maxAttempts = 60, interval = 2000) {
   let attempts = 0
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
 
   while (attempts < maxAttempts) {
     try {
@@ -404,7 +404,7 @@ async function createAccount(accountData) {
   }
 
   // 保存到 Redis
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   await client.hset(`${GEMINI_ACCOUNT_KEY_PREFIX}${id}`, account)
 
   // 如果是共享账户，添加到共享账户集合
@@ -429,7 +429,7 @@ async function createAccount(accountData) {
 
 // 获取账户
 async function getAccount(accountId) {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const accountData = await client.hgetall(`${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`)
 
   if (!accountData || Object.keys(accountData).length === 0) {
@@ -522,7 +522,7 @@ async function updateAccount(accountId, updates) {
   }
 
   // 更新账户类型时处理共享账户集合
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   if (updates.accountType && updates.accountType !== existingAccount.accountType) {
     if (updates.accountType === 'shared') {
       await client.sadd(SHARED_GEMINI_ACCOUNTS_KEY, accountId)
@@ -607,7 +607,7 @@ async function deleteAccount(accountId) {
   }
 
   // 从 Redis 删除
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   await client.del(`${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`)
 
   // 从共享账户集合中移除
@@ -630,7 +630,7 @@ async function deleteAccount(accountId) {
 
 // 获取所有账户
 async function getAllAccounts() {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const keys = await client.keys(`${GEMINI_ACCOUNT_KEY_PREFIX}*`)
   const accounts = []
 
@@ -687,7 +687,7 @@ async function getAllAccounts() {
 // 选择可用账户（支持专属和共享账户）
 async function selectAvailableAccount(apiKeyId, sessionHash = null) {
   // 首先检查是否有粘性会话
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   if (sessionHash) {
     const mappedAccountId = await client.get(`${ACCOUNT_SESSION_MAPPING_PREFIX}${sessionHash}`)
 
@@ -1367,7 +1367,7 @@ async function generateContentStream(
 // 🔄 更新账户调度相关字段（用于调度算法）
 async function updateAccountSchedulingFields(accountId, updates) {
   try {
-    const client = redisClient.getClientSafe()
+    const client = database.getClientSafe()
     const accountKey = `${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`
 
     // 将数字字段转换为字符串存储
@@ -1395,7 +1395,7 @@ async function updateAccountSchedulingFields(accountId, updates) {
 // 🔢 增加账户使用计数并更新最后调度时间
 async function recordAccountUsage(accountId) {
   try {
-    const client = redisClient.getClientSafe()
+    const client = database.getClientSafe()
     const accountKey = `${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`
 
     // 获取当前使用计数

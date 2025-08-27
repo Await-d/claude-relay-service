@@ -1,7 +1,7 @@
 const { v4: uuidv4 } = require('uuid')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const LRUCache = require('../utils/lruCache')
@@ -113,7 +113,7 @@ class ClaudeConsoleAccountService {
       lastScheduledAt: '' // 最后调度时间，初始为空
     }
 
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     logger.debug(
       `[DEBUG] Saving account data to Redis with key: ${this.ACCOUNT_KEY_PREFIX}${accountId}`
     )
@@ -148,7 +148,7 @@ class ClaudeConsoleAccountService {
   // 📋 获取所有Claude Console账户
   async getAllAccounts() {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const keys = await client.keys(`${this.ACCOUNT_KEY_PREFIX}*`)
       const accounts = []
 
@@ -192,7 +192,7 @@ class ClaudeConsoleAccountService {
 
   // 🔍 获取单个账户（内部使用，包含敏感信息）
   async getAccount(accountId) {
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     logger.debug(`[DEBUG] Getting account data for ID: ${accountId}`)
     const accountData = await client.hgetall(`${this.ACCOUNT_KEY_PREFIX}${accountId}`)
 
@@ -251,7 +251,7 @@ class ClaudeConsoleAccountService {
         throw new Error('Account not found')
       }
 
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const updatedData = {}
 
       // 处理各个字段的更新
@@ -366,7 +366,7 @@ class ClaudeConsoleAccountService {
   // 🗑️ 删除账户
   async deleteAccount(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const account = await this.getAccount(accountId)
 
       if (!account) {
@@ -393,7 +393,7 @@ class ClaudeConsoleAccountService {
   // 🚫 标记账号为限流状态
   async markAccountRateLimited(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const account = await this.getAccount(accountId)
 
       if (!account) {
@@ -444,7 +444,7 @@ class ClaudeConsoleAccountService {
   // ✅ 移除账号的限流状态
   async removeAccountRateLimit(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       await client.hdel(
         `${this.ACCOUNT_KEY_PREFIX}${accountId}`,
@@ -505,7 +505,7 @@ class ClaudeConsoleAccountService {
   // 🚫 标记账号为封锁状态（模型不支持等原因）
   async blockAccount(accountId, reason) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 获取账户信息用于webhook通知
       const accountData = await client.hgetall(`${this.ACCOUNT_KEY_PREFIX}${accountId}`)
@@ -734,7 +734,7 @@ class ClaudeConsoleAccountService {
   // 🔄 更新账户调度相关字段（用于调度算法）
   async updateAccountSchedulingFields(accountId, updates) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const accountKey = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
 
       // 将数字字段转换为字符串存储
@@ -767,7 +767,7 @@ class ClaudeConsoleAccountService {
   // 📊 记录账户使用（用于统计和调度）
   async recordAccountUsage(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const accountKey = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
 
       // 原子性增加使用计数并更新最后调度时间

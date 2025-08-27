@@ -1,4 +1,4 @@
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const { v4: uuidv4 } = require('uuid')
 
@@ -18,7 +18,7 @@ class TokenRefreshService {
    */
   async acquireLock(lockKey) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const lockId = uuidv4()
       const result = await client.set(lockKey, lockId, 'NX', 'EX', this.lockTTL)
 
@@ -40,7 +40,7 @@ class TokenRefreshService {
    */
   async releaseLock(lockKey) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const lockId = this.lockValue.get(lockKey)
 
       if (!lockId) {
@@ -100,7 +100,7 @@ class TokenRefreshService {
   async isRefreshLocked(accountId, platform = 'claude') {
     const lockKey = `token_refresh_lock:${platform}:${accountId}`
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const exists = await client.exists(lockKey)
       return exists === 1
     } catch (error) {
@@ -118,7 +118,7 @@ class TokenRefreshService {
   async getLockTTL(accountId, platform = 'claude') {
     const lockKey = `token_refresh_lock:${platform}:${accountId}`
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const ttl = await client.ttl(lockKey)
       return ttl
     } catch (error) {

@@ -15,7 +15,7 @@
  */
 
 const fs = require('fs').promises
-const redis = require('../src/models/redis')
+const { getDatabase, initDatabase } = require('../src/models/database')
 const logger = require('../src/utils/logger')
 const readline = require('readline')
 
@@ -96,9 +96,13 @@ async function exportData() {
     logger.info(`📋 Data types: ${types.join(', ')}`)
     logger.info(`🔒 Sanitize sensitive data: ${shouldSanitize ? 'YES' : 'NO'}`)
 
-    // 连接 Redis
-    await redis.connect()
-    logger.success('✅ Connected to Redis')
+    // 连接数据库
+    await initDatabase()
+    const database = await getDatabase()
+    if (typeof database.connect === 'function') {
+      await database.connect()
+    }
+    logger.success('✅ Connected to database')
 
     const exportDataObj = {
       metadata: {
@@ -113,7 +117,7 @@ async function exportData() {
     // 导出 API Keys
     if (types.includes('all') || types.includes('apikeys')) {
       logger.info('📤 Exporting API Keys...')
-      const keys = await redis.client.keys('apikey:*')
+      const keys = await database.keys('apikey:*')
       const apiKeys = []
 
       for (const key of keys) {
@@ -122,7 +126,7 @@ async function exportData() {
         }
 
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await redis.client.hgetall(key)
+        const data = await database.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           apiKeys.push(shouldSanitize ? sanitizeData(data, 'apikey') : data)
@@ -137,13 +141,13 @@ async function exportData() {
     if (types.includes('all') || types.includes('accounts')) {
       logger.info('📤 Exporting Claude accounts...')
       // 注意：Claude 账户使用 claude:account: 前缀，不是 claude_account:
-      const keys = await redis.client.keys('claude:account:*')
+      const keys = await database.keys('claude:account:*')
       logger.info(`Found ${keys.length} Claude account keys in Redis`)
       const accounts = []
 
       for (const key of keys) {
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await redis.client.hgetall(key)
+        const data = await database.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           // 解析 JSON 字段（如果存在）
@@ -163,13 +167,13 @@ async function exportData() {
 
       // 导出 Gemini 账户
       logger.info('📤 Exporting Gemini accounts...')
-      const geminiKeys = await redis.client.keys('gemini_account:*')
+      const geminiKeys = await database.keys('gemini_account:*')
       logger.info(`Found ${geminiKeys.length} Gemini account keys in Redis`)
       const geminiAccounts = []
 
       for (const key of geminiKeys) {
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await redis.client.hgetall(key)
+        const data = await database.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           geminiAccounts.push(shouldSanitize ? sanitizeData(data, 'gemini_account') : data)
@@ -183,7 +187,7 @@ async function exportData() {
     // 导出管理员
     if (types.includes('all') || types.includes('admins')) {
       logger.info('📤 Exporting admins...')
-      const keys = await redis.client.keys('admin:*')
+      const keys = await database.keys('admin:*')
       const admins = []
 
       for (const key of keys) {
@@ -192,7 +196,7 @@ async function exportData() {
         }
 
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await redis.client.hgetall(key)
+        const data = await database.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           admins.push(shouldSanitize ? sanitizeData(data, 'admin') : data)
@@ -204,7 +208,7 @@ async function exportData() {
     }
 
     // 写入文件
-    await fs.writeFile(outputFile, JSON.stringify(exportData, null, 2))
+    await fs.writeFile(outputFile, JSON.stringify(exportDataObj, null, 2))
 
     // 显示导出摘要
     console.log(`\n${'='.repeat(60)}`)
@@ -234,7 +238,10 @@ async function exportData() {
     logger.error('💥 Export failed:', error)
     process.exit(1)
   } finally {
-    await redis.disconnect()
+    const database = await getDatabase()
+    if (typeof database.disconnect === 'function') {
+      await database.disconnect()
+    }
     rl.close()
   }
 }
@@ -304,9 +311,13 @@ async function importData() {
       return
     }
 
-    // 连接 Redis
-    await redis.connect()
-    logger.success('✅ Connected to Redis')
+    // 连接数据库
+    await initDatabase()
+    const database = await getDatabase()
+    if (typeof database.connect === 'function') {
+      await database.connect()
+    }
+    logger.success('✅ Connected to database')
 
     const stats = {
       imported: 0,
@@ -319,7 +330,7 @@ async function importData() {
       logger.info('\n📥 Importing API Keys...')
       for (const apiKey of importDataObj.data.apiKeys) {
         try {
-          const exists = await redis.client.exists(`apikey:${apiKey.id}`)
+          const exists = await database.exists(`apikey:${apiKey.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -337,16 +348,12 @@ async function importData() {
             }
           }
 
-          // 使用 hset 存储到哈希表
-          const pipeline = redis.client.pipeline()
-          for (const [field, value] of Object.entries(apiKey)) {
-            pipeline.hset(`apikey:${apiKey.id}`, field, value)
-          }
-          await pipeline.exec()
+          // 使用 hmset 存储到哈希表
+          await database.hmset(`apikey:${apiKey.id}`, apiKey)
 
           // 更新哈希映射
           if (apiKey.apiKey && !importDataObj.metadata.sanitized) {
-            await redis.client.hset('apikey:hash_map', apiKey.apiKey, apiKey.id)
+            await database.hset('apikey:hash_map', apiKey.apiKey, apiKey.id)
           }
 
           logger.success(`✅ Imported API Key: ${apiKey.name} (${apiKey.id})`)
@@ -363,7 +370,7 @@ async function importData() {
       logger.info('\n📥 Importing Claude accounts...')
       for (const account of importDataObj.data.claudeAccounts) {
         try {
-          const exists = await redis.client.exists(`claude_account:${account.id}`)
+          const exists = await database.exists(`claude_account:${account.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -381,17 +388,16 @@ async function importData() {
             }
           }
 
-          // 使用 hset 存储到哈希表
-          const pipeline = redis.client.pipeline()
-          for (const [field, value] of Object.entries(account)) {
-            // 如果是对象，需要序列化
-            if (field === 'claudeAiOauth' && typeof value === 'object') {
-              pipeline.hset(`claude_account:${account.id}`, field, JSON.stringify(value))
-            } else {
-              pipeline.hset(`claude_account:${account.id}`, field, value)
-            }
+          // 处理对象字段序列化
+          const processedAccount = { ...account }
+          if (
+            processedAccount.claudeAiOauth &&
+            typeof processedAccount.claudeAiOauth === 'object'
+          ) {
+            processedAccount.claudeAiOauth = JSON.stringify(processedAccount.claudeAiOauth)
           }
-          await pipeline.exec()
+          // 使用 hmset 存储到哈希表
+          await database.hmset(`claude_account:${account.id}`, processedAccount)
           logger.success(`✅ Imported Claude account: ${account.name} (${account.id})`)
           stats.imported++
         } catch (error) {
@@ -406,7 +412,7 @@ async function importData() {
       logger.info('\n📥 Importing Gemini accounts...')
       for (const account of importDataObj.data.geminiAccounts) {
         try {
-          const exists = await redis.client.exists(`gemini_account:${account.id}`)
+          const exists = await database.exists(`gemini_account:${account.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -424,12 +430,8 @@ async function importData() {
             }
           }
 
-          // 使用 hset 存储到哈希表
-          const pipeline = redis.client.pipeline()
-          for (const [field, value] of Object.entries(account)) {
-            pipeline.hset(`gemini_account:${account.id}`, field, value)
-          }
-          await pipeline.exec()
+          // 使用 hmset 存储到哈希表
+          await database.hmset(`gemini_account:${account.id}`, account)
           logger.success(`✅ Imported Gemini account: ${account.name} (${account.id})`)
           stats.imported++
         } catch (error) {
@@ -451,7 +453,10 @@ async function importData() {
     logger.error('💥 Import failed:', error)
     process.exit(1)
   } finally {
-    await redis.disconnect()
+    const database = await getDatabase()
+    if (typeof database.disconnect === 'function') {
+      await database.disconnect()
+    }
     rl.close()
   }
 }

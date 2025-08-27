@@ -9,7 +9,7 @@ const fs = require('fs')
 const path = require('path')
 const readline = require('readline')
 const zlib = require('zlib')
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 
 class LogSessionAnalyzer {
   constructor() {
@@ -395,7 +395,7 @@ class LogSessionAnalyzer {
       console.log('🧪 模拟模式 - 不会实际更新Redis数据\n')
     } else {
       console.log('💾 更新Redis中的会话窗口数据...\n')
-      await redis.connect()
+      // 数据库会自动初始化和连接
     }
 
     let updatedCount = 0
@@ -403,15 +403,22 @@ class LogSessionAnalyzer {
 
     for (const result of results) {
       try {
-        const accountData = await redis.getClaudeAccount(result.accountId)
+        let accountData = null
 
-        if (!accountData || Object.keys(accountData).length === 0) {
-          console.log(`⚠️  账户 ${result.accountId} 在Redis中不存在，跳过`)
-          skippedCount++
-          continue
+        if (dryRun) {
+          console.log(`🔄 [模拟] 处理账户: ${result.accountName || result.accountId}`)
+          // 在模拟模式下创建一个简单的对象
+          accountData = { name: result.accountName || 'Unknown' }
+        } else {
+          accountData = await database.getClaudeAccount(result.accountId)
+
+          if (!accountData || Object.keys(accountData).length === 0) {
+            console.log(`⚠️  账户 ${result.accountId} 在Redis中不存在，跳过`)
+            skippedCount++
+            continue
+          }
+          console.log(`🔄 处理账户: ${accountData.name || result.accountId}`)
         }
-
-        console.log(`🔄 处理账户: ${accountData.name || result.accountId}`)
 
         // 确定要设置的会话窗口
         let targetWindow = null
@@ -445,7 +452,7 @@ class LogSessionAnalyzer {
           accountData.lastUsedAt = result.lastRequest.toISOString()
           accountData.lastRequestTime = result.lastRequest.toISOString()
 
-          await redis.setClaudeAccount(result.accountId, accountData)
+          await database.setClaudeAccount(result.accountId, accountData)
           updatedCount++
 
           console.log('   ✅ 已更新会话窗口数据')
@@ -467,7 +474,9 @@ class LogSessionAnalyzer {
     }
 
     if (!dryRun) {
-      await redis.disconnect()
+      if (typeof database._manager.cleanup === 'function') {
+        await database._manager.cleanup()
+      }
     }
 
     console.log('📊 更新结果:')

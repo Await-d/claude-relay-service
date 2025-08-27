@@ -1,7 +1,7 @@
 const crypto = require('crypto')
 const { v4: uuidv4 } = require('uuid')
 const config = require('../../config/config')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 
 class ApiKeyService {
@@ -70,7 +70,7 @@ class ApiKeyService {
     }
 
     // 保存API Key数据并建立哈希映射
-    await redis.setApiKey(keyId, keyData, hashedKey)
+    await database.setApiKey(keyId, keyData, hashedKey)
 
     logger.success(`🔑 Generated new API key: ${name} (${keyId})`)
 
@@ -114,7 +114,7 @@ class ApiKeyService {
       const hashedKey = this._hashApiKey(apiKey)
 
       // 通过哈希值直接查找API Key（性能优化）
-      const keyData = await redis.findApiKeyByHash(hashedKey)
+      const keyData = await database.findApiKeyByHash(hashedKey)
 
       if (!keyData) {
         return { valid: false, error: 'API key not found' }
@@ -131,10 +131,10 @@ class ApiKeyService {
       }
 
       // 获取使用统计（供返回数据使用）
-      const usage = await redis.getUsageStats(keyData.id)
+      const usage = await database.getUsageStats(keyData.id)
 
       // 获取当日费用统计
-      const dailyCost = await redis.getDailyCost(keyData.id)
+      const dailyCost = await database.getDailyCost(keyData.id)
 
       // 更新最后使用时间（优化：只在实际API调用时更新，而不是验证时）
       // 注意：lastUsedAt的更新已移至recordUsage方法中
@@ -203,23 +203,23 @@ class ApiKeyService {
   // 📋 获取所有API Keys
   async getAllApiKeys() {
     try {
-      const apiKeys = await redis.getAllApiKeys()
-      const client = redis.getClientSafe()
+      const apiKeys = await database.getAllApiKeys()
+      const client = database.getClientSafe()
 
       // 为每个key添加使用统计和当前并发数
       for (const key of apiKeys) {
-        key.usage = await redis.getUsageStats(key.id)
+        key.usage = await database.getUsageStats(key.id)
         key.tokenLimit = parseInt(key.tokenLimit)
         key.concurrencyLimit = parseInt(key.concurrencyLimit || 0)
         key.rateLimitWindow = parseInt(key.rateLimitWindow || 0)
         key.rateLimitRequests = parseInt(key.rateLimitRequests || 0)
-        key.currentConcurrency = await redis.getConcurrency(key.id)
+        key.currentConcurrency = await database.getConcurrency(key.id)
         key.isActive = key.isActive === 'true'
         key.enableModelRestriction = key.enableModelRestriction === 'true'
         key.enableClientRestriction = key.enableClientRestriction === 'true'
         key.permissions = key.permissions || 'all' // 兼容旧数据
         key.dailyCostLimit = parseFloat(key.dailyCostLimit || 0)
-        key.dailyCost = (await redis.getDailyCost(key.id)) || 0
+        key.dailyCost = (await database.getDailyCost(key.id)) || 0
 
         // 获取当前时间窗口的请求次数和Token使用量
         if (key.rateLimitWindow > 0) {
@@ -294,7 +294,7 @@ class ApiKeyService {
   // 📝 更新API Key
   async updateApiKey(keyId, updates) {
     try {
-      const keyData = await redis.getApiKey(keyId)
+      const keyData = await database.getApiKey(keyId)
       if (!keyData || Object.keys(keyData).length === 0) {
         throw new Error('API key not found')
       }
@@ -342,7 +342,7 @@ class ApiKeyService {
       updatedData.updatedAt = new Date().toISOString()
 
       // 更新时不需要重新建立哈希映射，因为API Key本身没有变化
-      await redis.setApiKey(keyId, updatedData)
+      await database.setApiKey(keyId, updatedData)
 
       logger.success(`📝 Updated API key: ${keyId}`)
 
@@ -356,7 +356,7 @@ class ApiKeyService {
   // 🗑️ 删除API Key
   async deleteApiKey(keyId) {
     try {
-      const result = await redis.deleteApiKey(keyId)
+      const result = await database.deleteApiKey(keyId)
 
       if (result === 0) {
         throw new Error('API key not found')
@@ -397,7 +397,7 @@ class ApiKeyService {
       )
 
       // 记录API Key级别的使用统计
-      await redis.incrementTokenUsage(
+      await database.incrementTokenUsage(
         keyId,
         totalTokens,
         inputTokens,
@@ -409,7 +409,7 @@ class ApiKeyService {
 
       // 记录费用统计
       if (costInfo.costs.total > 0) {
-        await redis.incrementDailyCost(keyId, costInfo.costs.total)
+        await database.incrementDailyCost(keyId, costInfo.costs.total)
         logger.database(
           `💰 Recorded cost for ${keyId}: $${costInfo.costs.total.toFixed(6)}, model: ${model}`
         )
@@ -418,15 +418,15 @@ class ApiKeyService {
       }
 
       // 获取API Key数据以确定关联的账户
-      const keyData = await redis.getApiKey(keyId)
+      const keyData = await database.getApiKey(keyId)
       if (keyData && Object.keys(keyData).length > 0) {
         // 更新最后使用时间
         keyData.lastUsedAt = new Date().toISOString()
-        await redis.setApiKey(keyId, keyData)
+        await database.setApiKey(keyId, keyData)
 
         // 记录账户级别的使用统计（只统计实际处理请求的账户）
         if (accountId) {
-          await redis.incrementAccountUsage(
+          await database.incrementAccountUsage(
             accountId,
             totalTokens,
             inputTokens,
@@ -496,7 +496,7 @@ class ApiKeyService {
       }
 
       // 记录API Key级别的使用统计 - 这个必须执行
-      await redis.incrementTokenUsage(
+      await database.incrementTokenUsage(
         keyId,
         totalTokens,
         inputTokens,
@@ -510,7 +510,7 @@ class ApiKeyService {
 
       // 记录费用统计
       if (costInfo.totalCost > 0) {
-        await redis.incrementDailyCost(keyId, costInfo.totalCost)
+        await database.incrementDailyCost(keyId, costInfo.totalCost)
         logger.database(
           `💰 Recorded cost for ${keyId}: $${costInfo.totalCost.toFixed(6)}, model: ${model}`
         )
@@ -526,15 +526,15 @@ class ApiKeyService {
       }
 
       // 获取API Key数据以确定关联的账户
-      const keyData = await redis.getApiKey(keyId)
+      const keyData = await database.getApiKey(keyId)
       if (keyData && Object.keys(keyData).length > 0) {
         // 更新最后使用时间
         keyData.lastUsedAt = new Date().toISOString()
-        await redis.setApiKey(keyId, keyData)
+        await database.setApiKey(keyId, keyData)
 
         // 记录账户级别的使用统计（只统计实际处理请求的账户）
         if (accountId) {
-          await redis.incrementAccountUsage(
+          await database.incrementAccountUsage(
             accountId,
             totalTokens,
             inputTokens,
@@ -595,23 +595,23 @@ class ApiKeyService {
 
   // 📈 获取使用统计
   async getUsageStats(keyId) {
-    return await redis.getUsageStats(keyId)
+    return await database.getUsageStats(keyId)
   }
 
   // 📊 获取账户使用统计
   async getAccountUsageStats(accountId) {
-    return await redis.getAccountUsageStats(accountId)
+    return await database.getAccountUsageStats(accountId)
   }
 
   // 📈 获取所有账户使用统计
   async getAllAccountsUsageStats() {
-    return await redis.getAllAccountsUsageStats()
+    return await database.getAllAccountsUsageStats()
   }
 
   // 🧹 清理过期的API Keys
   async cleanupExpiredKeys() {
     try {
-      const apiKeys = await redis.getAllApiKeys()
+      const apiKeys = await database.getAllApiKeys()
       const now = new Date()
       let cleanedCount = 0
 

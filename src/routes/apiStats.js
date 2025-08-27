@@ -1,5 +1,5 @@
 const express = require('express')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const apiKeyService = require('../services/apiKeyService')
 const CostCalculator = require('../utils/costCalculator')
@@ -81,7 +81,7 @@ router.post('/api/user-stats', async (req, res) => {
       }
 
       // 直接通过 ID 获取 API Key 数据
-      keyData = await redis.getApiKey(apiId)
+      keyData = await database.getApiKey(apiId)
 
       if (!keyData || Object.keys(keyData).length === 0) {
         logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`)
@@ -110,10 +110,10 @@ router.post('/api/user-stats', async (req, res) => {
       keyId = apiId
 
       // 获取使用统计
-      const usage = await redis.getUsageStats(keyId)
+      const usage = await database.getUsageStats(keyId)
 
       // 获取当日费用统计
-      const dailyCost = await redis.getDailyCost(keyId)
+      const dailyCost = await database.getDailyCost(keyId)
 
       // 处理数据格式，与 validateApiKey 返回的格式保持一致
       // 解析限制模型数据
@@ -196,7 +196,7 @@ router.post('/api/user-stats', async (req, res) => {
     let formattedCost = '$0.000000'
 
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 获取所有月度模型统计（与model-stats接口相同的逻辑）
       const allModelKeys = await client.keys(`usage:${keyId}:model:monthly:*:*`)
@@ -286,7 +286,7 @@ router.post('/api/user-stats', async (req, res) => {
     try {
       // 获取当前时间窗口的请求次数和Token使用量
       if (fullKeyData.rateLimitWindow > 0) {
-        const client = redis.getClientSafe()
+        const client = database.getClientSafe()
         const requestCountKey = `rate_limit:requests:${keyId}`
         const tokenCountKey = `rate_limit:tokens:${keyId}`
         const windowStartKey = `rate_limit:window_start:${keyId}`
@@ -318,7 +318,7 @@ router.post('/api/user-stats', async (req, res) => {
       }
 
       // 获取当日费用
-      currentDailyCost = (await redis.getDailyCost(keyId)) || 0
+      currentDailyCost = (await database.getDailyCost(keyId)) || 0
     } catch (error) {
       logger.warn(`Failed to get current usage for key ${keyId}:`, error)
     }
@@ -422,7 +422,7 @@ router.post('/api/user-model-stats', async (req, res) => {
       }
 
       // 直接通过 ID 获取 API Key 数据
-      keyData = await redis.getApiKey(apiId)
+      keyData = await database.getApiKey(apiId)
 
       if (!keyData || Object.keys(keyData).length === 0) {
         logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`)
@@ -443,7 +443,7 @@ router.post('/api/user-model-stats', async (req, res) => {
       keyId = apiId
 
       // 获取使用统计
-      const usage = await redis.getUsageStats(keyId)
+      const usage = await database.getUsageStats(keyId)
       keyData.usage = { total: usage.total }
     } else if (apiKey) {
       // 通过 apiKey 查询（保持向后兼容）
@@ -479,10 +479,10 @@ router.post('/api/user-model-stats', async (req, res) => {
     )
 
     // 重用管理后台的模型统计逻辑，但只返回该API Key的数据
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     // 使用与管理页面相同的时区处理逻辑
-    const tzDate = redis.getDateInTimezone()
-    const today = redis.getDateStringInTimezone()
+    const tzDate = database.getDateInTimezone()
+    const today = database.getDateStringInTimezone()
     const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`
 
     const pattern =

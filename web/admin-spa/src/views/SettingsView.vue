@@ -2139,25 +2139,66 @@ const performExport = async () => {
         includeStats: exportOptions.value.includeStats
       },
       {
-        responseType: 'blob'
+        responseType: 'blob',
+        timeout: 60000 // 60秒超时
       }
     )
-
+    // 验证响应是否为有效的ZIP文件
+    if (!response.data || response.data.size === 0) {
+      throw new Error('下载的文件为空')
+    }
+    // 检查响应内容类型
+    const contentType = response.headers['content-type'] || response.headers.get?.('content-type')
+    if (contentType && !contentType.includes('application/zip')) {
+      // 如果不是ZIP文件，可能是错误响应，尝试读取文本内容
+      const text = await response.data.text()
+      try {
+        const errorData = JSON.parse(text)
+        throw new Error(errorData.error || '导出失败')
+      } catch (jsonError) {
+        throw new Error('导出文件格式错误')
+      }
+    }
     // 创建下载链接
     const blob = new Blob([response.data], { type: 'application/zip' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
     link.download = `claude-relay-data-${Date.now()}.zip`
+    // 添加到DOM并触发下载
     document.body.appendChild(link)
     link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
+    // 清理
+    setTimeout(() => {
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    }, 100)
 
     showToast('数据导出成功', 'success')
     loadDataOverview() // 刷新概览
   } catch (error) {
-    showToast('数据导出失败: ' + (error.response?.data?.error || '网络错误'), 'error')
+    console.error('导出错误:', error)
+    let errorMessage = '导出失败'
+    if (error.response) {
+      // HTTP错误响应
+      if (error.response.data) {
+        try {
+          // 尝试读取blob中的错误���息
+          if (error.response.data instanceof Blob) {
+            const text = await error.response.data.text()
+            const errorData = JSON.parse(text)
+            errorMessage = errorData.error || '导出失败'
+          } else {
+            errorMessage = error.response.data.error || '导出失败'
+          }
+        } catch (parseError) {
+          errorMessage = `导出失败 (状态码: ${error.response.status})`
+        }
+      }
+    } else if (error.message) {
+      errorMessage = error.message
+    }
+    showToast('数据导出失败: ' + errorMessage, 'error')
   } finally {
     exporting.value = false
     sensitiveAuth.value.sessionToken = ''

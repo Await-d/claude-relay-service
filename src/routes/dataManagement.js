@@ -18,7 +18,7 @@ const twoFactorAuthService = require('../services/twoFactorAuthService')
 const DataExportService = require('../services/dataExportService')
 const DataImportService = require('../services/dataImportService')
 const DataMigrationService = require('../services/dataMigrationService')
-const { DatabaseFactory } = require('../models/database/DatabaseFactory')
+const database = require('../models/database')
 const { authenticateAdmin } = require('../middleware/auth')
 
 const router = express.Router()
@@ -43,8 +43,8 @@ router.get('/overview', authenticateAdmin, async (req, res) => {
   try {
     logger.info(`📊 管理员 ${req.admin.username} 获取数据管理概览`)
 
-    const database = DatabaseFactory.create(require('../../config/config'))
-    await database.connect()
+    const db = database
+    await db.connect()
 
     // 获取数据统计
     const stats = {
@@ -57,45 +57,47 @@ router.get('/overview', authenticateAdmin, async (req, res) => {
     }
 
     try {
-      const apiKeys = await database.getAllApiKeys()
+      const apiKeys = await db.getAllApiKeys()
       stats.apiKeys = apiKeys.length
     } catch (error) {
       logger.warn('获取API Keys统计失败:', error.message)
     }
 
     try {
-      const claudeAccounts = await database.getAllClaudeAccounts()
+      const claudeAccounts = await db.getAllClaudeAccounts()
       stats.claudeAccounts = claudeAccounts.length
     } catch (error) {
       logger.warn('获取Claude账户统计失败:', error.message)
     }
 
     try {
-      const openaiAccounts = await database.getAllOpenAIAccounts()
+      const openaiAccounts = await db.getAllOpenAIAccounts()
       stats.openaiAccounts = openaiAccounts.length
     } catch (error) {
       logger.warn('获取OpenAI账户统计失败:', error.message)
     }
 
     try {
-      const config = await database.getSystemSchedulingConfig()
+      const config = await db.getSystemSchedulingConfig()
       stats.systemConfig = config ? 1 : 0
     } catch (error) {
       logger.warn('获取系统配置统计失败:', error.message)
     }
 
     // 检查2FA状态
-    stats.is2FAEnabled = await twoFactorAuthService.is2FAEnabled(req.admin.id)
+    logger.debug(`🔍 检查管理员 ${req.admin.username} 的2FA状态`)
+    stats.is2FAEnabled = await twoFactorAuthService.is2FAEnabled(req.admin.username)
+    logger.debug(`🔍 管理员 ${req.admin.username} 2FA状态: ${stats.is2FAEnabled}`)
 
     // 获取最后导出时间（如果有）
     try {
-      const lastExportInfo = await database.getSession('last_data_export')
+      const lastExportInfo = await db.getSession('last_data_export')
       stats.lastExport = lastExportInfo?.timestamp || null
     } catch (error) {
       // 忽略获取最后导出时间的错误
     }
 
-    await database.disconnect()
+    await db.disconnect()
 
     res.json({
       success: true,
@@ -118,7 +120,7 @@ router.post('/2fa/generate', authenticateAdmin, async (req, res) => {
     logger.info(`🔐 管理员 ${req.admin.username} 生成2FA密钥`)
 
     const twoFAConfig = await twoFactorAuthService.generate2FASecret(
-      req.admin.id,
+      req.admin.username,
       req.admin.username
     )
 
@@ -154,7 +156,7 @@ router.post('/2fa/enable', authenticateAdmin, async (req, res) => {
       })
     }
 
-    await twoFactorAuthService.enable2FA(req.admin.id, token)
+    await twoFactorAuthService.enable2FA(req.admin.username, token)
 
     logger.info(`✅ 管理员 ${req.admin.username} 成功启用2FA`)
 
@@ -181,9 +183,24 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
 
     // 验证管理员密码
     const bcrypt = require('bcryptjs')
-    const isPasswordValid = await bcrypt.compare(password, req.admin.hashedPassword)
+
+    // 从数据库获取完整的管理员信息（包括哈希密码）
+    const db = database
+    await db.connect()
+
+    const fullAdminInfo = await db.getSession('admin_credentials')
+    if (!fullAdminInfo || !fullAdminInfo.passwordHash) {
+      await db.disconnect()
+      return res.status(401).json({
+        success: false,
+        error: '管理员信息不完整'
+      })
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, fullAdminInfo.passwordHash)
 
     if (!isPasswordValid) {
+      await db.disconnect()
       return res.status(401).json({
         success: false,
         error: '管理员密码错误'
@@ -191,9 +208,10 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
     }
 
     // 验证2FA
-    const is2FAEnabled = await twoFactorAuthService.is2FAEnabled(req.admin.id)
+    const is2FAEnabled = await twoFactorAuthService.is2FAEnabled(req.admin.username)
 
     if (!is2FAEnabled) {
+      await db.disconnect()
       return res.status(400).json({
         success: false,
         error: '请先启用2FA'
@@ -201,30 +219,29 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
     }
 
     if (!token) {
+      await db.disconnect()
       return res.status(400).json({
         success: false,
         error: '请输入2FA验证码'
       })
     }
 
-    await twoFactorAuthService.verify2FA(req.admin.id, token, clientIP)
+    await twoFactorAuthService.verify2FA(req.admin.username, token, clientIP)
 
     // 创建敏感操作会话（15分钟有效期）
     const sensitiveSessionToken = require('crypto').randomUUID()
-    const database = DatabaseFactory.create(require('../../config/config'))
-    await database.connect()
 
-    await database.setSession(
+    await db.setSession(
       `sensitive_session:${sensitiveSessionToken}`,
       {
-        adminId: req.admin.id,
+        adminUsername: req.admin.username,
         createdAt: new Date().toISOString(),
         clientIP
       },
       15 * 60
     ) // 15分钟
 
-    await database.disconnect()
+    await db.disconnect()
 
     logger.info(`✅ 管理员 ${req.admin.username} 通过敏感操作验证`)
 
@@ -236,6 +253,14 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
       }
     })
   } catch (error) {
+    // 确保数据库连接被正确关闭
+    try {
+      const db = database
+      await db.disconnect()
+    } catch (disconnectError) {
+      logger.warn('数据库断开连接失败:', disconnectError.message)
+    }
+
     logger.error('❌ 2FA验证失败:', error)
     res.status(400).json({
       success: false,
@@ -252,12 +277,12 @@ router.post('/export', authenticateAdmin, async (req, res) => {
     const { sessionToken, includeStats = true } = req.body
 
     // 验证敏感操作会话
-    const database = DatabaseFactory.create(require('../../config/config'))
-    await database.connect()
+    const db = database
+    await db.connect()
 
-    const sensitiveSession = await database.getSession(`sensitive_session:${sessionToken}`)
-    if (!sensitiveSession || sensitiveSession.adminId !== req.admin.id) {
-      await database.disconnect()
+    const sensitiveSession = await db.getSession(`sensitive_session:${sessionToken}`)
+    if (!sensitiveSession || sensitiveSession.adminUsername !== req.admin.username) {
+      await db.disconnect()
       return res.status(401).json({
         success: false,
         error: '敏感操作会话无效或已过期'
@@ -272,7 +297,7 @@ router.post('/export', authenticateAdmin, async (req, res) => {
     await fs.mkdir(exportDir, { recursive: true })
 
     // 执行数据导出
-    const exportService = new DataExportService(database)
+    const exportService = new DataExportService(db)
     const exportResult = await exportService.exportAllData(exportDir, {
       includeStats,
       includeSessions: false, // 会话数据不导出
@@ -284,7 +309,7 @@ router.post('/export', authenticateAdmin, async (req, res) => {
     await createZipArchive(exportDir, zipPath)
 
     // 记录导出信息
-    await database.setSession(
+    await db.setSession(
       'last_data_export',
       {
         timestamp: new Date().toISOString(),
@@ -296,22 +321,47 @@ router.post('/export', authenticateAdmin, async (req, res) => {
       30 * 24 * 60 * 60
     ) // 保存30天
 
-    await database.disconnect()
+    // 清理敏感操作会话
+    await db.deleteSession(`sensitive_session:${sessionToken}`)
 
-    // 设置下载响应
+    // 断开数据库连接
+    await db.disconnect()
+
+    logger.info(`✅ 管理员 ${req.admin.username} 数据导出完成: ${exportResult.totalRecords} 条记录`)
+
+    // 验证ZIP文件存在且大小正确
     const stats = await fs.stat(zipPath)
+    if (stats.size === 0) {
+      throw new Error('生成的ZIP文件为空')
+    }
+
+    // 设置响应头
     res.setHeader('Content-Type', 'application/zip')
     res.setHeader('Content-Disposition', `attachment; filename="claude-relay-data-${exportId}.zip"`)
     res.setHeader('Content-Length', stats.size)
+    res.setHeader('Cache-Control', 'no-cache')
+
+    // 创建文件流并处理错误
+    const fileStream = require('fs').createReadStream(zipPath)
+
+    fileStream.on('error', (error) => {
+      logger.error('文件流读取错误:', error)
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: '文件读取失败' })
+      }
+    })
+
+    res.on('error', (error) => {
+      logger.error('响应流错误:', error)
+      fileStream.destroy()
+    })
+
+    res.on('close', () => {
+      fileStream.destroy()
+    })
 
     // 发送文件
-    const fileStream = require('fs').createReadStream(zipPath)
     fileStream.pipe(res)
-
-    // 清理敏感操作会话
-    await database.deleteSession(`sensitive_session:${sessionToken}`)
-
-    logger.info(`✅ 管理员 ${req.admin.username} 数据导出完成: ${exportResult.totalRecords} 条记录`)
 
     // 异步清理临时文件
     setTimeout(async () => {
@@ -346,12 +396,12 @@ router.post('/import', authenticateAdmin, upload.single('dataFile'), async (req,
     }
 
     // 验证敏感操作会话
-    const database = DatabaseFactory.create(require('../../config/config'))
-    await database.connect()
+    const db = database
+    await db.connect()
 
-    const sensitiveSession = await database.getSession(`sensitive_session:${sessionToken}`)
-    if (!sensitiveSession || sensitiveSession.adminId !== req.admin.id) {
-      await database.disconnect()
+    const sensitiveSession = await db.getSession(`sensitive_session:${sessionToken}`)
+    if (!sensitiveSession || sensitiveSession.adminUsername !== req.admin.username) {
+      await db.disconnect()
       return res.status(401).json({
         success: false,
         error: '敏感操作会话无效或已过期'
@@ -370,7 +420,7 @@ router.post('/import', authenticateAdmin, upload.single('dataFile'), async (req,
     }
 
     // 执行数据导入
-    const importService = new DataImportService(database)
+    const importService = new DataImportService(db)
     const importResult = await importService.importAllData(importDir, {
       validateChecksums: true,
       conflictStrategy,
@@ -378,10 +428,10 @@ router.post('/import', authenticateAdmin, upload.single('dataFile'), async (req,
       dryRun: false
     })
 
-    await database.disconnect()
+    await db.disconnect()
 
     // 清理敏感操作会话
-    await database.deleteSession(`sensitive_session:${sessionToken}`)
+    await db.deleteSession(`sensitive_session:${sessionToken}`)
 
     logger.info(`✅ 管理员 ${req.admin.username} 数据导入完成: ${importResult.totalRecords} 条记录`)
 
@@ -430,12 +480,12 @@ router.post('/migrate', authenticateAdmin, upload.single('configFile'), async (r
     }
 
     // 验证敏感操作会话
-    const database = DatabaseFactory.create(require('../../config/config'))
-    await database.connect()
+    const db = database
+    await db.connect()
 
-    const sensitiveSession = await database.getSession(`sensitive_session:${sessionToken}`)
-    if (!sensitiveSession || sensitiveSession.adminId !== req.admin.id) {
-      await database.disconnect()
+    const sensitiveSession = await db.getSession(`sensitive_session:${sessionToken}`)
+    if (!sensitiveSession || sensitiveSession.adminUsername !== req.admin.username) {
+      await db.disconnect()
       return res.status(401).json({
         success: false,
         error: '敏感操作会话无效或已过期'
@@ -462,10 +512,10 @@ router.post('/migrate', authenticateAdmin, upload.single('configFile'), async (r
       }
     )
 
-    await database.disconnect()
+    await db.disconnect()
 
     // 清理敏感操作会话
-    await database.deleteSession(`sensitive_session:${sessionToken}`)
+    await db.deleteSession(`sensitive_session:${sessionToken}`)
 
     logger.info(`✅ 管理员 ${req.admin.username} 数据库迁移完成`)
 
@@ -499,11 +549,34 @@ async function createZipArchive(sourceDir, outputPath) {
     const output = require('fs').createWriteStream(outputPath)
     const archive = archiver('zip', { zlib: { level: 9 } })
 
-    output.on('close', () => resolve())
-    archive.on('error', reject)
+    // 处理输出流事件
+    output.on('close', () => {
+      logger.debug(`ZIP压缩完成，文件大小: ${archive.pointer()} bytes`)
+      resolve()
+    })
 
+    output.on('error', (error) => {
+      logger.error('ZIP输出流错误:', error)
+      reject(error)
+    })
+
+    // 处理archiver事件
+    archive.on('error', (error) => {
+      logger.error('ZIP压缩错误:', error)
+      reject(error)
+    })
+
+    archive.on('warning', (warning) => {
+      logger.warn('ZIP压缩警告:', warning)
+    })
+
+    // 连接流
     archive.pipe(output)
+
+    // 添加目录内容
     archive.directory(sourceDir, false)
+
+    // 完成压缩
     archive.finalize()
   })
 }

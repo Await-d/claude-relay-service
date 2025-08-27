@@ -2,17 +2,16 @@
  * 检查 Redis 中的所有键
  */
 
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 
 async function checkRedisKeys() {
   console.log('🔍 检查 Redis 中的所有键...\n')
 
   try {
-    // 确保 Redis 已连接
-    await redis.connect()
+    // 数据库会自动初始化和连接
 
     // 获取所有键
-    const allKeys = await redis.client.keys('*')
+    const allKeys = await database.keys('*')
     console.log(`找到 ${allKeys.length} 个键\n`)
 
     // 按类型分组
@@ -46,6 +45,9 @@ async function checkRedisKeys() {
     console.error('❌ 错误:', error)
     console.error(error.stack)
   } finally {
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
     process.exit(0)
   }
 }

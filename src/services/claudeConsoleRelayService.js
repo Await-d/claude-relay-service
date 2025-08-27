@@ -632,7 +632,7 @@ class ClaudeConsoleRelayService {
   // 🕐 更新最后使用时间
   async _updateLastUsedTime(accountId) {
     try {
-      const client = require('../models/redis').getClientSafe()
+      const client = require('../models/database').getClientSafe()
       await client.hset(
         `claude_console_account:${accountId}`,
         'lastUsedAt',

@@ -5,9 +5,11 @@
  * 用于调试、恢复和管理Claude账户的会话窗口
  */
 
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 const claudeAccountService = require('../src/services/claudeAccountService')
 const readline = require('readline')
+
+// 全局数据库实例（使用模块导入的 database 代理）
 
 // 创建readline接口
 const rl = readline.createInterface({
@@ -89,7 +91,7 @@ const commands = {
   async debug() {
     console.log('🔍 开始调试会话窗口状态...\n')
 
-    const accounts = await redis.getAllClaudeAccounts()
+    const accounts = await database.getAllClaudeAccounts()
     console.log(`📊 找到 ${accounts.length} 个Claude账户\n`)
 
     const stats = {
@@ -216,7 +218,7 @@ const commands = {
   async clear() {
     console.log('🗑️ 清除所有会话窗口...\n')
 
-    const accounts = await redis.getAllClaudeAccounts()
+    const accounts = await database.getAllClaudeAccounts()
     let clearedCount = 0
 
     for (const account of accounts) {
@@ -225,7 +227,7 @@ const commands = {
         delete account.sessionWindowEnd
         delete account.lastRequestTime
 
-        await redis.setClaudeAccount(account.id, account)
+        await database.setClaudeAccount(account.id, account)
         clearedCount++
 
         console.log(`✅ 清除账户 ${account.name} (${account.id}) 的会话窗口`)
@@ -239,7 +241,7 @@ const commands = {
   async test() {
     console.log('🧪 创建测试会话窗口...\n')
 
-    const accounts = await redis.getAllClaudeAccounts()
+    const accounts = await database.getAllClaudeAccounts()
     if (accounts.length === 0) {
       console.log('❌ 没有找到Claude账户')
       return
@@ -261,7 +263,7 @@ const commands = {
         account.sessionWindowEnd = windowEnd.toISOString()
         account.lastRequestTime = now.toISOString()
 
-        await redis.setClaudeAccount(account.id, account)
+        await database.setClaudeAccount(account.id, account)
         updatedCount++
 
         console.log(`✅ 为账户 ${account.name} 创建测试会话窗口:`)
@@ -278,7 +280,7 @@ const commands = {
     console.log('🔧 手动设置会话窗口...\n')
 
     // 获取所有账户
-    const accounts = await redis.getAllClaudeAccounts()
+    const accounts = await database.getAllClaudeAccounts()
     if (accounts.length === 0) {
       console.log('❌ 没有找到Claude账户')
       return
@@ -409,7 +411,7 @@ async function setPresetWindow(account) {
     account.lastUsedAt = now.toISOString()
   }
 
-  await redis.setClaudeAccount(account.id, account)
+  await database.setClaudeAccount(account.id, account)
 
   console.log('\n✅ 已设置会话窗口:')
   console.log(`   账户: ${account.name}`)
@@ -443,7 +445,7 @@ async function setCustomLastUsed(account) {
   account.sessionWindowEnd = windowEnd.toISOString()
   account.lastRequestTime = lastUsedTime.toISOString()
 
-  await redis.setClaudeAccount(account.id, account)
+  await database.setClaudeAccount(account.id, account)
 
   console.log('\n✅ 已设置会话窗口:')
   console.log(`   账户: ${account.name}`)
@@ -492,7 +494,7 @@ async function setDirectWindow(account) {
     account.lastUsedAt = startTime.toISOString()
   }
 
-  await redis.setClaudeAccount(account.id, account)
+  await database.setClaudeAccount(account.id, account)
 
   console.log('\n✅ 已设置会话窗口:')
   console.log(`   账户: ${account.name}`)
@@ -516,7 +518,7 @@ async function clearAccountWindow(account) {
   delete account.sessionWindowEnd
   delete account.lastRequestTime
 
-  await redis.setClaudeAccount(account.id, account)
+  await database.setClaudeAccount(account.id, account)
 
   console.log(`\n✅ 已清除账户 "${account.name}" 的会话窗口`)
 }
@@ -536,8 +538,7 @@ async function main() {
   }
 
   try {
-    // 连接Redis
-    await redis.connect()
+    // 数据库会自动初始化和连接
 
     // 执行命令
     await commands[command]()
@@ -545,7 +546,9 @@ async function main() {
     console.error('❌ 执行失败:', error)
     process.exit(1)
   } finally {
-    await redis.disconnect()
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
     rl.close()
   }
 }

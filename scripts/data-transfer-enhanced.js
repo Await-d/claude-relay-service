@@ -7,7 +7,7 @@
 
 const fs = require('fs').promises
 const crypto = require('crypto')
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 const logger = require('../src/utils/logger')
 const readline = require('readline')
 const config = require('../config/config')
@@ -130,7 +130,7 @@ async function exportUsageStats(keyId) {
 
     // 导出总统计
     const totalKey = `usage:${keyId}`
-    const totalData = await redis.client.hgetall(totalKey)
+    const totalData = await database.client.hgetall(totalKey)
     if (totalData && Object.keys(totalData).length > 0) {
       stats.total = totalData
     }
@@ -143,7 +143,7 @@ async function exportUsageStats(keyId) {
       const dateStr = date.toISOString().split('T')[0]
       const dailyKey = `usage:daily:${keyId}:${dateStr}`
 
-      const dailyData = await redis.client.hgetall(dailyKey)
+      const dailyData = await database.client.hgetall(dailyKey)
       if (dailyData && Object.keys(dailyData).length > 0) {
         stats.daily[dateStr] = dailyData
       }
@@ -156,7 +156,7 @@ async function exportUsageStats(keyId) {
       const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
       const monthlyKey = `usage:monthly:${keyId}:${monthStr}`
 
-      const monthlyData = await redis.client.hgetall(monthlyKey)
+      const monthlyData = await database.client.hgetall(monthlyKey)
       if (monthlyData && Object.keys(monthlyData).length > 0) {
         stats.monthly[monthStr] = monthlyData
       }
@@ -171,7 +171,7 @@ async function exportUsageStats(keyId) {
       const hourKey = `${dateStr}:${hour}`
       const hourlyKey = `usage:hourly:${keyId}:${hourKey}`
 
-      const hourlyData = await redis.client.hgetall(hourlyKey)
+      const hourlyData = await database.client.hgetall(hourlyKey)
       if (hourlyData && Object.keys(hourlyData).length > 0) {
         stats.hourly[hourKey] = hourlyData
       }
@@ -180,13 +180,13 @@ async function exportUsageStats(keyId) {
     // 导出模型统计
     // 每日模型统计
     const modelDailyPattern = `usage:${keyId}:model:daily:*`
-    const modelDailyKeys = await redis.client.keys(modelDailyPattern)
+    const modelDailyKeys = await database.client.keys(modelDailyPattern)
     for (const key of modelDailyKeys) {
       const match = key.match(/usage:.+:model:daily:(.+):(\d{4}-\d{2}-\d{2})$/)
       if (match) {
         const model = match[1]
         const date = match[2]
-        const data = await redis.client.hgetall(key)
+        const data = await database.client.hgetall(key)
         if (data && Object.keys(data).length > 0) {
           if (!stats.models[model]) {
             stats.models[model] = { daily: {}, monthly: {} }
@@ -198,13 +198,13 @@ async function exportUsageStats(keyId) {
 
     // 每月模型统计
     const modelMonthlyPattern = `usage:${keyId}:model:monthly:*`
-    const modelMonthlyKeys = await redis.client.keys(modelMonthlyPattern)
+    const modelMonthlyKeys = await database.client.keys(modelMonthlyPattern)
     for (const key of modelMonthlyKeys) {
       const match = key.match(/usage:.+:model:monthly:(.+):(\d{4}-\d{2})$/)
       if (match) {
         const model = match[1]
         const month = match[2]
-        const data = await redis.client.hgetall(key)
+        const data = await database.client.hgetall(key)
         if (data && Object.keys(data).length > 0) {
           if (!stats.models[model]) {
             stats.models[model] = { daily: {}, monthly: {} }
@@ -228,7 +228,7 @@ async function importUsageStats(keyId, stats) {
       return
     }
 
-    const pipeline = redis.client.pipeline()
+    const pipeline = database.client.pipeline()
     let importCount = 0
 
     // 导入总统计
@@ -372,7 +372,7 @@ async function exportData() {
     logger.info(`🔒 Sanitize sensitive data: ${shouldSanitize ? 'YES' : 'NO'}`)
     logger.info(`🔓 Decrypt data: ${shouldDecrypt ? 'YES' : 'NO'}`)
 
-    await redis.connect()
+    await database._manager.init()
     logger.success('✅ Connected to Redis')
 
     const exportDataObj = {
@@ -389,7 +389,7 @@ async function exportData() {
     // 导出 API Keys
     if (types.includes('all') || types.includes('apikeys')) {
       logger.info('📤 Exporting API Keys...')
-      const keys = await redis.client.keys('apikey:*')
+      const keys = await database.client.keys('apikey:*')
       const apiKeys = []
 
       for (const key of keys) {
@@ -397,7 +397,7 @@ async function exportData() {
           continue
         }
 
-        const data = await redis.client.hgetall(key)
+        const data = await database.client.hgetall(key)
         if (data && Object.keys(data).length > 0) {
           // 获取该 API Key 的 ID
           const keyId = data.id
@@ -418,12 +418,12 @@ async function exportData() {
     // 导出 Claude 账户
     if (types.includes('all') || types.includes('accounts')) {
       logger.info('📤 Exporting Claude accounts...')
-      const keys = await redis.client.keys('claude:account:*')
+      const keys = await database.client.keys('claude:account:*')
       logger.info(`Found ${keys.length} Claude account keys in Redis`)
       const accounts = []
 
       for (const key of keys) {
-        const data = await redis.client.hgetall(key)
+        const data = await database.client.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           // 解密敏感字段
@@ -459,12 +459,12 @@ async function exportData() {
 
       // 导出 Gemini 账户
       logger.info('📤 Exporting Gemini accounts...')
-      const geminiKeys = await redis.client.keys('gemini_account:*')
+      const geminiKeys = await database.client.keys('gemini_account:*')
       logger.info(`Found ${geminiKeys.length} Gemini account keys in Redis`)
       const geminiAccounts = []
 
       for (const key of geminiKeys) {
-        const data = await redis.client.hgetall(key)
+        const data = await database.client.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           // 解密敏感字段
@@ -496,7 +496,7 @@ async function exportData() {
     // 导出管理员
     if (types.includes('all') || types.includes('admins')) {
       logger.info('📤 Exporting admins...')
-      const keys = await redis.client.keys('admin:*')
+      const keys = await database.client.keys('admin:*')
       const admins = []
 
       for (const key of keys) {
@@ -504,7 +504,7 @@ async function exportData() {
           continue
         }
 
-        const data = await redis.client.hgetall(key)
+        const data = await database.client.hgetall(key)
         if (data && Object.keys(data).length > 0) {
           admins.push(shouldSanitize ? sanitizeData(data, 'admin') : data)
         }
@@ -525,13 +525,13 @@ async function exportData() {
 
       // 导出全局每日模型统计
       const globalDailyPattern = 'usage:model:daily:*'
-      const globalDailyKeys = await redis.client.keys(globalDailyPattern)
+      const globalDailyKeys = await database.client.keys(globalDailyPattern)
       for (const key of globalDailyKeys) {
         const match = key.match(/usage:model:daily:(.+):(\d{4}-\d{2}-\d{2})$/)
         if (match) {
           const model = match[1]
           const date = match[2]
-          const data = await redis.client.hgetall(key)
+          const data = await database.client.hgetall(key)
           if (data && Object.keys(data).length > 0) {
             if (!globalStats.daily[date]) {
               globalStats.daily[date] = {}
@@ -543,13 +543,13 @@ async function exportData() {
 
       // 导出全局每月模型统计
       const globalMonthlyPattern = 'usage:model:monthly:*'
-      const globalMonthlyKeys = await redis.client.keys(globalMonthlyPattern)
+      const globalMonthlyKeys = await database.client.keys(globalMonthlyPattern)
       for (const key of globalMonthlyKeys) {
         const match = key.match(/usage:model:monthly:(.+):(\d{4}-\d{2})$/)
         if (match) {
           const model = match[1]
           const month = match[2]
-          const data = await redis.client.hgetall(key)
+          const data = await database.client.hgetall(key)
           if (data && Object.keys(data).length > 0) {
             if (!globalStats.monthly[month]) {
               globalStats.monthly[month] = {}
@@ -561,13 +561,13 @@ async function exportData() {
 
       // 导出全局每小时模型统计
       const globalHourlyPattern = 'usage:model:hourly:*'
-      const globalHourlyKeys = await redis.client.keys(globalHourlyPattern)
+      const globalHourlyKeys = await database.client.keys(globalHourlyPattern)
       for (const key of globalHourlyKeys) {
         const match = key.match(/usage:model:hourly:(.+):(\d{4}-\d{2}-\d{2}:\d{2})$/)
         if (match) {
           const model = match[1]
           const hour = match[2]
-          const data = await redis.client.hgetall(key)
+          const data = await database.client.hgetall(key)
           if (data && Object.keys(data).length > 0) {
             if (!globalStats.hourly[hour]) {
               globalStats.hourly[hour] = {}
@@ -615,7 +615,7 @@ async function exportData() {
     logger.error('💥 Export failed:', error)
     process.exit(1)
   } finally {
-    await redis.disconnect()
+    await database._manager.cleanup()
     rl.close()
   }
 }
@@ -734,7 +734,7 @@ async function importData() {
     }
 
     // 连接 Redis
-    await redis.connect()
+    await database._manager.init()
     logger.success('✅ Connected to Redis')
 
     const stats = {
@@ -748,7 +748,7 @@ async function importData() {
       logger.info('\n📥 Importing API Keys...')
       for (const apiKey of importDataObj.data.apiKeys) {
         try {
-          const exists = await redis.client.exists(`apikey:${apiKey.id}`)
+          const exists = await database.client.exists(`apikey:${apiKey.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -774,7 +774,7 @@ async function importData() {
           delete apiKeyData.usageStats
 
           // 使用 hset 存储到哈希表
-          const pipeline = redis.client.pipeline()
+          const pipeline = database.client.pipeline()
           for (const [field, value] of Object.entries(apiKeyData)) {
             pipeline.hset(`apikey:${apiKey.id}`, field, value)
           }
@@ -782,7 +782,7 @@ async function importData() {
 
           // 更新哈希映射
           if (apiKey.apiKey && !importDataObj.metadata.sanitized) {
-            await redis.client.hset('apikey:hash_map', apiKey.apiKey, apiKey.id)
+            await database.client.hset('apikey:hash_map', apiKey.apiKey, apiKey.id)
           }
 
           // 导入使用统计数据
@@ -804,7 +804,7 @@ async function importData() {
       logger.info('\n📥 Importing Claude accounts...')
       for (const account of importDataObj.data.claudeAccounts) {
         try {
-          const exists = await redis.client.exists(`claude:account:${account.id}`)
+          const exists = await database.client.exists(`claude:account:${account.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -852,7 +852,7 @@ async function importData() {
           }
 
           // 使用 hset 存储到哈希表
-          const pipeline = redis.client.pipeline()
+          const pipeline = database.client.pipeline()
           for (const [field, value] of Object.entries(accountData)) {
             if (field === 'claudeAiOauth' && typeof value === 'object') {
               // 确保对象被序列化
@@ -877,7 +877,7 @@ async function importData() {
       logger.info('\n📥 Importing Gemini accounts...')
       for (const account of importDataObj.data.geminiAccounts) {
         try {
-          const exists = await redis.client.exists(`gemini_account:${account.id}`)
+          const exists = await database.client.exists(`gemini_account:${account.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -918,7 +918,7 @@ async function importData() {
           }
 
           // 使用 hset 存储到哈希表
-          const pipeline = redis.client.pipeline()
+          const pipeline = database.client.pipeline()
           for (const [field, value] of Object.entries(accountData)) {
             pipeline.hset(`gemini_account:${account.id}`, field, value)
           }
@@ -938,7 +938,7 @@ async function importData() {
       logger.info('\n📥 Importing admins...')
       for (const admin of importDataObj.data.admins) {
         try {
-          const exists = await redis.client.exists(`admin:${admin.id}`)
+          const exists = await database.client.exists(`admin:${admin.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -957,14 +957,14 @@ async function importData() {
           }
 
           // 使用 hset 存储到哈希表
-          const pipeline = redis.client.pipeline()
+          const pipeline = database.client.pipeline()
           for (const [field, value] of Object.entries(admin)) {
             pipeline.hset(`admin:${admin.id}`, field, value)
           }
           await pipeline.exec()
 
           // 更新用户名映射
-          await redis.client.set(`admin_username:${admin.username}`, admin.id)
+          await database.client.set(`admin_username:${admin.username}`, admin.id)
 
           logger.success(`✅ Imported admin: ${admin.username} (${admin.id})`)
           stats.imported++
@@ -980,7 +980,7 @@ async function importData() {
       logger.info('\n📥 Importing global model statistics...')
       try {
         const globalStats = importDataObj.data.globalModelStats
-        const pipeline = redis.client.pipeline()
+        const pipeline = database.client.pipeline()
         let globalStatCount = 0
 
         // 导入每日统计
@@ -1040,7 +1040,7 @@ async function importData() {
     logger.error('💥 Import failed:', error)
     process.exit(1)
   } finally {
-    await redis.disconnect()
+    await database._manager.cleanup()
     rl.close()
   }
 }

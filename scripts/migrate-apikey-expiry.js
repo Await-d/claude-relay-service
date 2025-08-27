@@ -11,7 +11,7 @@
  * --dry-run: 仅模拟运行，不实际修改数据
  */
 
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 const logger = require('../src/utils/logger')
 const readline = require('readline')
 
@@ -46,12 +46,11 @@ async function migrateApiKeys() {
     logger.info(`📅 Default expiry period: ${DEFAULT_DAYS} days`)
     logger.info(`🔍 Mode: ${DRY_RUN ? 'DRY RUN (no changes will be made)' : 'LIVE RUN'}`)
 
-    // 连接 Redis
-    await redis.connect()
-    logger.success('✅ Connected to Redis')
+    // 数据库会自动初始化和连接
+    logger.success('✅ Connected to database')
 
     // 获取所有 API Keys
-    const apiKeys = await redis.getAllApiKeys()
+    const apiKeys = await database.getAllApiKeys()
     logger.info(`📊 Found ${apiKeys.length} API Keys in total`)
 
     // 统计信息
@@ -119,9 +118,8 @@ async function migrateApiKeys() {
     for (const key of keysToMigrate) {
       try {
         if (!DRY_RUN) {
-          // 直接更新 Redis 中的数据
-          // 使用 hset 更新单个字段
-          await redis.client.hset(`apikey:${key.id}`, 'expiresAt', newExpiryISO)
+          // 直接更新数据库中的数据
+          await database.updateApiKey(key.id, { expiresAt: newExpiryISO })
           logger.success(`✅ Migrated: "${key.name}" (${key.id})`)
         } else {
           logger.info(`[DRY RUN] Would migrate: "${key.name}" (${key.id})`)
@@ -152,8 +150,10 @@ async function migrateApiKeys() {
   } finally {
     // 清理
     rl.close()
-    await redis.disconnect()
-    logger.info('👋 Disconnected from Redis')
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
+    logger.info('👋 Disconnected from database')
   }
 }
 

@@ -5,17 +5,17 @@
  * 用于查看 Redis 中存储的所有键和数据结构
  */
 
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 const logger = require('../src/utils/logger')
 
 async function debugRedisKeys() {
   try {
-    logger.info('🔄 Connecting to Redis...')
-    await redis.connect()
-    logger.success('✅ Connected to Redis')
+    logger.info('🔄 Connecting to database...')
+    // 数据库会自动初始化和连接
+    logger.success('✅ Connected to database')
 
     // 获取所有键
-    const allKeys = await redis.client.keys('*')
+    const allKeys = await database.keys('*')
     logger.info(`\n📊 Total keys in Redis: ${allKeys.length}\n`)
 
     // 按类型分组
@@ -108,13 +108,15 @@ async function debugRedisKeys() {
     // 随机检查几个键的类型
     const sampleKeys = allKeys.slice(0, Math.min(10, allKeys.length))
     for (const key of sampleKeys) {
-      const type = await redis.client.type(key)
+      const type = await database.type(key)
       console.log(`${key} => ${type}`)
     }
   } catch (error) {
     logger.error('💥 Debug failed:', error)
   } finally {
-    await redis.disconnect()
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
     logger.info('👋 Disconnected from Redis')
   }
 }

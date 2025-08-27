@@ -1,6 +1,6 @@
 const openaiAccountService = require('./openaiAccountService')
 const accountGroupService = require('./accountGroupService')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 
@@ -26,7 +26,7 @@ class UnifiedOpenAIScheduler {
   async _getSystemDefaultStrategy() {
     try {
       // 首先尝试从Redis获取动态配置
-      const systemConfig = await redis.getSystemSchedulingConfig()
+      const systemConfig = await database.getSystemSchedulingConfig()
       if (systemConfig && systemConfig.defaultStrategy) {
         return systemConfig.defaultStrategy
       }
@@ -298,7 +298,7 @@ class UnifiedOpenAIScheduler {
 
   // 🔗 获取会话映射
   async _getSessionMapping(sessionHash) {
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     const mappingData = await client.get(`${this.SESSION_MAPPING_PREFIX}${sessionHash}`)
 
     if (mappingData) {
@@ -315,7 +315,7 @@ class UnifiedOpenAIScheduler {
 
   // 💾 设置会话映射
   async _setSessionMapping(sessionHash, accountId, accountType) {
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     const mappingData = JSON.stringify({ accountId, accountType })
 
     // 设置1小时过期
@@ -324,7 +324,7 @@ class UnifiedOpenAIScheduler {
 
   // 🗑️ 删除会话映射
   async _deleteSessionMapping(sessionHash) {
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     await client.del(`${this.SESSION_MAPPING_PREFIX}${sessionHash}`)
   }
 
@@ -553,7 +553,7 @@ class UnifiedOpenAIScheduler {
       }
 
       // 保持原有的统计逻辑用于调度器内部统计
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const statsKey = `${this.USAGE_STATS_PREFIX}${accountType}:${accountId}`
 
       // 增加使用次数
@@ -725,7 +725,7 @@ class UnifiedOpenAIScheduler {
   // 🔄 轮询调度策略
   async _roundRobinStrategy(accounts, priority = null) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 为每个优先级组使用独立的轮询键
       const roundRobinKey =
@@ -884,7 +884,7 @@ class UnifiedOpenAIScheduler {
         return a.accountId.localeCompare(b.accountId)
       })
 
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 为每个优先级组使用独立的顺序键
       const sequentialKey =
@@ -922,7 +922,7 @@ class UnifiedOpenAIScheduler {
   // 📈 获取账户使用统计
   async getAccountUsageCount(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const statsKey = `${this.USAGE_STATS_PREFIX}${accountId}`
       const count = await client.get(statsKey)
       return parseInt(count) || 0

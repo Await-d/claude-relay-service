@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid')
 const logger = require('../utils/logger')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const schedulingValidator = require('../utils/schedulingValidator')
 
 class AccountGroupService {
@@ -54,7 +54,7 @@ class AccountGroupService {
         throw new Error(`调度策略字段验证失败: ${validation.errors.join(', ')}`)
       }
 
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const groupId = uuidv4()
       const now = new Date().toISOString()
 
@@ -100,7 +100,7 @@ class AccountGroupService {
    */
   async updateGroup(groupId, updates) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const groupKey = `${this.GROUP_PREFIX}${groupId}`
 
       // 检查分组是否存在
@@ -178,7 +178,7 @@ class AccountGroupService {
    */
   async deleteGroup(groupId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 检查分组是否存在
       const group = await this.getGroup(groupId)
@@ -219,7 +219,7 @@ class AccountGroupService {
    */
   async getGroup(groupId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const groupData = await client.hgetall(`${this.GROUP_PREFIX}${groupId}`)
 
       if (!groupData || Object.keys(groupData).length === 0) {
@@ -250,7 +250,7 @@ class AccountGroupService {
    */
   async getAllGroups(platform = null) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const groupIds = await client.smembers(this.GROUPS_KEY)
 
       const groups = []
@@ -282,7 +282,7 @@ class AccountGroupService {
    */
   async addAccountToGroup(accountId, groupId, accountPlatform) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 获取分组信息
       const group = await this.getGroup(groupId)
@@ -314,7 +314,7 @@ class AccountGroupService {
    */
   async removeAccountFromGroup(accountId, groupId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 从分组成员集合中移除
       await client.srem(`${this.GROUP_MEMBERS_PREFIX}${groupId}`, accountId)
@@ -333,7 +333,7 @@ class AccountGroupService {
    */
   async getGroupMembers(groupId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const members = await client.smembers(`${this.GROUP_MEMBERS_PREFIX}${groupId}`)
       return members || []
     } catch (error) {
@@ -364,7 +364,7 @@ class AccountGroupService {
    */
   async getApiKeysUsingGroup(groupId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const groupKey = `group:${groupId}`
 
       // 获取所有API Key
@@ -400,7 +400,7 @@ class AccountGroupService {
    */
   async getAccountGroup(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const allGroupIds = await client.smembers(this.GROUPS_KEY)
 
       for (const groupId of allGroupIds) {

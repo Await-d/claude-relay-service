@@ -1441,11 +1441,11 @@ class ClaudeRelayService {
   async recordUnauthorizedError(accountId) {
     try {
       const key = `claude_account:${accountId}:401_errors`
-      const redis = require('../models/redis')
+      const database = require('../models/database')
 
       // 增加错误计数，设置5分钟过期时间
-      await redis.client.incr(key)
-      await redis.client.expire(key, 300) // 5分钟
+      await database.client.incr(key)
+      await database.client.expire(key, 300) // 5分钟
 
       logger.info(`📝 Recorded 401 error for account ${accountId}`)
     } catch (error) {
@@ -1457,9 +1457,9 @@ class ClaudeRelayService {
   async getUnauthorizedErrorCount(accountId) {
     try {
       const key = `claude_account:${accountId}:401_errors`
-      const redis = require('../models/redis')
+      const database = require('../models/database')
 
-      const count = await redis.client.get(key)
+      const count = await database.client.get(key)
       return parseInt(count) || 0
     } catch (error) {
       logger.error(`❌ Failed to get 401 error count for account ${accountId}:`, error)
@@ -1471,9 +1471,9 @@ class ClaudeRelayService {
   async clearUnauthorizedErrors(accountId) {
     try {
       const key = `claude_account:${accountId}:401_errors`
-      const redis = require('../models/redis')
+      const database = require('../models/database')
 
-      await redis.client.del(key)
+      await database.client.del(key)
       logger.info(`✅ Cleared 401 error count for account ${accountId}`)
     } catch (error) {
       logger.error(`❌ Failed to clear 401 errors for account ${accountId}:`, error)

@@ -1,4 +1,4 @@
-const redis = require('../models/redis')
+const database = require('../models/database')
 const apiKeyService = require('./apiKeyService')
 const CostCalculator = require('../utils/costCalculator')
 const logger = require('../utils/logger')
@@ -13,7 +13,7 @@ class CostInitService {
       logger.info('💰 Starting cost initialization for all API Keys...')
 
       const apiKeys = await apiKeyService.getAllApiKeys()
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       let processedCount = 0
       let errorCount = 0
@@ -151,7 +151,7 @@ class CostInitService {
    */
   async needsInitialization() {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
 
       // 检查是否有任何费用数据
       const costKeys = await client.keys('usage:cost:*')

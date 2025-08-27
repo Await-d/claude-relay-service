@@ -2,7 +2,7 @@ const { v4: uuidv4 } = require('uuid')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
 const axios = require('axios')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const { maskToken } = require('../utils/tokenMask')
@@ -141,7 +141,7 @@ class ClaudeAccountService {
       }
     }
 
-    await redis.setClaudeAccount(accountId, accountData)
+    await database.setClaudeAccount(accountId, accountData)
 
     logger.success(`🏢 Created Claude account: ${name} (${accountId})`)
 
@@ -192,7 +192,7 @@ class ClaudeAccountService {
     let lockAcquired = false
 
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
@@ -218,7 +218,7 @@ class ClaudeAccountService {
         await new Promise((resolve) => setTimeout(resolve, 2000))
 
         // 重新获取账户数据（可能已被其他进程刷新）
-        const updatedData = await redis.getClaudeAccount(accountId)
+        const updatedData = await database.getClaudeAccount(accountId)
         if (updatedData && updatedData.accessToken) {
           const accessToken = this._decryptSensitiveData(updatedData.accessToken)
           return {
@@ -301,7 +301,7 @@ class ClaudeAccountService {
         accountData.status = 'active'
         accountData.errorMessage = ''
 
-        await redis.setClaudeAccount(accountId, accountData)
+        await database.setClaudeAccount(accountId, accountData)
 
         // 刷新成功后，如果有 user:profile 权限，尝试获取账号 profile 信息
         // 检查账户的 scopes 是否包含 user:profile（标准 OAuth 有，Setup Token 没有）
@@ -341,12 +341,12 @@ class ClaudeAccountService {
       }
     } catch (error) {
       // 记录刷新失败
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (accountData) {
         logRefreshError(accountId, accountData.name, 'claude', error)
         accountData.status = 'error'
         accountData.errorMessage = error.message
-        await redis.setClaudeAccount(accountId, accountData)
+        await database.setClaudeAccount(accountId, accountData)
 
         // 发送Webhook通知
         try {
@@ -378,7 +378,7 @@ class ClaudeAccountService {
   // 🔍 获取账户信息
   async getAccount(accountId) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         return null
@@ -394,7 +394,7 @@ class ClaudeAccountService {
   // 🎯 获取有效的访问token
   async getValidAccessToken(accountId) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
@@ -438,7 +438,7 @@ class ClaudeAccountService {
       // 更新最后使用时间和会话窗口
       accountData.lastUsedAt = new Date().toISOString()
       await this.updateSessionWindow(accountId, accountData)
-      await redis.setClaudeAccount(accountId, accountData)
+      await database.setClaudeAccount(accountId, accountData)
 
       return accessToken
     } catch (error) {
@@ -450,7 +450,7 @@ class ClaudeAccountService {
   // 📋 获取所有Claude账户
   async getAllAccounts() {
     try {
-      const accounts = await redis.getAllClaudeAccounts()
+      const accounts = await database.getAllClaudeAccounts()
 
       // 处理返回数据，移除敏感信息并添加限流状态和会话窗口信息
       const processedAccounts = await Promise.all(
@@ -519,7 +519,7 @@ class ClaudeAccountService {
   // 📝 更新Claude账户
   async updateAccount(accountId, updates) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
@@ -627,7 +627,7 @@ class ClaudeAccountService {
         }
       }
 
-      await redis.setClaudeAccount(accountId, updatedData)
+      await database.setClaudeAccount(accountId, updatedData)
 
       logger.success(`📝 Updated Claude account: ${accountId}`)
 
@@ -641,7 +641,7 @@ class ClaudeAccountService {
   // 🗑️ 删除Claude账户
   async deleteAccount(accountId) {
     try {
-      const result = await redis.deleteClaudeAccount(accountId)
+      const result = await database.deleteClaudeAccount(accountId)
 
       if (result === 0) {
         throw new Error('Account not found')
@@ -659,7 +659,7 @@ class ClaudeAccountService {
   // 🔄 更新账户调度相关字段（用于调度算法）
   async updateAccountSchedulingFields(accountId, updates) {
     try {
-      await redis.updateClaudeAccountSchedulingFields(accountId, updates)
+      await database.updateClaudeAccountSchedulingFields(accountId, updates)
       logger.debug(`🔄 Updated scheduling fields for account ${accountId}:`, updates)
       return { success: true }
     } catch (error) {
@@ -671,8 +671,8 @@ class ClaudeAccountService {
   // 🔢 增加账户使用计数并更新最后调度时间
   async recordAccountUsage(accountId) {
     try {
-      const usageCount = await redis.incrementClaudeAccountUsageCount(accountId)
-      await redis.updateClaudeAccountSchedulingFields(accountId, {
+      const usageCount = await database.incrementClaudeAccountUsageCount(accountId)
+      await database.updateClaudeAccountSchedulingFields(accountId, {
         lastScheduledAt: new Date().toISOString()
       })
       logger.debug(`🔢 Recorded usage for account ${accountId}, new count: ${usageCount}`)
@@ -686,7 +686,7 @@ class ClaudeAccountService {
   // 🎯 智能选择可用账户（支持sticky会话和模型过滤）
   async selectAvailableAccount(sessionHash = null, modelName = null) {
     try {
-      const accounts = await redis.getAllClaudeAccounts()
+      const accounts = await database.getAllClaudeAccounts()
 
       let activeAccounts = accounts.filter(
         (account) => account.isActive === 'true' && account.status !== 'error'
@@ -726,7 +726,7 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，检查是否有已映射的账户
       if (sessionHash) {
-        const mappedAccountId = await redis.getSessionAccountMapping(sessionHash)
+        const mappedAccountId = await database.getSessionAccountMapping(sessionHash)
         if (mappedAccountId) {
           // 验证映射的账户是否仍然可用
           const mappedAccount = activeAccounts.find((acc) => acc.id === mappedAccountId)
@@ -740,7 +740,7 @@ class ClaudeAccountService {
               `⚠️ Mapped account ${mappedAccountId} is no longer available, selecting new account`
             )
             // 清理无效的映射
-            await redis.deleteSessionAccountMapping(sessionHash)
+            await database.deleteSessionAccountMapping(sessionHash)
           }
         }
       }
@@ -757,7 +757,7 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，建立新的映射
       if (sessionHash) {
-        await redis.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1小时过期
+        await database.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1小时过期
         logger.info(
           `🎯 Created new sticky session mapping: ${sortedAccounts[0].name} (${selectedAccountId}) for session ${sessionHash}`
         )
@@ -775,7 +775,7 @@ class ClaudeAccountService {
     try {
       // 如果API Key绑定了专属账户，优先使用
       if (apiKeyData.claudeAccountId) {
-        const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId)
+        const boundAccount = await database.getClaudeAccount(apiKeyData.claudeAccountId)
         if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
           logger.info(
             `🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`
@@ -789,7 +789,7 @@ class ClaudeAccountService {
       }
 
       // 如果没有绑定账户或绑定账户不可用，从共享池选择
-      const accounts = await redis.getAllClaudeAccounts()
+      const accounts = await database.getAllClaudeAccounts()
 
       let sharedAccounts = accounts.filter(
         (account) =>
@@ -832,7 +832,7 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，检查是否有已映射的账户
       if (sessionHash) {
-        const mappedAccountId = await redis.getSessionAccountMapping(sessionHash)
+        const mappedAccountId = await database.getSessionAccountMapping(sessionHash)
         if (mappedAccountId) {
           // 验证映射的账户是否仍然在共享池中且可用
           const mappedAccount = sharedAccounts.find((acc) => acc.id === mappedAccountId)
@@ -843,7 +843,7 @@ class ClaudeAccountService {
               logger.warn(
                 `⚠️ Mapped account ${mappedAccountId} is rate limited, selecting new account`
               )
-              await redis.deleteSessionAccountMapping(sessionHash)
+              await database.deleteSessionAccountMapping(sessionHash)
             } else {
               logger.info(
                 `🎯 Using sticky session shared account: ${mappedAccount.name} (${mappedAccountId}) for session ${sessionHash}`
@@ -855,7 +855,7 @@ class ClaudeAccountService {
               `⚠️ Mapped shared account ${mappedAccountId} is no longer available, selecting new account`
             )
             // 清理无效的映射
-            await redis.deleteSessionAccountMapping(sessionHash)
+            await database.deleteSessionAccountMapping(sessionHash)
           }
         }
       }
@@ -903,7 +903,7 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，建立新的映射
       if (sessionHash) {
-        await redis.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1小时过期
+        await database.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1小时过期
         logger.info(
           `🎯 Created new sticky session mapping for shared account: ${candidateAccounts[0].name} (${selectedAccountId}) for session ${sessionHash}`
         )
@@ -1055,7 +1055,7 @@ class ClaudeAccountService {
   // 🧹 清理错误账户
   async cleanupErrorAccounts() {
     try {
-      const accounts = await redis.getAllClaudeAccounts()
+      const accounts = await database.getAllClaudeAccounts()
       let cleanedCount = 0
 
       for (const account of accounts) {
@@ -1068,7 +1068,7 @@ class ClaudeAccountService {
           if (hoursSinceLastRefresh > 24) {
             account.status = 'created'
             account.errorMessage = ''
-            await redis.setClaudeAccount(account.id, account)
+            await database.setClaudeAccount(account.id, account)
             cleanedCount++
           }
         }
@@ -1088,7 +1088,7 @@ class ClaudeAccountService {
   // 🚫 标记账号为限流状态
   async markAccountRateLimited(accountId, sessionHash = null, rateLimitResetTimestamp = null) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1138,11 +1138,11 @@ class ClaudeAccountService {
         }
       }
 
-      await redis.setClaudeAccount(accountId, updatedAccountData)
+      await database.setClaudeAccount(accountId, updatedAccountData)
 
       // 如果有会话哈希，删除粘性会话映射
       if (sessionHash) {
-        await redis.deleteSessionAccountMapping(sessionHash)
+        await database.deleteSessionAccountMapping(sessionHash)
         logger.info(`🗑️ Deleted sticky session mapping for rate limited account: ${accountId}`)
       }
 
@@ -1172,7 +1172,7 @@ class ClaudeAccountService {
   // ✅ 移除账号的限流状态
   async removeAccountRateLimit(accountId) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1181,7 +1181,7 @@ class ClaudeAccountService {
       delete accountData.rateLimitedAt
       delete accountData.rateLimitStatus
       delete accountData.rateLimitEndAt // 清除限流结束时间
-      await redis.setClaudeAccount(accountId, accountData)
+      await database.setClaudeAccount(accountId, accountData)
 
       logger.success(`✅ Rate limit removed for account: ${accountData.name} (${accountId})`)
       return { success: true }
@@ -1194,7 +1194,7 @@ class ClaudeAccountService {
   // 🔍 检查账号是否处于限流状态
   async isAccountRateLimited(accountId) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         return false
       }
@@ -1239,7 +1239,7 @@ class ClaudeAccountService {
   // 📊 获取账号的限流信息
   async getAccountRateLimitInfo(accountId) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         return null
       }
@@ -1292,7 +1292,7 @@ class ClaudeAccountService {
     try {
       // 如果没有传入accountData，从Redis获取
       if (!accountData) {
-        accountData = await redis.getClaudeAccount(accountId)
+        accountData = await database.getClaudeAccount(accountId)
         if (!accountData || Object.keys(accountData).length === 0) {
           throw new Error('Account not found')
         }
@@ -1359,7 +1359,7 @@ class ClaudeAccountService {
   // 📊 获取会话窗口信息
   async getSessionWindowInfo(accountId) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         return null
       }
@@ -1418,7 +1418,7 @@ class ClaudeAccountService {
   // 📊 获取账号 Profile 信息并更新账号类型
   async fetchAndUpdateAccountProfile(accountId, accessToken = null, agent = null) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1508,7 +1508,7 @@ class ClaudeAccountService {
           accountData.email = this._encryptSensitiveData(profileData.account.email)
         }
 
-        await redis.setClaudeAccount(accountId, accountData)
+        await database.setClaudeAccount(accountId, accountData)
 
         logger.success(
           `✅ Updated account profile for ${accountData.name} (${accountId}) - Type: ${subscriptionInfo.accountType}`
@@ -1537,7 +1537,7 @@ class ClaudeAccountService {
     try {
       logger.info('🔄 Starting batch profile update for all accounts...')
 
-      const accounts = await redis.getAllClaudeAccounts()
+      const accounts = await database.getAllClaudeAccounts()
       let successCount = 0
       let failureCount = 0
       const results = []
@@ -1613,7 +1613,7 @@ class ClaudeAccountService {
     try {
       logger.info('🔄 Initializing session windows for all Claude accounts...')
 
-      const accounts = await redis.getAllClaudeAccounts()
+      const accounts = await database.getAllClaudeAccounts()
       let validWindowCount = 0
       let expiredWindowCount = 0
       let noWindowCount = 0
@@ -1626,7 +1626,7 @@ class ClaudeAccountService {
           delete account.sessionWindowStart
           delete account.sessionWindowEnd
           delete account.lastRequestTime
-          await redis.setClaudeAccount(account.id, account)
+          await database.setClaudeAccount(account.id, account)
         }
 
         // 检查现有会话窗口
@@ -1652,7 +1652,7 @@ class ClaudeAccountService {
             delete account.sessionWindowStart
             delete account.sessionWindowEnd
             delete account.lastRequestTime
-            await redis.setClaudeAccount(account.id, account)
+            await database.setClaudeAccount(account.id, account)
           }
         } else {
           noWindowCount++
@@ -1689,7 +1689,7 @@ class ClaudeAccountService {
   // 🚫 标记账户为未授权状态（401错误）
   async markAccountUnauthorized(accountId, sessionHash = null) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1702,11 +1702,11 @@ class ClaudeAccountService {
       updatedAccountData.unauthorizedAt = new Date().toISOString()
 
       // 保存更新后的账户数据
-      await redis.setClaudeAccount(accountId, updatedAccountData)
+      await database.setClaudeAccount(accountId, updatedAccountData)
 
       // 如果有sessionHash，删除粘性会话映射
       if (sessionHash) {
-        await redis.client.del(`sticky_session:${sessionHash}`)
+        await database.client.del(`sticky_session:${sessionHash}`)
         logger.info(`🗑️ Deleted sticky session mapping for hash: ${sessionHash}`)
       }
 
@@ -1739,7 +1739,7 @@ class ClaudeAccountService {
   // 🔄 重置账户所有异常状态
   async resetAccountStatus(accountId) {
     try {
-      const accountData = await redis.getClaudeAccount(accountId)
+      const accountData = await database.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1765,15 +1765,15 @@ class ClaudeAccountService {
       delete updatedAccountData.rateLimitEndAt
 
       // 保存更新后的账户数据
-      await redis.setClaudeAccount(accountId, updatedAccountData)
+      await database.setClaudeAccount(accountId, updatedAccountData)
 
       // 清除401错误计数
       const errorKey = `claude_account:${accountId}:401_errors`
-      await redis.client.del(errorKey)
+      await database.client.del(errorKey)
 
       // 清除限流状态（如果存在）
       const rateLimitKey = `ratelimit:${accountId}`
-      await redis.client.del(rateLimitKey)
+      await database.client.del(rateLimitKey)
 
       logger.info(
         `✅ Successfully reset all error states for account ${accountData.name} (${accountId})`

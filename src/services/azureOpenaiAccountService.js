@@ -1,4 +1,4 @@
-const redisClient = require('../models/redis')
+const database = require('../models/database')
 const { v4: uuidv4 } = require('uuid')
 const crypto = require('crypto')
 const config = require('../../config/config')
@@ -150,7 +150,7 @@ async function createAccount(accountData) {
       typeof accountData.proxy === 'string' ? accountData.proxy : JSON.stringify(accountData.proxy)
   }
 
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   await client.hset(`${AZURE_OPENAI_ACCOUNT_KEY_PREFIX}${accountId}`, account)
 
   // 如果是共享账户，添加到共享账户集合
@@ -164,7 +164,7 @@ async function createAccount(accountData) {
 
 // 获取账户
 async function getAccount(accountId) {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const accountData = await client.hgetall(`${AZURE_OPENAI_ACCOUNT_KEY_PREFIX}${accountId}`)
 
   if (!accountData || Object.keys(accountData).length === 0) {
@@ -240,7 +240,7 @@ async function updateAccount(accountId, updates) {
   }
 
   // 更新账户类型时处理共享账户集合
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   if (updates.accountType && updates.accountType !== existingAccount.accountType) {
     if (updates.accountType === 'shared') {
       await client.sadd(SHARED_AZURE_OPENAI_ACCOUNTS_KEY, accountId)
@@ -270,7 +270,7 @@ async function updateAccount(accountId, updates) {
 
 // 删除账户
 async function deleteAccount(accountId) {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const accountKey = `${AZURE_OPENAI_ACCOUNT_KEY_PREFIX}${accountId}`
 
   // 从Redis中删除账户数据
@@ -285,7 +285,7 @@ async function deleteAccount(accountId) {
 
 // 获取所有账户
 async function getAllAccounts() {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const keys = await client.keys(`${AZURE_OPENAI_ACCOUNT_KEY_PREFIX}*`)
 
   if (!keys || keys.length === 0) {
@@ -326,7 +326,7 @@ async function getAllAccounts() {
 
 // 获取共享账户
 async function getSharedAccounts() {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const accountIds = await client.smembers(SHARED_AZURE_OPENAI_ACCOUNTS_KEY)
 
   if (!accountIds || accountIds.length === 0) {
@@ -348,7 +348,7 @@ async function getSharedAccounts() {
 async function selectAvailableAccount(sessionId = null) {
   // 如果有会话ID，尝试获取之前分配的账户
   if (sessionId) {
-    const client = redisClient.getClientSafe()
+    const client = database.getClientSafe()
     const mappingKey = `${ACCOUNT_SESSION_MAPPING_PREFIX}${sessionId}`
     const accountId = await client.get(mappingKey)
 
@@ -379,7 +379,7 @@ async function selectAvailableAccount(sessionId = null) {
 
   // 如果有会话ID，保存映射关系
   if (sessionId && selectedAccount) {
-    const client = redisClient.getClientSafe()
+    const client = database.getClientSafe()
     const mappingKey = `${ACCOUNT_SESSION_MAPPING_PREFIX}${sessionId}`
     await client.setex(mappingKey, 3600, selectedAccount.id) // 1小时过期
   }
@@ -390,7 +390,7 @@ async function selectAvailableAccount(sessionId = null) {
 
 // 更新账户使用量
 async function updateAccountUsage(accountId, tokens) {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const now = new Date().toISOString()
 
   // 使用 HINCRBY 原子操作更新使用量
@@ -465,7 +465,7 @@ async function toggleSchedulable(accountId) {
 
 // 迁移 API Keys 以支持 Azure OpenAI
 async function migrateApiKeysForAzureSupport() {
-  const client = redisClient.getClientSafe()
+  const client = database.getClientSafe()
   const apiKeyIds = await client.smembers('api_keys')
 
   let migratedCount = 0
@@ -485,7 +485,7 @@ async function migrateApiKeysForAzureSupport() {
 // 🔄 更新账户调度相关字段（用于调度算法）
 async function updateAccountSchedulingFields(accountId, updates) {
   try {
-    const client = redisClient.getClientSafe()
+    const client = database.getClientSafe()
     const accountKey = `${AZURE_OPENAI_ACCOUNT_KEY_PREFIX}${accountId}`
 
     // 将数字字段转换为字符串存储
@@ -516,7 +516,7 @@ async function updateAccountSchedulingFields(accountId, updates) {
 // 🔢 增加账户使用计数并更新最后调度时间
 async function recordAccountUsage(accountId) {
   try {
-    const client = redisClient.getClientSafe()
+    const client = database.getClientSafe()
     const accountKey = `${AZURE_OPENAI_ACCOUNT_KEY_PREFIX}${accountId}`
 
     // 获取当前使用计数

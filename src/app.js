@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs')
 
 const config = require('../config/config')
 const logger = require('./utils/logger')
-const redis = require('./models/redis')
+const database = require('./models/database')
 const pricingService = require('./services/pricingService')
 const cacheMonitor = require('./utils/cacheMonitor')
 
@@ -43,10 +43,10 @@ class Application {
 
   async initialize() {
     try {
-      // 🔗 连接Redis
-      logger.info('🔄 Connecting to Redis...')
-      await redis.connect()
-      logger.success('✅ Redis connected successfully')
+      // 🔗 连接数据库
+      logger.info('🔄 Connecting to database...')
+      await database.connect()
+      logger.success('✅ Database connected successfully')
 
       // 💰 初始化价格服务
       logger.info('🔄 Initializing pricing service...')
@@ -319,7 +319,7 @@ class Application {
       // 📊 指标端点
       this.app.get('/metrics', async (req, res) => {
         try {
-          const stats = await redis.getSystemStats()
+          const stats = await database.getSystemStats()
           const metrics = {
             ...stats,
             uptime: process.uptime(),
@@ -379,7 +379,7 @@ class Application {
         updatedAt: initData.updatedAt || null
       }
 
-      await redis.setSession('admin_credentials', adminCredentials)
+      await database.setSession('admin_credentials', adminCredentials)
 
       logger.success('✅ Admin credentials loaded from init.json (single source of truth)')
       logger.info(`📋 Admin username: ${adminCredentials.username}`)
@@ -396,12 +396,12 @@ class Application {
   async checkRedisHealth() {
     try {
       const start = Date.now()
-      await redis.getClient().ping()
+      await database.getClient().ping()
       const latency = Date.now() - start
 
       return {
         status: 'healthy',
-        connected: redis.isConnected,
+        connected: database.isConnected,
         latency: `${latency}ms`
       }
     } catch (error) {
@@ -512,7 +512,7 @@ class Application {
           claudeAccountService.cleanupErrorAccounts()
         ])
 
-        await redis.cleanup()
+        await database.cleanup()
 
         logger.success(
           `🧹 Cleanup completed: ${expiredKeys} expired keys, ${errorAccounts} error accounts reset`
@@ -544,7 +544,7 @@ class Application {
           }
 
           try {
-            await redis.disconnect()
+            await database.disconnect()
             logger.info('👋 Redis disconnected')
           } catch (error) {
             logger.error('❌ Error disconnecting Redis:', error)

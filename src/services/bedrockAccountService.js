@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid')
 const crypto = require('crypto')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const bedrockRelayService = require('./bedrockRelayService')
@@ -73,7 +73,7 @@ class BedrockAccountService {
       accountData.awsCredentials = this._encryptAwsCredentials(awsCredentials)
     }
 
-    const client = redis.getClientSafe()
+    const client = database.getClientSafe()
     await client.set(`bedrock_account:${accountId}`, JSON.stringify(accountData))
 
     logger.info(`✅ 创建Bedrock账户成功 - ID: ${accountId}, 名称: ${name}, 区域: ${region}`)
@@ -107,7 +107,7 @@ class BedrockAccountService {
   // 🔍 获取账户信息
   async getAccount(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const accountData = await client.get(`bedrock_account:${accountId}`)
       if (!accountData) {
         return { success: false, error: 'Account not found' }
@@ -135,7 +135,7 @@ class BedrockAccountService {
   // 📋 获取所有账户列表
   async getAllAccounts() {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const keys = await client.keys('bedrock_account:*')
       const accounts = []
 
@@ -195,7 +195,7 @@ class BedrockAccountService {
   async updateAccount(accountId, updates = {}) {
     try {
       // 获取原始账户数据（不解密凭证）
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const accountData = await client.get(`bedrock_account:${accountId}`)
       if (!accountData) {
         return { success: false, error: 'Account not found' }
@@ -303,7 +303,7 @@ class BedrockAccountService {
         return accountResult
       }
 
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       await client.del(`bedrock_account:${accountId}`)
 
       logger.info(`✅ 删除Bedrock账户成功 - ID: ${accountId}`)
@@ -520,7 +520,7 @@ class BedrockAccountService {
   // 🔄 更新账户调度相关字段（用于调度算法）
   async updateAccountSchedulingFields(accountId, updates) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const accountData = await client.get(`bedrock_account:${accountId}`)
       if (!accountData) {
         return { success: false, error: 'Account not found' }
@@ -562,7 +562,7 @@ class BedrockAccountService {
   // 🔢 增加账户使用计数并更新最后调度时间
   async recordAccountUsage(accountId) {
     try {
-      const client = redis.getClientSafe()
+      const client = database.getClientSafe()
       const accountData = await client.get(`bedrock_account:${accountId}`)
       if (!accountData) {
         return { success: false, error: 'Account not found' }

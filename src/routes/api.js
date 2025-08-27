@@ -7,7 +7,7 @@ const unifiedClaudeScheduler = require('../services/unifiedClaudeScheduler')
 const apiKeyService = require('../services/apiKeyService')
 const { authenticateApiKey } = require('../middleware/auth')
 const logger = require('../utils/logger')
-const redis = require('../models/redis')
+const database = require('../models/database')
 const sessionHelper = require('../utils/sessionHelper')
 
 const router = express.Router()
@@ -139,7 +139,7 @@ async function handleMessagesRequest(req, res) {
               // 更新时间窗口内的token计数
               if (req.rateLimitInfo) {
                 const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-                redis
+                database
                   .getClient()
                   .incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
                   .catch((error) => {
@@ -224,7 +224,7 @@ async function handleMessagesRequest(req, res) {
               // 更新时间窗口内的token计数
               if (req.rateLimitInfo) {
                 const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-                redis
+                database
                   .getClient()
                   .incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
                   .catch((error) => {
@@ -274,7 +274,7 @@ async function handleMessagesRequest(req, res) {
             // 更新时间窗口内的token计数
             if (req.rateLimitInfo) {
               const totalTokens = inputTokens + outputTokens
-              redis
+              database
                 .getClient()
                 .incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
                 .catch((error) => {
@@ -441,7 +441,7 @@ async function handleMessagesRequest(req, res) {
           // 更新时间窗口内的token计数
           if (req.rateLimitInfo) {
             const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-            await redis.getClient().incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
+            await database.getClient().incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
             logger.api(`📊 Updated rate limit token count: +${totalTokens} tokens`)
           }
 

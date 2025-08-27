@@ -9,7 +9,7 @@ const bcrypt = require('bcryptjs')
 const fs = require('fs')
 const path = require('path')
 
-const redis = require('../src/models/redis')
+const database = require('../src/models/database')
 const apiKeyService = require('../src/services/apiKeyService')
 const claudeAccountService = require('../src/services/claudeAccountService')
 const bedrockAccountService = require('../src/services/bedrockAccountService')
@@ -28,12 +28,14 @@ const styles = {
 
 // 🔧 初始化
 async function initialize() {
-  const spinner = ora('正在连接 Redis...').start()
+  const spinner = ora('正在连接数据库...').start()
   try {
-    await redis.connect()
-    spinner.succeed('Redis 连接成功')
+    // 数据库会自动初始化，直接使用即可
+    // 触发数据库连接 - 通过调用一个简单的方法
+    await database.ping()
+    spinner.succeed('数据库连接成功')
   } catch (error) {
-    spinner.fail('Redis 连接失败')
+    spinner.fail('数据库连接失败')
     console.error(styles.error(error.message))
     process.exit(1)
   }
@@ -49,7 +51,9 @@ program
     // 直接执行创建初始管理员
     await createInitialAdmin()
 
-    await redis.disconnect()
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
   })
 
 // 🔑 API Key 管理
@@ -88,7 +92,9 @@ program
         break
     }
 
-    await redis.disconnect()
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
   })
 
 // 📊 系统状态
@@ -101,8 +107,7 @@ program
     const spinner = ora('正在获取系统状态...').start()
 
     try {
-      const [, apiKeys, accounts] = await Promise.all([
-        redis.getSystemStats(),
+      const [apiKeys, accounts] = await Promise.all([
         apiKeyService.getAllApiKeys(),
         claudeAccountService.getAllAccounts()
       ])
@@ -115,7 +120,7 @@ program
         ['项目', '数量', '状态'],
         ['API Keys', apiKeys.length, `${apiKeys.filter((k) => k.isActive).length} 活跃`],
         ['Claude 账户', accounts.length, `${accounts.filter((a) => a.isActive).length} 活跃`],
-        ['Redis 连接', redis.isConnected ? '已连接' : '未连接', redis.isConnected ? '🟢' : '🔴'],
+        ['数据库连接', '已连接', '🟢'],
         ['运行时间', `${Math.floor(process.uptime() / 60)} 分钟`, '🕐']
       ]
 
@@ -133,7 +138,9 @@ program
       console.error(styles.error(error.message))
     }
 
-    await redis.disconnect()
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
   })
 
 // ☁️ Bedrock 账户管理
@@ -180,7 +187,9 @@ program
         break
     }
 
-    await redis.disconnect()
+    if (typeof database._manager.cleanup === 'function') {
+      await database._manager.cleanup()
+    }
   })
 
 // 实现具体功能函数
@@ -265,7 +274,7 @@ async function createInitialAdmin() {
       updatedAt: new Date().toISOString()
     }
 
-    await redis.setSession('admin_credentials', credentials, 0) // 永不过期
+    await database.setSession('admin_credentials', credentials, 0) // 永不过期
 
     spinner.succeed('管理员账户创建成功')
     console.log(`${styles.success('✅')} 用户名: ${adminData.username}`)
