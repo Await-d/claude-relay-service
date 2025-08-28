@@ -9,14 +9,16 @@ const { authenticateApiKey } = require('../middleware/auth')
 const logger = require('../utils/logger')
 const database = require('../models/database')
 const sessionHelper = require('../utils/sessionHelper')
+const { requestLogger } = require('../services/requestLoggerService')
 
 const router = express.Router()
 
 // 🔧 共享的消息处理函数
 async function handleMessagesRequest(req, res) {
-  try {
-    const startTime = Date.now()
+  const startTime = Date.now()
+  let shouldLogRequest = false
 
+  try {
     // 严格的输入验证
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({
@@ -45,6 +47,38 @@ async function handleMessagesRequest(req, res) {
     logger.api(
       `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for key: ${req.apiKey.name}`
     )
+
+    // 智能采样决策：检查是否应该记录此请求到日志系统
+    shouldLogRequest = false
+    try {
+      logger.info(
+        `🔍 Checking request logging: requestLogger available: ${!!requestLogger}, shouldLog function: ${!!(requestLogger && typeof requestLogger.shouldLog === 'function')}`
+      )
+      if (requestLogger && typeof requestLogger.shouldLog === 'function') {
+        shouldLogRequest = await requestLogger.shouldLog(
+          req.apiKey.id,
+          'normal', // 请求类型：normal, error, slow
+          {
+            responseTime: 0, // 稍后更新
+            statusCode: 200 // 预期状态码，稍后更新
+          }
+        )
+        logger.info(
+          `🎯 Sampling decision for key ${req.apiKey.name}: shouldLog = ${shouldLogRequest}`
+        )
+
+        if (shouldLogRequest) {
+          logger.debug(`🎯 Request selected for logging by intelligent sampler`)
+        } else {
+          logger.info(`📊 Request not selected for logging (sampling decision)`)
+        }
+      } else {
+        logger.warn('⚠️ requestLogger not available or shouldLog method missing')
+      }
+    } catch (samplingError) {
+      logger.warn('⚠️ Request logging sampling failed:', samplingError.message)
+      // 不影响主要请求处理流程
+    }
 
     if (isStream) {
       // 流式响应 - 只使用官方真实usage数据
@@ -470,12 +504,101 @@ async function handleMessagesRequest(req, res) {
 
     const duration = Date.now() - startTime
     logger.api(`✅ Request completed in ${duration}ms for key: ${req.apiKey.name}`)
+
+    // 请求完成后的日志记录
+    if (shouldLogRequest) {
+      try {
+        const logEntry = {
+          keyId: req.apiKey.id,
+          method: req.method,
+          path: req.path,
+          statusCode: res.statusCode || 200,
+          responseTime: duration,
+          userAgent: req.get('User-Agent') || '',
+          ipAddress: req.ip || req.connection.remoteAddress || '',
+          model: req.body.model || 'unknown',
+          tokens: 0, // Token信息从usage统计中获取，这里设为0
+          inputTokens: 0,
+          outputTokens: 0,
+          error: null
+        }
+
+        if (requestLogger && typeof requestLogger.enqueueLog === 'function') {
+          const queued = requestLogger.enqueueLog(logEntry)
+          if (queued) {
+            logger.debug(`📝 Request logged successfully for key: ${req.apiKey.name}`)
+          } else {
+            logger.warn(`⚠️ Failed to queue request log for key: ${req.apiKey.name}`)
+          }
+        }
+      } catch (loggingError) {
+        logger.warn('⚠️ Request logging failed:', loggingError.message)
+        // 不影响响应，只记录警告
+      }
+    }
+
     return undefined
   } catch (error) {
+    const duration = Date.now() - startTime
     logger.error('❌ Claude relay error:', error.message, {
       code: error.code,
       stack: error.stack
     })
+
+    // 错误情况下的日志记录
+    // 错误请求很重要，即使没有被原始采样选中也应该记录
+    let shouldLogError = shouldLogRequest
+    if (!shouldLogError && requestLogger && typeof requestLogger.shouldLog === 'function') {
+      try {
+        // 重新采样检查，错误请求类型会被智能采样器优先记录
+        shouldLogError = await requestLogger.shouldLog(
+          req.apiKey.id,
+          'error', // 错误请求类型
+          {
+            responseTime: duration,
+            statusCode: 500
+          }
+        )
+        if (shouldLogError) {
+          logger.debug(`🎯 Error request selected for logging by intelligent sampler`)
+        }
+      } catch (samplingError) {
+        // 采样失败时也记录错误请求
+        shouldLogError = true
+        logger.warn(
+          '⚠️ Error sampling failed, logging error request anyway:',
+          samplingError.message
+        )
+      }
+    }
+
+    if (shouldLogError) {
+      try {
+        const logEntry = {
+          keyId: req.apiKey.id,
+          method: req.method,
+          path: req.path,
+          statusCode: 500, // 错误状态码
+          responseTime: duration,
+          userAgent: req.get('User-Agent') || '',
+          ipAddress: req.ip || req.connection.remoteAddress || '',
+          model: req.body?.model || 'unknown',
+          tokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          error: error.message || 'An unexpected error occurred'
+        }
+
+        if (requestLogger && typeof requestLogger.enqueueLog === 'function') {
+          const queued = requestLogger.enqueueLog(logEntry)
+          if (queued) {
+            logger.debug(`📝 Error request logged for key: ${req.apiKey.name}`)
+          }
+        }
+      } catch (loggingError) {
+        logger.warn('⚠️ Error request logging failed:', loggingError.message)
+      }
+    }
 
     // 确保在任何情况下都能返回有效的JSON响应
     if (!res.headersSent) {

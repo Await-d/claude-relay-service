@@ -265,23 +265,73 @@ class PerformantRequestLogger {
   constructor(options = {}) {
     // 配置管理器引用（用于动态配置获取）
     this.configManager = options.configManager || null
-
-    // 配置初始化
-    this.config = options.config || config.requestLogging
-    this._isEnabled = this.config.enabled
     this._configVersion = 0 // 配置版本号，用于检测配置变更
 
-    if (!this._isEnabled) {
-      logger.info('📝 Request logging is disabled')
-      // 即使禁用也初始化基础结构，支持运行时启用
-      this.initializeBaseComponents()
+    // 异步初始化标志
+    this._initialized = false
+    this._initializing = false
+
+    // 立即开始异步初始化
+    this.initializeAsync(options)
+  }
+
+  /**
+   * 异步初始化方法 - 从动态配置系统获取配置
+   * @param {Object} options 初始化选项
+   */
+  async initializeAsync(options = {}) {
+    if (this._initializing || this._initialized) {
       return
     }
 
-    // 初始化所有组件
-    this.initializeAllComponents()
+    this._initializing = true
 
-    logger.info('🚀 PerformantRequestLogger initialized successfully')
+    try {
+      // 1. 尝试从动态配置系统获取配置
+      let dynamicConfig = null
+      try {
+        const { dynamicConfigManager } = require('./dynamicConfigService')
+        dynamicConfig = await dynamicConfigManager.getRequestLoggingConfig()
+        logger.debug('📋 Loaded configuration from dynamic config system:', {
+          enabled: dynamicConfig?.enabled,
+          mode: dynamicConfig?.mode
+        })
+      } catch (dynamicError) {
+        logger.warn(
+          '⚠️ Failed to load from dynamic config, falling back to static config:',
+          dynamicError.message
+        )
+      }
+
+      // 2. 配置优先级: options.config > dynamicConfig > 静态配置
+      // 使用深度合并确保不丢失静态配置中的字段
+      this.config = options.config || this.mergeConfigs(config.requestLogging, dynamicConfig)
+      this._isEnabled = this.config.enabled || false
+
+      // 3. 初始化组件
+      if (!this._isEnabled) {
+        logger.info('📝 Request logging is disabled')
+        // 即使禁用也初始化基础结构，支持运行时启用
+        this.initializeBaseComponents()
+      } else {
+        // 初始化所有组件
+        this.initializeAllComponents()
+      }
+
+      this._initialized = true
+      logger.info(
+        `🚀 PerformantRequestLogger initialized successfully (enabled: ${this._isEnabled})`
+      )
+    } catch (error) {
+      logger.error('❌ Failed to initialize PerformantRequestLogger:', error)
+      // 降级到静态配置初始化
+      this.config = config.requestLogging
+      this._isEnabled = this.config.enabled || false
+      this.initializeBaseComponents()
+      this._initialized = true
+    } finally {
+      this._initializing = false
+    }
   }
 
   /**
@@ -325,10 +375,10 @@ class PerformantRequestLogger {
    * 智能采样决策
    * @param {string} apiKeyId API Key ID
    * @param {string} requestType 请求类型
-   * @param {number} systemLoad 系统负载
+   * @param {Object} context 请求上下文 {responseTime, statusCode}
    * @returns {Promise<boolean>} 是否应该记录
    */
-  async shouldLog(apiKeyId, requestType = 'normal', systemLoad = 0.5) {
+  async shouldLog(apiKeyId, requestType = 'normal', context = {}) {
     if (!this.isCurrentlyEnabled()) {
       return false
     }
@@ -336,12 +386,19 @@ class PerformantRequestLogger {
     // 如果采样器未初始化（服务刚启用），先初始化
     if (!this.sampler) {
       this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
+      logger.debug(`🎯 Sampler initialized with config:`, {
+        rate: this.config.sampling?.rate || 0.1,
+        alwaysLogErrors: this.config.sampling?.alwaysLogErrors !== false,
+        slowRequestThreshold: this.config.sampling?.slowRequestThreshold || 5000,
+        alwaysLogSlowRequests: this.config.sampling?.alwaysLogSlowRequests !== false
+      })
     }
 
     return await this.sampler.shouldLog({
       apiKeyId,
       requestType,
-      systemLoad
+      responseTime: context.responseTime || 0,
+      statusCode: context.statusCode || 200
     })
   }
 
@@ -454,13 +511,19 @@ class PerformantRequestLogger {
 
   /**
    * 重新加载配置（热重载核心方法）
-   * @param {Object} newConfig 新的配置对象
+   * @param {Object} newConfig 新的配置对象，如果未提供则从动态配置服务获取
    * @returns {Promise<Object>} 重载结果状态
    */
-  async reloadConfig(newConfig) {
+  async reloadConfig(newConfig = null) {
     logger.info('🔄 Starting configuration reload...')
 
     try {
+      // 如果没有提供配置，从动态配置服务获取
+      if (!newConfig) {
+        const { dynamicConfigManager } = require('./dynamicConfigService')
+        newConfig = await dynamicConfigManager.getRequestLoggingConfig()
+      }
+
       const oldEnabled = this._isEnabled
       const newEnabled = newConfig.enabled
 
@@ -601,11 +664,16 @@ class PerformantRequestLogger {
    * @returns {boolean} 当前是否启用
    */
   isCurrentlyEnabled() {
+    // 如果正在初始化，返回false（确保初始化完成后再处理请求）
+    if (this._initializing || !this._initialized) {
+      return false
+    }
+
     // 支持从配置管理器动态获取状态
     if (this.configManager && typeof this.configManager.getRequestLoggingEnabled === 'function') {
       return this.configManager.getRequestLoggingEnabled()
     }
-    return this._isEnabled
+    return this._isEnabled || false
   }
 
   /**
@@ -627,9 +695,10 @@ class PerformantRequestLogger {
     // 重新创建采样器（应用新的采样配置）
     this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
 
-    // 更新错误处理配置
-    this.maxRetries = this.config.async?.maxRetries || 3
-    this.retryDelay = this.config.async?.retryDelay || 1000
+    // 更新错误处理配置 - 安全访问属性
+    const asyncConfig = this.config.async || {}
+    this.maxRetries = asyncConfig.maxRetries || 3
+    this.retryDelay = asyncConfig.retryDelay || 1000
 
     // 重新启动监控和定时器
     this.startPerformanceMonitoring()
@@ -911,7 +980,8 @@ class PerformantRequestLogger {
    * 启动性能监控
    */
   startPerformanceMonitoring() {
-    if (!this.config.monitoring.enabled) {
+    const monitoringConfig = this.config.monitoring || {}
+    if (!monitoringConfig.enabled) {
       return
     }
 
@@ -922,19 +992,18 @@ class PerformantRequestLogger {
 
     this.monitoringTimer = setInterval(() => {
       const metrics = this.getMetrics()
+      const warningThresholds = monitoringConfig.warningThresholds || {}
 
       // 检查警告阈值
-      if (metrics.queue.length >= this.config.monitoring.warningThresholds.queueLength) {
+      if (metrics.queue.length >= (warningThresholds.queueLength || 800)) {
         logger.warn(`⚠️ Request logger queue length warning: ${metrics.queue.length}`)
       }
 
-      if (
-        metrics.performance.avgWriteTime >= this.config.monitoring.warningThresholds.batchWriteDelay
-      ) {
+      if (metrics.performance.avgWriteTime >= (warningThresholds.batchWriteDelay || 1000)) {
         logger.warn(`⚠️ Request logger write time warning: ${metrics.performance.avgWriteTime}ms`)
       }
 
-      if (metrics.performance.memoryUsage >= this.config.monitoring.warningThresholds.memoryUsage) {
+      if (metrics.performance.memoryUsage >= (warningThresholds.memoryUsage || 100)) {
         logger.warn(`⚠️ Request logger memory usage warning: ${metrics.performance.memoryUsage}MB`)
       }
 
@@ -945,7 +1014,7 @@ class PerformantRequestLogger {
         avgWriteTime: `${Math.round(metrics.performance.avgWriteTime)}ms`,
         memoryUsage: `${metrics.performance.memoryUsage}MB`
       })
-    }, this.config.monitoring.metricsInterval)
+    }, monitoringConfig.metricsInterval || 60000)
   }
 
   /**
@@ -987,6 +1056,32 @@ class PerformantRequestLogger {
     }
 
     logger.info('✅ Request logger shutdown completed')
+  }
+
+  /**
+   * 深度合并配置对象
+   * @param {Object} baseConfig 基础配置（静态配置）
+   * @param {Object} overrideConfig 覆盖配置（动态配置）
+   * @returns {Object} 合并后的配置
+   */
+  mergeConfigs(baseConfig, overrideConfig) {
+    if (!overrideConfig) {
+      return baseConfig
+    }
+
+    const merged = { ...baseConfig }
+
+    for (const [key, value] of Object.entries(overrideConfig)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // 递归合并对象
+        merged[key] = this.mergeConfigs(merged[key] || {}, value)
+      } else {
+        // 直接覆盖基本类型和数组
+        merged[key] = value
+      }
+    }
+
+    return merged
   }
 }
 

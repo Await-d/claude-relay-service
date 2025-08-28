@@ -551,6 +551,9 @@ module.exports.getClient = function (...args) {
 module.exports.getClientSafe = function (...args) {
   return databaseProxy.getClientSafe(...args)
 }
+module.exports.ping = async function (...args) {
+  return await databaseProxy.ping(...args)
+}
 
 // Redis基础操作方法 - IDE识别 + 实际转发到Proxy
 module.exports.keys = async function (...args) {

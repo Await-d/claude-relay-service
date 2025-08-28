@@ -1208,13 +1208,13 @@
             <div class="flex gap-3">
               <button
                 class="btn btn-primary px-6 py-3"
-                :class="{ 'cursor-not-allowed opacity-50': savingLoggingConfig }"
-                :disabled="savingLoggingConfig"
+                :class="{ 'cursor-not-allowed opacity-50': configSaving }"
+                :disabled="configSaving"
                 @click="saveRequestLoggingConfig"
               >
-                <div v-if="savingLoggingConfig" class="loading-spinner mr-2"></div>
+                <div v-if="configSaving" class="loading-spinner mr-2"></div>
                 <i v-else class="fas fa-save mr-2" />
-                {{ savingLoggingConfig ? '保存中...' : '保存配置' }}
+                {{ configSaving ? '保存中...' : '保存配置' }}
               </button>
 
               <router-link
@@ -1644,6 +1644,7 @@ import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { showToast } from '@/utils/toast'
 import { useSettingsStore } from '@/stores/settings'
+import { useRequestLogsStore } from '@/stores/requestLogs'
 import { apiClient } from '@/config/api'
 
 // 定义组件名称，用于keep-alive排除
@@ -1654,6 +1655,10 @@ defineOptions({
 // 使用settings store
 const settingsStore = useSettingsStore()
 const { loading, saving, oemSettings } = storeToRefs(settingsStore)
+
+// 使用requestLogs store
+const requestLogsStore = useRequestLogsStore()
+const { config: requestLoggingConfig, configSaving } = storeToRefs(requestLogsStore)
 
 // 组件refs
 const iconFileInput = ref()
@@ -2374,20 +2379,7 @@ const migrating = ref(false)
 const migrationConfig = ref(null)
 const migrationConfigInput = ref()
 
-// 请求日志配置相关变量
-const requestLoggingConfig = ref({
-  enabled: false,
-  level: 'info',
-  retentionDays: 7,
-  maxFileSize: 10,
-  maxFiles: 10,
-  includeHeaders: true,
-  includeBody: false,
-  includeResponse: false,
-  includeErrors: true,
-  filterSensitiveData: true,
-  updatedAt: null
-})
+// 请求日志配置现在来自requestLogs store，已在上面定义
 
 const requestLoggingStats = ref({
   todayLogs: 0,
@@ -2396,7 +2388,6 @@ const requestLoggingStats = ref({
   errorLogs: 0
 })
 
-const savingLoggingConfig = ref(false)
 const cleaningLogs = ref(false)
 
 // 数据管理相关函数
@@ -2658,14 +2649,9 @@ const formatDate = (dateString) => {
 const loadRequestLoggingConfig = async () => {
   if (!isMounted.value) return
   try {
-    const response = await apiClient.get('/admin/request-logs/config', {
-      signal: abortController.value.signal
-    })
-    if (response.success && isMounted.value) {
-      Object.assign(requestLoggingConfig.value, response.data)
-      // 加载统计信息
-      await loadRequestLoggingStats()
-    }
+    await requestLogsStore.loadConfig()
+    // 加载统计信息
+    await loadRequestLoggingStats()
   } catch (error) {
     if (error.name === 'AbortError') return
     if (!isMounted.value) return
@@ -2676,17 +2662,9 @@ const loadRequestLoggingConfig = async () => {
 // 保存请求日��配置
 const saveRequestLoggingConfig = async () => {
   if (!isMounted.value) return
-  savingLoggingConfig.value = true
   try {
-    const response = await apiClient.post(
-      '/admin/request-logs/config',
-      requestLoggingConfig.value,
-      {
-        signal: abortController.value.signal
-      }
-    )
-    if (response.success && isMounted.value) {
-      requestLoggingConfig.value.updatedAt = new Date().toISOString()
+    await requestLogsStore.saveConfig(requestLoggingConfig.value)
+    if (isMounted.value) {
       showToast('请求日志配置已保存', 'success')
       await loadRequestLoggingStats()
     }
@@ -2695,10 +2673,6 @@ const saveRequestLoggingConfig = async () => {
     if (!isMounted.value) return
     showToast('保存配置失败', 'error')
     console.error(error)
-  } finally {
-    if (isMounted.value) {
-      savingLoggingConfig.value = false
-    }
   }
 }
 

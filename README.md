@@ -522,7 +522,7 @@ http://你的服务器:3000/openai/claude/v1/
 
 ### 功能说明
 
-当系统检测到账号异常时，会自动发送 webhook 通知，支持企业微信、钉钉、Slack 等平台。
+当系统检测到账号异常时，会自动发送 webhook 通知，支持企业微信、钉钉、飞书、Slack、Discord、Bark 等平台。
 
 ### 通知触发场景
 
@@ -557,6 +557,54 @@ WEBHOOK_RETRIES=3
 1. 在企业微信群中添加「群机器人」
 2. 获取 webhook 地址：`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx`
 3. 将地址配置到 `WEBHOOK_URLS` 环境变量
+
+**3. Bark 推送设置（iOS）**
+
+Bark 是一个优秀的 iOS 推送应用，支持自定义推送服务器。
+
+1. **安装 Bark 应用**
+   - 从 App Store 下载安装 "Bark" 应用
+   - 打开应用获取设备密钥（类似：`abc123def456`）
+
+2. **管理后台配置**
+   - 登录 Web 管理后台：`http://你的服务器:3000/web`
+   - 进入"系统设置" > "Webhook 配置"
+   - 添加 Bark 平台，配置以下参数：
+     ```json
+     {
+       "name": "我的iPhone",
+       "type": "bark",
+       "url": "https://api.day.app",
+       "deviceKey": "abc123def456",
+       "enabled": true,
+       "sound": "bell",
+       "level": "active",
+       "group": "claude-relay-service"
+     }
+     ```
+
+3. **配置参数说明**
+   - `url`: Bark 服务器地址（默认官方服务器：`https://api.day.app`）
+   - `deviceKey`: 从 Bark 应用获取的设备密钥（必需）
+   - `usePost`: 是否使用 POST 方式（自建服务器可能需要）
+   - `sound`: 通知声音（可选：`bell`、`alarm`、`calypso` 等）
+   - `level`: 中断级别（`passive`、`active`、`critical`）
+   - `group`: 通知分组（可选）
+   - `icon`: 自定义图标 URL（可选）
+   - `clickUrl`: 点击通知打开的链接（可选）
+
+4. **自建 Bark 服务器**
+   如果使用自建服务器，配置示例：
+   ```json
+   {
+     "name": "自建Bark服务器",
+     "type": "bark",
+     "url": "https://your-bark-server.com/push",
+     "deviceKey": "your_device_key",
+     "usePost": true,
+     "enabled": true
+   }
+   ```
 
 ### 通知内容格式
 

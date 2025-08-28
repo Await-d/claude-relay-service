@@ -464,15 +464,19 @@ const authenticateAdmin = async (req, res, next) => {
       })
     }
 
-    // 检查会话活跃性（可选：检查最后活动时间）
+    // 🎯 智能会话活跃性检查
     const now = new Date()
     const lastActivity = new Date(adminSession.lastActivity || adminSession.loginTime)
     const inactiveDuration = now - lastActivity
     const maxInactivity = 24 * 60 * 60 * 1000 // 24小时
 
+    // 增加会话活跃度阈值检查
+    const sessionAge = now - new Date(adminSession.loginTime)
+    const isLongSession = sessionAge > 2 * 60 * 60 * 1000 // 超过2小时的长会话
+
     if (inactiveDuration > maxInactivity) {
       logger.security(
-        `🔒 Expired admin session for ${adminSession.username} from ${req.ip || 'unknown'}`
+        `🔒 Expired admin session for ${adminSession.username} from ${req.ip || 'unknown'} (inactive: ${Math.floor(inactiveDuration / 60000)}min)`
       )
       await database.deleteSession(token) // 清理过期会话
       return res.status(401).json({
@@ -481,19 +485,31 @@ const authenticateAdmin = async (req, res, next) => {
       })
     }
 
-    // 更新最后活动时间（异步，不阻塞请求）
-    database
-      .setSession(
-        token,
-        {
-          ...adminSession,
-          lastActivity: now.toISOString()
-        },
-        86400
+    // 对于长期活跃会话给出警告（可能存在异常轮询）
+    if (isLongSession && inactiveDuration < 60 * 1000) {
+      logger.debug(
+        `⚠️ Highly active long session detected: ${adminSession.username} (${Math.floor(sessionAge / 60000)}min old, last activity: ${Math.floor(inactiveDuration / 1000)}s ago)`
       )
-      .catch((error) => {
-        logger.error('Failed to update admin session activity:', error)
-      })
+    }
+
+    // 🎯 智能会话更新：减少频繁更新，仅在必要时执行
+    const timeSinceLastUpdate = inactiveDuration // 重用已计算的非活跃时长
+
+    // 只在超过5分钟未更新时才更新会话（减少Redis写入压力）
+    if (timeSinceLastUpdate > 5 * 60 * 1000) {
+      database
+        .setSession(
+          token,
+          {
+            ...adminSession,
+            lastActivity: now.toISOString()
+          },
+          86400
+        )
+        .catch((error) => {
+          logger.debug('Failed to update admin session activity:', error.message)
+        })
+    }
 
     // 设置管理员信息（只包含必要信息）
     req.admin = {
@@ -504,7 +520,15 @@ const authenticateAdmin = async (req, res, next) => {
     }
 
     const authDuration = Date.now() - startTime
-    logger.security(`🔐 Admin authenticated: ${adminSession.username} in ${authDuration}ms`)
+
+    // 🎯 智能日志记录：减少频繁认证日志，仅在必要时记录
+    if (timeSinceLastUpdate > 5 * 60 * 1000 || authDuration > 100) {
+      // 只在会话更新或认证较慢时记录安全日志
+      logger.security(`🔐 Admin authenticated: ${adminSession.username} in ${authDuration}ms`)
+    } else {
+      // 常规快速认证只记录debug级别
+      logger.debug(`🔐 Admin auth (cached): ${adminSession.username} in ${authDuration}ms`)
+    }
 
     return next()
   } catch (error) {
@@ -596,9 +620,15 @@ const requestLogger = (req, res, next) => {
     referer
   }
 
-  // 记录请求开始（过滤健康检查）
-  if (req.originalUrl !== '/health') {
+  // 🎯 智能请求日志记录：减少频繁的管理界面请求日志
+  const isHealthCheck = req.originalUrl === '/health'
+  const isAdminAuth = req.originalUrl.includes('/admin/') || req.originalUrl.includes('/web/auth/')
+  const isFrequentCall = isAdminAuth && req.method === 'GET'
+
+  if (!isHealthCheck && !isFrequentCall) {
     logger.info(`▶️ [${requestId}] ${req.method} ${req.originalUrl} | IP: ${clientIP}`)
+  } else if (isFrequentCall) {
+    logger.debug(`▶️ [${requestId}] ${req.method} ${req.originalUrl} | IP: ${clientIP}`)
   }
 
   // 🚀 优化事件监听器 - 避免重复创建，使用单一监听器处理多种需求
@@ -637,8 +667,14 @@ const requestLogger = (req, res, next) => {
         `◀️ [${requestId}] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${duration}ms | ${contentLength}B`,
         logMetadata
       )
-    } else if (req.originalUrl !== '/health') {
+    } else if (!isHealthCheck && !isFrequentCall) {
+      // 只记录非健康检查和非频繁管理请求的成功响应
       logger.request(req.method, req.originalUrl, res.statusCode, duration, logMetadata)
+    } else if (isFrequentCall && duration > 100) {
+      // 频繁请求只在响应时间较长时记录
+      logger.debug(
+        `◀️ [${requestId}] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${duration}ms (slow admin)`
+      )
     }
 
     // API Key相关日志
@@ -658,7 +694,7 @@ const requestLogger = (req, res, next) => {
     // 🚀 高性能日志记录集成 - 异步非阻塞处理（支持动态配置）
     if (isRequestLoggingEnabled() && req.apiKey) {
       // 使用 setImmediate 确保完全异步，零阻塞主请求流程
-      setImmediate(() => {
+      setImmediate(async () => {
         try {
           // 确定请求类型用于智能采样
           let requestType = 'normal'
@@ -668,8 +704,29 @@ const requestLogger = (req, res, next) => {
             requestType = 'slow'
           }
 
+          // 🎯 关键修复：添加采样器决策检查
+          const shouldLogResult = await requestLoggerService.shouldLog(req.apiKey.id, requestType, {
+            responseTime: duration,
+            statusCode: res.statusCode
+          })
+
+          logger.debug(
+            `🎯 Sampling decision for ${req.apiKey.id}: ${shouldLogResult} (type: ${requestType}, duration: ${duration}ms)`
+          )
+
+          if (!shouldLogResult) {
+            logger.debug(
+              `📊 Request skipped by sampler: ${req.method} ${req.originalUrl} (${requestType})`
+            )
+            return
+          }
+
+          logger.debug(
+            `📊 Request selected for logging: ${req.method} ${req.originalUrl} (${requestType})`
+          )
+
           // 异步入队日志条目（性能要求：< 0.5ms）
-          requestLoggerService.enqueueLog({
+          const enqueueSuccess = requestLoggerService.enqueueLog({
             // 从现有上下文复用数据
             requestId: req._logContext.requestId,
             method: req._logContext.method,
@@ -695,6 +752,12 @@ const requestLogger = (req, res, next) => {
             // 错误信息（如果存在）
             error: res.statusCode >= 400 ? `HTTP ${res.statusCode}` : null
           })
+
+          if (enqueueSuccess) {
+            logger.debug(`📝 Log entry queued successfully for ${req.apiKey.id}`)
+          } else {
+            logger.debug(`⚠️  Log queue full or disabled for ${req.apiKey.id}`)
+          }
         } catch (logError) {
           // 静默处理日志错误，不影响主请求流程
           logger.debug('High-performance logging error (non-critical):', logError.message)

@@ -226,6 +226,22 @@ class RedisAdapter extends DatabaseAdapter {
     }
   }
 
+  /**
+   * Ping Redis服务器检查连接状态
+   * @returns {Promise<string>} 返回'PONG'表示连接正常
+   * @throws {Error} 连接失败时抛出错误
+   */
+  async ping() {
+    try {
+      const client = this.getClientSafe()
+      const result = await client.ping()
+      return result
+    } catch (error) {
+      logger.error('💥 Redis ping failed:', error)
+      throw error
+    }
+  }
+
   // Redis版本兼容的hset方法（支持多字段设置）
   async hsetCompat(key, ...args) {
     const client = await this.getClientWithReconnect()

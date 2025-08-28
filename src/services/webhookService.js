@@ -11,6 +11,8 @@ class WebhookService {
       feishu: this.sendToFeishu.bind(this),
       slack: this.sendToSlack.bind(this),
       discord: this.sendToDiscord.bind(this),
+      bark: this.sendToBark.bind(this),
+      iyuu: this.sendToIYUU.bind(this),
       custom: this.sendToCustom.bind(this)
     }
   }
@@ -198,6 +200,221 @@ class WebhookService {
   }
 
   /**
+   * Bark推送 - iOS推送通知服务
+   */
+  async sendToBark(platform, type, data) {
+    const title = this.getNotificationTitle(type)
+    const body = this.formatBarkMessage(data)
+
+    // Bark API格式: https://api.day.app/[key]/[title]/[body]?[params]
+    // 或者使用POST方式发送JSON
+
+    let { url } = platform
+    let method = 'GET'
+    let payload = null
+
+    // 检查URL格式，决定使用GET还是POST方式
+    if (platform.usePost || platform.url.includes('/push')) {
+      // POST方式 - 适用于自建Bark服务器或需要复杂参数的情况
+      method = 'POST'
+      payload = {
+        title,
+        body,
+        device_key: platform.deviceKey, // Bark设备密钥
+        ...this.getBarkExtraParams(platform, type)
+      }
+    } else {
+      // GET方式 - 传统Bark URL格式
+      // 确保URL格式正确: https://api.day.app/[deviceKey]/
+      if (!platform.deviceKey) {
+        throw new Error('Bark推送需要设备密钥 (deviceKey)')
+      }
+
+      // 构建GET请求URL
+      const encodedTitle = encodeURIComponent(title)
+      const encodedBody = encodeURIComponent(body)
+      const extraParams = this.getBarkExtraParams(platform, type)
+      const paramString = new URLSearchParams(extraParams).toString()
+
+      url = `${platform.url.replace(/\/$/, '')}/${platform.deviceKey}/${encodedTitle}/${encodedBody}`
+      if (paramString) {
+        url += `?${paramString}`
+      }
+    }
+
+    if (method === 'POST') {
+      await this.sendHttpRequest(url, payload, platform.timeout || 10000)
+    } else {
+      // GET请求
+      await this.sendHttpGetRequest(url, platform.timeout || 10000)
+    }
+  }
+
+  /**
+   * IYUU推送 - 支持GET/POST双模式和智能切换
+   */
+  async sendToIYUU(platform, type, data) {
+    const title = this.getNotificationTitle(type)
+    const content = this.formatMessageForIYUU(type, data)
+
+    // 构建IYUU API URL
+    const baseUrl = `https://iyuu.cn/${platform.token}.send`
+
+    // 准备参数
+    const params = {
+      text: title,
+      desp: content
+    }
+
+    // 检查参数长度，决定使用GET还是POST
+    const paramString = new URLSearchParams(params).toString()
+    const usePost = paramString.length > 1800 || platform.forcePost // URL长度限制或强制使用POST
+
+    try {
+      if (usePost) {
+        // POST方式发送
+        await this.sendHttpRequest(baseUrl, params, platform.timeout || 10000)
+      } else {
+        // GET方式发送
+        const url = `${baseUrl}?${paramString}`
+        await this.sendHttpGetRequest(url, platform.timeout || 10000)
+      }
+
+      logger.debug(`✅ IYUU推送成功 (${usePost ? 'POST' : 'GET'}方式)`, {
+        platform: platform.name || 'IYUU',
+        type,
+        titleLength: title.length,
+        contentLength: content.length
+      })
+    } catch (error) {
+      // 如果GET方式失败且是413错误，尝试POST方式
+      if (!usePost && error.response && error.response.status === 413) {
+        logger.warn('📝 IYUU GET请求过大，自动切换到POST方式重试')
+        await this.sendHttpRequest(baseUrl, params, platform.timeout || 10000)
+        logger.debug('✅ IYUU POST重试成功')
+      } else {
+        // 处理特定错误
+        this.handleIYUUError(error)
+        throw error
+      }
+    }
+  }
+
+  /**
+   * 处理IYUU推送错误
+   */
+  handleIYUUError(error) {
+    if (error.response) {
+      const { status } = error.response
+      const { data } = error.response
+
+      switch (status) {
+        case 404:
+          throw new Error('IYUU Token无效或不存在')
+        case 413:
+          throw new Error('请求参数过大，建议使用POST方式或减少内容长度')
+        case 429:
+          throw new Error('IYUU推送频率限制，请稍后再试')
+        case 500:
+          throw new Error('IYUU服务器内部错误，请稍后再试')
+        default:
+          if (data && data.errmsg) {
+            throw new Error(`IYUU推送失败: ${data.errmsg}`)
+          }
+          throw new Error(`IYUU推送失败: HTTP ${status}`)
+      }
+    } else if (error.code === 'ECONNREFUSED') {
+      throw new Error('无法连接到IYUU服务器，请检查网络连接')
+    } else if (error.code === 'ETIMEDOUT') {
+      throw new Error('IYUU推送超时，请稍后再试')
+    } else {
+      throw new Error(`IYUU推送失败: ${error.message}`)
+    }
+  }
+
+  /**
+   * 格式化IYUU消息内容
+   */
+  formatMessageForIYUU(type, data) {
+    const lines = []
+
+    // 添加服务信息
+    lines.push('**服务**: Claude Relay Service')
+    lines.push(`**时间**: ${new Date().toLocaleString('zh-CN')}`)
+    lines.push('')
+
+    // 添加详细信息
+    if (data.accountName) {
+      lines.push(`**账号**: ${data.accountName}`)
+    }
+
+    if (data.platform) {
+      lines.push(`**平台**: ${data.platform}`)
+    }
+
+    if (data.status) {
+      lines.push(`**状态**: ${data.status}`)
+    }
+
+    if (data.errorCode) {
+      lines.push(`**错误代码**: ${data.errorCode}`)
+    }
+
+    if (data.reason) {
+      lines.push(`**原因**: ${data.reason}`)
+    }
+
+    if (data.message) {
+      lines.push(`**消息**: ${data.message}`)
+    }
+
+    if (data.quota) {
+      lines.push(`**配额信息**: ${data.quota.remaining}/${data.quota.total} 剩余`)
+      if (data.quota.percentage !== undefined) {
+        lines.push(`**使用率**: ${data.quota.percentage}%`)
+      }
+    }
+
+    if (data.usage) {
+      lines.push(`**使用率**: ${data.usage}%`)
+    }
+
+    // 添加操作建议（根据通知类型）
+    switch (type) {
+      case 'accountAnomaly':
+        lines.push('')
+        lines.push('🔧 **建议操作**:')
+        lines.push('- 检查账号登录状态')
+        lines.push('- 验证代理配置')
+        lines.push('- 查看详细日志')
+        break
+      case 'quotaWarning':
+        lines.push('')
+        lines.push('📈 **建议操作**:')
+        lines.push('- 监控使用情况')
+        lines.push('- 考虑增加配额')
+        lines.push('- 优化使用策略')
+        break
+      case 'systemError':
+        lines.push('')
+        lines.push('🚨 **建议操作**:')
+        lines.push('- 立即检查系统状态')
+        lines.push('- 查看错误日志')
+        lines.push('- 必要时重启服务')
+        break
+      case 'securityAlert':
+        lines.push('')
+        lines.push('🔒 **建议操作**:')
+        lines.push('- 立即检查安全设置')
+        lines.push('- 审查访问日志')
+        lines.push('- 更新安全配置')
+        break
+    }
+
+    return lines.join('\n')
+  }
+
+  /**
    * 自定义webhook
    */
   async sendToCustom(platform, type, data) {
@@ -220,6 +437,24 @@ class WebhookService {
       timeout,
       headers: {
         'Content-Type': 'application/json',
+        'User-Agent': 'claude-relay-service/2.0'
+      }
+    })
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    return response.data
+  }
+
+  /**
+   * 发送HTTP GET请求 (用于Bark等GET方式的webhook)
+   */
+  async sendHttpGetRequest(url, timeout) {
+    const response = await axios.get(url, {
+      timeout,
+      headers: {
         'User-Agent': 'claude-relay-service/2.0'
       }
     })
@@ -334,6 +569,116 @@ class WebhookService {
         text: 'Claude Relay Service'
       }
     }
+  }
+
+  /**
+   * 格式化Bark消息内容
+   */
+  formatBarkMessage(data) {
+    const lines = []
+
+    if (data.accountName) {
+      lines.push(`账号: ${data.accountName}`)
+    }
+
+    if (data.platform) {
+      lines.push(`平台: ${data.platform}`)
+    }
+
+    if (data.status) {
+      lines.push(`状态: ${data.status}`)
+    }
+
+    if (data.errorCode) {
+      lines.push(`错误代码: ${data.errorCode}`)
+    }
+
+    if (data.reason) {
+      lines.push(`原因: ${data.reason}`)
+    }
+
+    if (data.message) {
+      lines.push(`消息: ${data.message}`)
+    }
+
+    if (data.quota) {
+      lines.push(`剩余配额: ${data.quota.remaining}/${data.quota.total}`)
+    }
+
+    if (data.usage) {
+      lines.push(`使用率: ${data.usage}%`)
+    }
+
+    // 添加时间戳
+    lines.push(`时间: ${new Date().toLocaleString('zh-CN')}`)
+
+    return lines.join('\n')
+  }
+
+  /**
+   * 获取Bark额外参数
+   */
+  getBarkExtraParams(platform, type) {
+    const params = {}
+
+    // 设置声音
+    if (platform.sound) {
+      params.sound = platform.sound
+    } else {
+      // 根据通知类型设置不同声音
+      const sounds = {
+        systemError: 'alarm',
+        securityAlert: 'multiwayinvitation',
+        accountAnomaly: 'calypso',
+        quotaWarning: 'bell',
+        test: 'birdsong'
+      }
+      params.sound = sounds[type] || 'bell'
+    }
+
+    // 设置徽章数字
+    if (platform.badge !== undefined) {
+      params.badge = platform.badge
+    }
+
+    // 设置分组
+    if (platform.group) {
+      params.group = platform.group
+    } else {
+      params.group = 'claude-relay-service'
+    }
+
+    // 设置图标
+    if (platform.icon) {
+      params.icon = platform.icon
+    }
+
+    // 设置URL (点击通知时打开) - 这应该是点击通知后要打开的URL，不是推送服务的URL
+    if (platform.clickUrl) {
+      params.url = platform.clickUrl
+    }
+
+    // 自动复制到剪贴板
+    if (platform.copy) {
+      params.copy = platform.copy
+    }
+
+    // 设置中断级别 (iOS 15+)
+    if (platform.level) {
+      params.level = platform.level // passive, active, critical
+    } else {
+      // 根据通知类型设置中断级别
+      const levels = {
+        systemError: 'critical',
+        securityAlert: 'critical',
+        accountAnomaly: 'active',
+        quotaWarning: 'active',
+        test: 'passive'
+      }
+      params.level = levels[type] || 'active'
+    }
+
+    return params
   }
 
   /**

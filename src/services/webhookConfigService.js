@@ -56,15 +56,31 @@ class WebhookConfigService {
 
     // 验证平台配置
     if (config.platforms) {
-      const validPlatforms = ['wechat_work', 'dingtalk', 'feishu', 'slack', 'discord', 'custom']
+      const validPlatforms = [
+        'wechat_work',
+        'dingtalk',
+        'feishu',
+        'slack',
+        'discord',
+        'bark',
+        'iyuu',
+        'custom'
+      ]
 
       for (const platform of config.platforms) {
         if (!validPlatforms.includes(platform.type)) {
           throw new Error(`不支持的平台类型: ${platform.type}`)
         }
 
-        if (!platform.url || !this.isValidUrl(platform.url)) {
-          throw new Error(`无效的webhook URL: ${platform.url}`)
+        // 特殊平台验证处理
+        if (platform.type === 'bark') {
+          this.validateBarkConfig(platform)
+        } else if (platform.type === 'iyuu') {
+          this.validateIYUUConfig(platform)
+        } else {
+          if (!platform.url || !this.isValidUrl(platform.url)) {
+            throw new Error(`无效的webhook URL: ${platform.url}`)
+          }
         }
 
         // 验证平台特定的配置
@@ -105,10 +121,130 @@ class WebhookConfigService {
           logger.warn('⚠️ Discord webhook URL格式可能不正确')
         }
         break
+      case 'bark':
+        // Bark配置已在 validateBarkConfig 中验证
+        break
+      case 'iyuu':
+        // IYUU配置已在 validateIYUUConfig 中验证
+        break
       case 'custom':
         // 自定义webhook，用户自行负责格式
         break
     }
+  }
+
+  /**
+   * 验证Bark配置
+   */
+  validateBarkConfig(platform) {
+    // Bark有两种配置模式：
+    // 1. 传统模式：提供完整的API URL (如 https://api.day.app) 和设备密钥
+    // 2. POST模式：提供完整的推送URL和设备密钥
+
+    if (platform.usePost) {
+      // POST模式验证
+      if (!platform.url || !this.isValidUrl(platform.url)) {
+        throw new Error('Bark POST模式需要有效的推送URL')
+      }
+      if (!platform.deviceKey) {
+        throw new Error('Bark POST模式需要设备密钥 (deviceKey)')
+      }
+    } else {
+      // GET模式验证 (传统Bark API)
+      if (!platform.url || !this.isValidUrl(platform.url)) {
+        throw new Error('Bark需要有效的API URL (如 https://api.day.app)')
+      }
+      if (!platform.deviceKey) {
+        throw new Error('Bark需要设备密钥 (deviceKey)')
+      }
+
+      // 检查URL格式
+      const url = new URL(platform.url)
+      if (!url.hostname.includes('day.app') && !url.hostname.includes('bark')) {
+        logger.warn('⚠️ Bark服务器URL格式可能不正确，请确认是否为有效的Bark服务器')
+      }
+    }
+
+    // 验证可选参数
+    if (platform.sound) {
+      const validSounds = [
+        'alarm',
+        'anticipate',
+        'bell',
+        'birdsong',
+        'bloom',
+        'calypso',
+        'chime',
+        'choo',
+        'descent',
+        'electronic',
+        'fanfare',
+        'glass',
+        'gotosleep',
+        'healthnotification',
+        'horn',
+        'ladder',
+        'mailsent',
+        'minuet',
+        'multiwayinvitation',
+        'newmail',
+        'newsflash',
+        'noir',
+        'paymentsuccess',
+        'shake',
+        'sherwoodforest',
+        'silence',
+        'spell',
+        'suspense',
+        'telegraph',
+        'tiptoes',
+        'typewriters',
+        'update'
+      ]
+
+      if (!validSounds.includes(platform.sound)) {
+        logger.warn(`⚠️ Bark声音 "${platform.sound}" 可能不被支持`)
+      }
+    }
+
+    if (platform.level) {
+      const validLevels = ['passive', 'active', 'critical']
+      if (!validLevels.includes(platform.level)) {
+        throw new Error(`Bark中断级别必须是: ${validLevels.join(', ')}`)
+      }
+    }
+  }
+
+  /**
+   * 验证IYUU配置
+   */
+  validateIYUUConfig(platform) {
+    // IYUU必须提供token
+    if (!platform.token || typeof platform.token !== 'string') {
+      throw new Error('IYUU推送需要有效的Token')
+    }
+
+    // 验证token格式
+    const tokenRegex = /^[a-zA-Z0-9]{8,64}$/
+    if (!tokenRegex.test(platform.token)) {
+      throw new Error('IYUU Token格式无效，应为8-64位字母数字组合')
+    }
+
+    // 验证超时设置
+    if (platform.timeout && (platform.timeout < 1000 || platform.timeout > 30000)) {
+      throw new Error('IYUU请求超时时间应在1000-30000毫秒之间')
+    }
+
+    // 验证强制POST模式设置
+    if (platform.forcePost && typeof platform.forcePost !== 'boolean') {
+      throw new Error('IYUU强制POST模式设置必须为布尔值')
+    }
+
+    logger.debug('✅ IYUU配置验证通过', {
+      token: `${platform.token.substring(0, 8)}***`,
+      timeout: platform.timeout || 10000,
+      forcePost: platform.forcePost || false
+    })
   }
 
   /**

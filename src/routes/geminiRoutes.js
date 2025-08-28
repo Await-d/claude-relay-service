@@ -439,7 +439,15 @@ async function handleCountTokens(req, res) {
   try {
     // 处理请求体结构，支持直接 contents 或 request.contents
     const requestData = req.body.request || req.body
-    const { contents, model = 'gemini-2.0-flash-exp' } = requestData
+
+    // 🔧 增强的模型名获取 - 支持v1beta路由参数
+    const { contents } = requestData
+    let { model = 'gemini-2.0-flash-exp' } = requestData
+    if (!model && req.params.modelName) {
+      model = req.params.modelName
+      logger.debug(`Using model name from route parameter for countTokens: ${model}`)
+    }
+
     const sessionHash = sessionHelper.generateSessionHash(req.body)
 
     // 验证必需参数
@@ -487,7 +495,14 @@ async function handleCountTokens(req, res) {
 // 共用的 generateContent 处理函数
 async function handleGenerateContent(req, res) {
   try {
-    const { model, project, user_prompt_id, request: requestData } = req.body
+    // 🔧 增强的模型名获取 - 支持v1beta路由参数
+    let { model } = req.body
+    if (!model && req.params.modelName) {
+      model = req.params.modelName
+      logger.debug(`Using model name from route parameter: ${model}`)
+    }
+
+    const { project, user_prompt_id, request: requestData } = req.body
     const sessionHash = sessionHelper.generateSessionHash(req.body)
 
     // 处理不同格式的请求
@@ -610,7 +625,14 @@ async function handleStreamGenerateContent(req, res) {
   let abortController = null
 
   try {
-    const { model, project, user_prompt_id, request: requestData } = req.body
+    // 🔧 增强的模型名获取 - 支持v1beta路由参数
+    let { model } = req.body
+    if (!model && req.params.modelName) {
+      model = req.params.modelName
+      logger.debug(`Using model name from route parameter for stream: ${model}`)
+    }
+
+    const { project, user_prompt_id, request: requestData } = req.body
     const sessionHash = sessionHelper.generateSessionHash(req.body)
 
     // 处理不同格式的请求

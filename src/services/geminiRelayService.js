@@ -39,6 +39,24 @@ function convertMessagesToGemini(messages) {
 
 // 转换 Gemini 响应到 OpenAI 格式
 function convertGeminiResponse(geminiResponse, model, stream = false) {
+  // 🔍 增强的输入验证
+  if (!geminiResponse) {
+    logger.warn('Empty Gemini response received')
+    return null
+  }
+
+  // 🚨 处理API错误响应
+  if (geminiResponse.error) {
+    const error = new Error(geminiResponse.error.message || 'Gemini API error')
+    error.status = geminiResponse.error.code === 'PERMISSION_DENIED' ? 403 : 400
+    error.error = {
+      message: geminiResponse.error.message || 'Gemini API error',
+      type: 'api_error',
+      code: geminiResponse.error.code || 'unknown'
+    }
+    throw error
+  }
+
   if (stream) {
     // 流式响应
     const candidate = geminiResponse.candidates?.[0]
@@ -47,7 +65,15 @@ function convertGeminiResponse(geminiResponse, model, stream = false) {
     }
 
     const content = candidate.content?.parts?.[0]?.text || ''
-    const finishReason = candidate.finishReason?.toLowerCase()
+    // 🔧 改进的finishReason处理 - 支持更多v1beta格式
+    let { finishReason } = candidate
+    if (finishReason) {
+      finishReason = finishReason.toLowerCase()
+      // 标准化不同的结束原因格式
+      if (finishReason === 'finish_reason_stop' || finishReason === 'stop') {
+        finishReason = 'stop'
+      }
+    }
 
     return {
       id: `chatcmpl-${Date.now()}`,
@@ -65,21 +91,30 @@ function convertGeminiResponse(geminiResponse, model, stream = false) {
       ]
     }
   } else {
-    // 非流式响应
+    // 非流式响应 - 增强的v1beta兼容性
     const candidate = geminiResponse.candidates?.[0]
     if (!candidate) {
-      throw new Error('No response from Gemini')
+      // 🔧 更详细的错误信息，帮助调试v1beta问题
+      const errorMsg = geminiResponse.promptFeedback
+        ? `Gemini blocked request: ${geminiResponse.promptFeedback.blockReason || 'unknown reason'}`
+        : 'No response candidates from Gemini'
+      throw new Error(errorMsg)
     }
 
     const content = candidate.content?.parts?.[0]?.text || ''
-    const finishReason = candidate.finishReason?.toLowerCase() || 'stop'
-
-    // 计算 token 使用量
-    const usage = geminiResponse.usageMetadata || {
-      promptTokenCount: 0,
-      candidatesTokenCount: 0,
-      totalTokenCount: 0
+    // 🔧 改进的finishReason处理
+    let finishReason = candidate.finishReason?.toLowerCase() || 'stop'
+    if (finishReason === 'finish_reason_stop') {
+      finishReason = 'stop'
     }
+
+    // 计算 token 使用量 - 支持v1beta的不同响应格式
+    const usage = geminiResponse.usageMetadata ||
+      geminiResponse.usage || {
+        promptTokenCount: 0,
+        candidatesTokenCount: 0,
+        totalTokenCount: 0
+      }
 
     return {
       id: `chatcmpl-${Date.now()}`,
@@ -97,9 +132,9 @@ function convertGeminiResponse(geminiResponse, model, stream = false) {
         }
       ],
       usage: {
-        prompt_tokens: usage.promptTokenCount,
-        completion_tokens: usage.candidatesTokenCount,
-        total_tokens: usage.totalTokenCount
+        prompt_tokens: usage.promptTokenCount || usage.prompt_tokens || 0,
+        completion_tokens: usage.candidatesTokenCount || usage.completion_tokens || 0,
+        total_tokens: usage.totalTokenCount || usage.total_tokens || 0
       }
     }
   }
@@ -140,19 +175,33 @@ async function* handleStreamResponse(response, model, apiKeyId, accountId = null
         try {
           const data = JSON.parse(jsonData)
 
+          // 🔍 增强的错误检查：处理v1beta可能出现的异常数据结构
+          if (data.error) {
+            logger.error('Gemini API error in stream:', data.error)
+            yield `data: ${JSON.stringify({
+              error: {
+                message: data.error.message || 'Gemini API error',
+                type: 'api_error',
+                code: data.error.code || 'unknown'
+              }
+            })}\n\n`
+            continue
+          }
+
           // 更新使用量统计
           if (data.usageMetadata) {
             totalUsage = data.usageMetadata
           }
 
-          // 转换并发送响应
+          // 转换并发送响应 - 增加空响应处理
           const openaiResponse = convertGeminiResponse(data, model, true)
           if (openaiResponse) {
             yield `data: ${JSON.stringify(openaiResponse)}\n\n`
           }
 
-          // 检查是否结束
-          if (data.candidates?.[0]?.finishReason === 'STOP') {
+          // 检查是否结束 - 增强结束条件检测
+          const finishReason = data.candidates?.[0]?.finishReason
+          if (finishReason === 'STOP' || finishReason === 'FINISH_REASON_STOP') {
             // 记录使用量
             if (apiKeyId && totalUsage.totalTokenCount > 0) {
               await apiKeyService
@@ -174,7 +223,12 @@ async function* handleStreamResponse(response, model, apiKeyId, accountId = null
             return
           }
         } catch (e) {
-          logger.debug('Error parsing JSON line:', e.message, 'Line:', jsonData)
+          // 🔧 改进的JSON解析错误处理
+          logger.debug('Error parsing JSON line:', e.message, 'Line:', jsonData?.substring(0, 100))
+          // 对于无法解析的数据，尝试直接转发（某些情况下可能是原始SSE数据）
+          if (jsonData && !jsonData.includes('error')) {
+            logger.debug('Attempting to forward unparsed data as-is')
+          }
         }
       }
     }

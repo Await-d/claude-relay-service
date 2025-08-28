@@ -28,22 +28,40 @@ const DEFAULT_LOG_CONFIG = {
  */
 router.get('/config', authenticateAdmin, async (req, res) => {
   try {
-    const config = (await database.getRequestLogsConfig()) || DEFAULT_LOG_CONFIG
+    // 1. 从传统配置系统获取基础配置
+    const legacyConfig = (await database.getRequestLogsConfig()) || DEFAULT_LOG_CONFIG
 
-    // 确保返回前端期望的字段格式
+    // 2. 从动态配置系统获取最新状态
+    let dynamicEnabled = legacyConfig.enabled
+    try {
+      const { dynamicConfigManager } = require('../services/dynamicConfigService')
+
+      // 优先使用动态配置系统的enabled状态
+      const currentEnabled = await dynamicConfigManager.getConfig('requestLogging.enabled')
+      if (currentEnabled !== undefined) {
+        dynamicEnabled = currentEnabled
+      }
+    } catch (dynamicError) {
+      winston.warn('⚠️ Failed to get dynamic config, using legacy config:', dynamicError.message)
+    }
+
+    // 3. 构建响应配置，优先使用动态配置的enabled状态
     const responseConfig = {
-      enabled: config.enabled !== undefined ? config.enabled : false,
-      level: config.level || config.logLevel || DEFAULT_LOG_CONFIG.logLevel,
-      retentionDays: config.retentionDays || config.retention || DEFAULT_LOG_CONFIG.retention,
-      maxFileSize: config.maxFileSize || 10,
-      maxFiles: config.maxFiles || 10,
-      includeHeaders: config.includeHeaders !== undefined ? config.includeHeaders : true,
-      includeBody: config.includeBody !== undefined ? config.includeBody : true,
-      includeResponse: config.includeResponse !== undefined ? config.includeResponse : true,
-      includeErrors: config.includeErrors !== undefined ? config.includeErrors : true,
+      enabled: dynamicEnabled,
+      level: legacyConfig.level || legacyConfig.logLevel || DEFAULT_LOG_CONFIG.logLevel,
+      retentionDays:
+        legacyConfig.retentionDays || legacyConfig.retention || DEFAULT_LOG_CONFIG.retention,
+      maxFileSize: legacyConfig.maxFileSize || 10,
+      maxFiles: legacyConfig.maxFiles || 10,
+      includeHeaders:
+        legacyConfig.includeHeaders !== undefined ? legacyConfig.includeHeaders : true,
+      includeBody: legacyConfig.includeBody !== undefined ? legacyConfig.includeBody : true,
+      includeResponse:
+        legacyConfig.includeResponse !== undefined ? legacyConfig.includeResponse : true,
+      includeErrors: legacyConfig.includeErrors !== undefined ? legacyConfig.includeErrors : true,
       filterSensitiveData:
-        config.filterSensitiveData !== undefined ? config.filterSensitiveData : true,
-      updatedAt: config.updatedAt || null
+        legacyConfig.filterSensitiveData !== undefined ? legacyConfig.filterSensitiveData : true,
+      updatedAt: legacyConfig.updatedAt || null
     }
 
     // 获取实时服务状态
@@ -155,9 +173,29 @@ const updateConfigHandler = async (req, res) => {
       retention: newConfig.retention
     })
 
-    // 3. 保存配置到Redis
+    // 3. 保存配置到Redis（传统方式）
     await database.setRequestLogsConfig(newConfig)
     savedConfig = newConfig
+
+    // 4. 同步保存到动态配置系统（新方式）
+    try {
+      const { dynamicConfigManager } = require('../services/dynamicConfigService')
+
+      // 将传统配置字段映射到动态配置格式
+      await dynamicConfigManager.setConfig('requestLogging.enabled', newConfig.enabled)
+
+      if (newConfig.logLevel) {
+        await dynamicConfigManager.setConfig(
+          'requestLogging.mode',
+          newConfig.logLevel === 'debug' ? 'detailed' : 'basic'
+        )
+      }
+
+      winston.info('✅ Configuration synchronized to dynamic config system')
+    } catch (syncError) {
+      winston.error('❌ Failed to sync to dynamic config system:', syncError)
+      // 不中断主流程，但记录错误
+    }
 
     // 4. 触发requestLoggerService热重载（异步非阻塞）
     let reloadResult = { success: false, message: 'Hot reload not attempted' }
