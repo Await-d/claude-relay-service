@@ -3187,7 +3187,10 @@ router.get('/dashboard', authenticateAdmin, async (req, res) => {
         isHistorical: realtimeMetrics.windowMinutes === 0 // 标识是否使用了历史数据
       },
       systemHealth: {
-        redisConnected: database.isConnected,
+        databaseConnected: await database
+          .getDatabase()
+          .then((instance) => instance.isConnected)
+          .catch(() => false),
         claudeAccountsHealthy: normalClaudeAccounts + normalClaudeConsoleAccounts > 0,
         geminiAccountsHealthy: normalGeminiAccounts > 0,
         uptime: process.uptime()
@@ -3302,7 +3305,7 @@ router.get('/model-stats', authenticateAdmin, async (req, res) => {
       }
 
       // 对于其他模型，去掉常见的版本后缀
-      return model.replace(/-v\d+:\d+$|:latest$/, '')
+      return model.replace(/-v\d+:\d+$|:latest$|\[\d+[a-zA-Z]*\]$/, '')
     }
 
     // 聚合相同模型的数据
@@ -4211,7 +4214,7 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
       }
 
       // 对于其他模型，去掉常见的版本后缀
-      return model.replace(/-v\d+:\d+$|:latest$/, '')
+      return model.replace(/-v\d+:\d+$|:latest$|\[\d+[a-zA-Z]*\]$/, '')
     }
 
     // 获取所有API Keys的使用统计

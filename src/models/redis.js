@@ -202,7 +202,7 @@ class RedisClient {
     }
 
     // 对于其他模型，去掉常见的版本后缀
-    return model.replace(/-v\d+:\d+$|:latest$/, '')
+    return model.replace(/-v\d+:\d+$|:latest$|\[\d+[a-zA-Z]*\]$/, '')
   }
 
   async incrementTokenUsage(
