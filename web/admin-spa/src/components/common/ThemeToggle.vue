@@ -220,10 +220,10 @@ const selectTheme = (mode) => {
   padding: 4px;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #7ab2d3 0%, #4a628a 100%);
   border: 2px solid rgba(255, 255, 255, 0.1);
   box-shadow:
-    0 4px 15px rgba(102, 126, 234, 0.3),
+    0 4px 15px rgba(122, 178, 211, 0.3),
     inset 0 1px 2px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   display: flex;
@@ -233,7 +233,7 @@ const selectTheme = (mode) => {
 .theme-switch:hover {
   transform: scale(1.05);
   box-shadow:
-    0 6px 20px rgba(102, 126, 234, 0.4),
+    0 6px 20px rgba(122, 178, 211, 0.4),
     inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
@@ -256,16 +256,16 @@ const selectTheme = (mode) => {
     inset 0 1px 2px rgba(255, 255, 255, 0.05);
 }
 
-/* 自动模式样式 - 静态蓝紫渐变设计（优化版） */
+/* 自动模式样式 - 静态蓝调渐变设计（优化版） */
 .theme-switch.is-auto {
   background: linear-gradient(
     135deg,
-    #c4b5fd 0%,
-    /* 更柔和的起始：淡紫 */ #a78bfa 15%,
-    /* 浅紫 */ #818cf8 40%,
-    /* 紫蓝 */ #6366f1 60%,
-    /* 靛蓝 */ #4f46e5 85%,
-    /* 深蓝紫 */ #4338ca 100% /* 更深的结束：深紫 */
+    #b9e5e8 0%,
+    /* 更柔和的起始：浅蓝绿 */ #7ab2d3 15%,
+    /* 中蓝 */ #5a9cc4 40%,
+    /* 深蓝 */ #4a628a 60%,
+    /* 蓝灰 */ #3a4d6b 85%,
+    /* 深蓝灰 */ #2a3441 100% /* 更深的结束：深蓝灰 */
   );
   border-color: rgba(255, 255, 255, 0.2);
   position: relative;
@@ -273,7 +273,7 @@ const selectTheme = (mode) => {
   background-size: 120% 120%;
   background-position: center;
   box-shadow:
-    0 4px 15px rgba(139, 92, 246, 0.25),
+    0 4px 15px rgba(122, 178, 211, 0.25),
     inset 0 1px 3px rgba(0, 0, 0, 0.1),
     inset 0 -1px 3px rgba(0, 0, 0, 0.1);
 }

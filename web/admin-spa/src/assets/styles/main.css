@@ -36,9 +36,9 @@ body::before {
   right: 0;
   bottom: 0;
   background:
-    radial-gradient(circle at 20% 80%, rgba(240, 147, 251, 0.2) 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, rgba(102, 126, 234, 0.2) 0%, transparent 50%),
-    radial-gradient(circle at 40% 40%, rgba(118, 75, 162, 0.1) 0%, transparent 50%);
+    radial-gradient(circle at 20% 80%, rgba(185, 229, 232, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(122, 178, 211, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(223, 242, 235, 0.15) 0%, transparent 50%);
   pointer-events: none;
   z-index: -1;
 }
@@ -80,7 +80,7 @@ h6 {
 /* 自定义滚动条样式 */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(102, 126, 234, 0.3) rgba(102, 126, 234, 0.05);
+  scrollbar-color: rgba(122, 178, 211, 0.3) rgba(122, 178, 211, 0.05);
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -89,22 +89,22 @@ h6 {
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(102, 126, 234, 0.05);
+  background: rgba(122, 178, 211, 0.05);
   border-radius: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.4) 0%, rgba(118, 75, 162, 0.4) 100%);
+  background: linear-gradient(135deg, rgba(122, 178, 211, 0.4) 0%, rgba(74, 98, 138, 0.4) 100%);
   border-radius: 10px;
   transition: background 0.3s ease;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.6) 0%, rgba(118, 75, 162, 0.6) 100%);
+  background: linear-gradient(135deg, rgba(122, 178, 211, 0.6) 0%, rgba(74, 98, 138, 0.6) 100%);
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:active {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.8) 0%, rgba(118, 75, 162, 0.8) 100%);
+  background: linear-gradient(135deg, rgba(122, 178, 211, 0.8) 0%, rgba(74, 98, 138, 0.8) 100%);
 }
 
 /* Vue过渡动画 */
