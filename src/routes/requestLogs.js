@@ -3,6 +3,7 @@ const { authenticateAdmin } = require('../middleware/auth')
 const database = require('../models/database')
 const winston = require('winston')
 const fs = require('fs')
+const { requestLogger } = require('../services/requestLoggerService')
 
 const router = express.Router()
 
@@ -13,7 +14,18 @@ const DEFAULT_LOG_CONFIG = {
   enableDetailedLogging: true // 是否启用详细日志
 }
 
-// 获取日志配置
+/**
+ * 获取日志配置处理器 - 包含实时状态信息
+ *
+ * 返回数据包括：
+ * 1. 完整的配置信息
+ * 2. 实时的服务状态
+ * 3. 性能指标概要
+ *
+ * @param {Object} req Express请求对象
+ * @param {Object} res Express响应对象
+ * @returns {Promise<void>}
+ */
 router.get('/config', authenticateAdmin, async (req, res) => {
   try {
     const config = (await database.getRequestLogsConfig()) || DEFAULT_LOG_CONFIG
@@ -34,7 +46,44 @@ router.get('/config', authenticateAdmin, async (req, res) => {
       updatedAt: config.updatedAt || null
     }
 
-    res.json(responseConfig)
+    // 获取实时服务状态
+    const serviceStatus = {
+      available: false,
+      currentlyEnabled: false,
+      supportsHotReload: false,
+      metrics: null
+    }
+
+    try {
+      if (requestLogger) {
+        serviceStatus.available = true
+        serviceStatus.supportsHotReload = typeof requestLogger.reloadConfig === 'function'
+
+        if (typeof requestLogger.isCurrentlyEnabled === 'function') {
+          serviceStatus.currentlyEnabled = requestLogger.isCurrentlyEnabled()
+        }
+
+        if (typeof requestLogger.getMetrics === 'function') {
+          const metrics = requestLogger.getMetrics()
+          serviceStatus.metrics = {
+            enabled: metrics.enabled,
+            queueLength: metrics.queue?.length || 0,
+            uptime: metrics.uptime?.formatted || 'Unknown',
+            totalProcessed: metrics.throughput?.totalWritten || 0
+          }
+        }
+      }
+    } catch (statusError) {
+      winston.warn('⚠️ Failed to get request logger status:', statusError)
+    }
+
+    const response = {
+      ...responseConfig,
+      serviceStatus,
+      timestamp: new Date().toISOString()
+    }
+
+    res.json(response)
   } catch (error) {
     winston.error('获取日志配置错误', { error })
     res.status(500).json({
@@ -45,9 +94,24 @@ router.get('/config', authenticateAdmin, async (req, res) => {
   }
 })
 
-// 更新日志配置 (支持 PUT 和 POST 方法)
+/**
+ * 更新日志配置处理器 - 支持热重载
+ *
+ * 主要功能：
+ * 1. 验证和标准化配置参数
+ * 2. 保存配置到Redis
+ * 3. 触发requestLoggerService热重载
+ * 4. 返回详细的操作结果状态
+ *
+ * @param {Object} req Express请求对象
+ * @param {Object} res Express响应对象
+ * @returns {Promise<void>}
+ */
 const updateConfigHandler = async (req, res) => {
+  let savedConfig = null
+
   try {
+    // 1. 提取和验证配置参数
     const {
       retention,
       logLevel,
@@ -64,6 +128,7 @@ const updateConfigHandler = async (req, res) => {
       filterSensitiveData
     } = req.body
 
+    // 2. 构建标准化配置对象
     const newConfig = {
       // 兼容老的配置字段名
       retention: retention || retentionDays || DEFAULT_LOG_CONFIG.retention,
@@ -84,20 +149,258 @@ const updateConfigHandler = async (req, res) => {
       updatedAt: new Date().toISOString()
     }
 
+    winston.info('📝 Updating request logs configuration:', {
+      enabled: newConfig.enabled,
+      logLevel: newConfig.logLevel,
+      retention: newConfig.retention
+    })
+
+    // 3. 保存配置到Redis
     await database.setRequestLogsConfig(newConfig)
-    res.json(newConfig)
+    savedConfig = newConfig
+
+    // 4. 触发requestLoggerService热重载（异步非阻塞）
+    let reloadResult = { success: false, message: 'Hot reload not attempted' }
+
+    try {
+      if (requestLogger && typeof requestLogger.reloadConfig === 'function') {
+        winston.debug('🔄 Triggering request logger hot reload...')
+        reloadResult = await requestLogger.reloadConfig(newConfig)
+        winston.info('🔄 Request logger hot reload result:', {
+          success: reloadResult.success,
+          statusChange: reloadResult.statusChange
+        })
+      } else {
+        winston.warn('⚠️ Request logger service not available for hot reload')
+        reloadResult = {
+          success: false,
+          message: 'Request logger service not available',
+          requiresRestart: true
+        }
+      }
+    } catch (reloadError) {
+      winston.error('❌ Request logger hot reload failed:', reloadError)
+      reloadResult = {
+        success: false,
+        error: reloadError.message,
+        requiresRestart: true
+      }
+    }
+
+    // 5. 构建响应数据
+    const response = {
+      ...newConfig,
+      hotReload: {
+        attempted: true,
+        ...reloadResult
+      },
+      operationSuccess: true,
+      message: reloadResult.success
+        ? '配置已更新并成功热重载'
+        : '配置已保存，但热重载失败，可能需要重启服务'
+    }
+
+    res.json(response)
   } catch (error) {
-    winston.error('更新日志配置错误', { error })
-    res.status(500).json({
+    winston.error('❌ Failed to update request logs configuration:', error)
+
+    // 构建详细的错误响应
+    const errorResponse = {
       error: '更新日志配置失败',
       code: 'LOG_CONFIG_UPDATE_ERROR',
-      timestamp: new Date().toISOString()
-    })
+      timestamp: new Date().toISOString(),
+      details: error.message,
+      savedConfig, // 显示是否至少保存了配置
+      hotReload: {
+        attempted: false,
+        message: 'Hot reload skipped due to configuration save failure'
+      }
+    }
+
+    res.status(500).json(errorResponse)
   }
 }
 
 router.put('/config', authenticateAdmin, updateConfigHandler)
 router.post('/config', authenticateAdmin, updateConfigHandler)
+
+/**
+ * 触发配置热重载的测试端点
+ *
+ * 此端点专门用于测试配置热重载功能，不更改配置，
+ * 只是重新加载现有配置到运行中的服务
+ *
+ * @route POST /admin/request-logs/reload
+ */
+router.post('/reload', authenticateAdmin, async (req, res) => {
+  try {
+    winston.info('🔄 Manual hot reload requested for request logger configuration')
+
+    // 检查服务可用性
+    if (!requestLogger) {
+      return res.status(503).json({
+        success: false,
+        error: 'Request logger service not available',
+        message: '请求日志服务不可用',
+        timestamp: new Date().toISOString()
+      })
+    }
+
+    if (typeof requestLogger.reloadConfig !== 'function') {
+      return res.status(503).json({
+        success: false,
+        error: 'Hot reload not supported',
+        message: '当前服务版本不支持热重载功能',
+        timestamp: new Date().toISOString()
+      })
+    }
+
+    // 获取当前配置
+    const currentConfig = await database.getRequestLogsConfig()
+    if (!currentConfig) {
+      return res.status(404).json({
+        success: false,
+        error: 'No configuration found',
+        message: '未找到要重载的配置',
+        timestamp: new Date().toISOString()
+      })
+    }
+
+    // 执行热重载
+    winston.debug('🔄 Performing manual hot reload with config:', {
+      enabled: currentConfig.enabled,
+      configKeys: Object.keys(currentConfig)
+    })
+
+    const reloadResult = await requestLogger.reloadConfig(currentConfig)
+
+    const response = {
+      success: reloadResult.success,
+      message: reloadResult.success ? '配置热重载成功完成' : '配置热重载失败',
+      reloadResult,
+      configReloaded: currentConfig,
+      timestamp: new Date().toISOString()
+    }
+
+    if (reloadResult.success) {
+      winston.info('✅ Manual hot reload completed successfully')
+      res.json(response)
+    } else {
+      winston.error('❌ Manual hot reload failed:', reloadResult.error)
+      res.status(500).json(response)
+    }
+  } catch (error) {
+    winston.error('❌ Manual hot reload error:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: '热重载过程中发生错误',
+      timestamp: new Date().toISOString()
+    })
+  }
+})
+
+/**
+ * 获取详细的服务状态信息
+ *
+ * 提供请求日志服务的完整状态信息，包括：
+ * - 服务可用性和配置状态
+ * - 实时性能指标
+ * - 队列状态和处理统计
+ * - 采样器状态
+ *
+ * @route GET /admin/request-logs/status
+ */
+router.get('/status', authenticateAdmin, async (req, res) => {
+  try {
+    winston.debug('📊 Request logger status requested')
+
+    const status = {
+      timestamp: new Date().toISOString(),
+      service: {
+        available: false,
+        initialized: false,
+        supportsHotReload: false,
+        version: 'unknown'
+      },
+      configuration: {
+        stored: null,
+        loaded: null,
+        synchronized: false
+      },
+      runtime: {
+        enabled: false,
+        metrics: null,
+        errors: []
+      }
+    }
+
+    // 检查存储的配置
+    try {
+      status.configuration.stored = await database.getRequestLogsConfig()
+    } catch (configError) {
+      status.runtime.errors.push({
+        type: 'configuration_retrieval',
+        message: configError.message,
+        timestamp: new Date().toISOString()
+      })
+    }
+
+    // 检查服务状态
+    try {
+      if (requestLogger) {
+        status.service.available = true
+        status.service.initialized = true
+        status.service.supportsHotReload = typeof requestLogger.reloadConfig === 'function'
+
+        // 检查当前启用状态
+        if (typeof requestLogger.isCurrentlyEnabled === 'function') {
+          status.runtime.enabled = requestLogger.isCurrentlyEnabled()
+        }
+
+        // 获取详细指标
+        if (typeof requestLogger.getMetrics === 'function') {
+          status.runtime.metrics = requestLogger.getMetrics()
+        }
+
+        // 检查配置同步状态
+        if (status.configuration.stored) {
+          const storedEnabled = status.configuration.stored.enabled !== false
+          status.configuration.synchronized = storedEnabled === status.runtime.enabled
+        }
+      } else {
+        status.runtime.errors.push({
+          type: 'service_unavailable',
+          message: 'Request logger service instance not found',
+          timestamp: new Date().toISOString()
+        })
+      }
+    } catch (serviceError) {
+      status.runtime.errors.push({
+        type: 'service_error',
+        message: serviceError.message,
+        timestamp: new Date().toISOString()
+      })
+    }
+
+    // 基于状态设置HTTP状态码
+    let httpStatus = 200
+    if (!status.service.available) {
+      httpStatus = 503
+    } else if (status.runtime.errors.length > 0) {
+      httpStatus = 206 // Partial Content - 部分功能异常
+    }
+
+    res.status(httpStatus).json(status)
+  } catch (error) {
+    winston.error('❌ Failed to get request logger status:', error)
+    res.status(500).json({
+      error: '获取服务状态失败',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    })
+  }
+})
 
 // 查询请求日志
 router.get('/', authenticateAdmin, async (req, res) => {

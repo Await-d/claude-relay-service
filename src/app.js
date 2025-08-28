@@ -12,6 +12,12 @@ const database = require('./models/database')
 const pricingService = require('./services/pricingService')
 const cacheMonitor = require('./utils/cacheMonitor')
 
+// 🔧 动态配置系统
+const {
+  initializeDynamicConfigSystem,
+  shutdownDynamicConfigSystem
+} = require('./services/dynamicConfigSystemBootstrap')
+
 // Import routes
 const apiRoutes = require('./routes/api')
 const adminRoutes = require('./routes/admin')
@@ -25,6 +31,7 @@ const azureOpenaiRoutes = require('./routes/azureOpenaiRoutes')
 const webhookRoutes = require('./routes/webhook')
 const dataManagementRoutes = require('./routes/dataManagement')
 const requestLogsRoutes = require('./routes/requestLogs')
+const configAdminRoutes = require('./routes/configAdmin')
 
 // Import middleware
 const {
@@ -52,6 +59,10 @@ class Application {
       // 💰 初始化价格服务
       logger.info('🔄 Initializing pricing service...')
       await pricingService.initialize()
+
+      // 🔧 初始化动态配置系统
+      logger.info('🔄 Initializing dynamic configuration system...')
+      await initializeDynamicConfigSystem()
 
       // 📊 初始化缓存监控
       await this.initializeCacheMonitoring()
@@ -248,6 +259,7 @@ class Application {
       this.app.use('/admin/webhook', webhookRoutes)
       this.app.use('/admin/data', dataManagementRoutes)
       this.app.use('/admin/request-logs', requestLogsRoutes)
+      this.app.use('/admin/config', configAdminRoutes)
 
       // 🏠 根路径重定向到新版管理界面
       this.app.get('/', (req, res) => {
@@ -543,6 +555,14 @@ class Application {
             logger.info('💰 Pricing service cleaned up')
           } catch (error) {
             logger.error('❌ Error cleaning up pricing service:', error)
+          }
+
+          // 🔧 关闭动态配置系统
+          try {
+            await shutdownDynamicConfigSystem()
+            logger.info('🔧 Dynamic configuration system shutdown')
+          } catch (error) {
+            logger.error('❌ Error shutting down dynamic configuration system:', error)
           }
 
           try {

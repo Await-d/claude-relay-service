@@ -259,48 +259,27 @@ class IntelligentSampler {
  * - 执行批量写入操作
  * - 提供内存保护机制
  * - 监控性能指标
+ * - 支持配置热重载
  */
 class PerformantRequestLogger {
   constructor(options = {}) {
+    // 配置管理器引用（用于动态配置获取）
+    this.configManager = options.configManager || null
+
     // 配置初始化
     this.config = options.config || config.requestLogging
-    this.isEnabled = this.config.enabled
+    this._isEnabled = this.config.enabled
+    this._configVersion = 0 // 配置版本号，用于检测配置变更
 
-    if (!this.isEnabled) {
+    if (!this._isEnabled) {
       logger.info('📝 Request logging is disabled')
+      // 即使禁用也初始化基础结构，支持运行时启用
+      this.initializeBaseComponents()
       return
     }
 
-    // 核心组件初始化
-    this.logQueue = []
-    this.isProcessing = false
-    this.batchTimer = null
-    this.retryQueue = []
-
-    // 采样器
-    this.sampler = new IntelligentSampler({ config: this.config.sampling })
-
-    // 性能监控
-    this.metrics = {
-      queueLength: 0,
-      totalEnqueued: 0,
-      totalWritten: 0,
-      totalDropped: 0,
-      totalErrors: 0,
-      lastBatchTime: 0,
-      lastBatchSize: 0,
-      avgWriteTime: 0,
-      memoryUsage: 0,
-      startTime: Date.now()
-    }
-
-    // 错误处理配置
-    this.maxRetries = this.config.async.maxRetries
-    this.retryDelay = this.config.async.retryDelay
-
-    // 启动监控和清理定时器
-    this.startPerformanceMonitoring()
-    this.startBatchTimer()
+    // 初始化所有组件
+    this.initializeAllComponents()
 
     logger.info('🚀 PerformantRequestLogger initialized successfully')
   }
@@ -311,13 +290,13 @@ class PerformantRequestLogger {
    * @returns {boolean} 是否成功入队
    */
   enqueueLog(logEntry) {
-    if (!this.isEnabled) {
+    if (!this.isCurrentlyEnabled()) {
       return false
     }
 
     try {
       // 队列长度检查 (< 0.1ms)
-      if (this.logQueue.length >= this.config.async.maxQueueSize) {
+      if (this.logQueue.length >= (this.config.async?.maxQueueSize || 1000)) {
         return this.handleQueueOverflow(logEntry)
       }
 
@@ -330,7 +309,7 @@ class PerformantRequestLogger {
       this.metrics.totalEnqueued++
 
       // 检查是否需要立即处理
-      if (this.logQueue.length >= this.config.async.batchSize) {
+      if (this.logQueue.length >= (this.config.async?.batchSize || 50)) {
         this.scheduleBatchWrite()
       }
 
@@ -350,8 +329,13 @@ class PerformantRequestLogger {
    * @returns {Promise<boolean>} 是否应该记录
    */
   async shouldLog(apiKeyId, requestType = 'normal', systemLoad = 0.5) {
-    if (!this.isEnabled) {
+    if (!this.isCurrentlyEnabled()) {
       return false
+    }
+
+    // 如果采样器未初始化（服务刚启用），先初始化
+    if (!this.sampler) {
+      this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
     }
 
     return await this.sampler.shouldLog({
@@ -375,7 +359,7 @@ class PerformantRequestLogger {
 
     try {
       // 取出要处理的批次
-      const batchSize = Math.min(this.logQueue.length, this.config.async.batchSize)
+      const batchSize = Math.min(this.logQueue.length, this.config.async?.batchSize || 50)
       const batch = this.logQueue.splice(0, batchSize)
 
       logger.debug(`📝 Processing batch of ${batch.length} logs`)
@@ -429,13 +413,14 @@ class PerformantRequestLogger {
    */
   getMetrics() {
     const uptime = Date.now() - this.metrics.startTime
-    const queueUtilization = this.metrics.queueLength / this.config.async.maxQueueSize
+    const queueUtilization = this.metrics.queueLength / (this.config.async?.maxQueueSize || 1000)
 
     return {
-      enabled: this.isEnabled,
+      enabled: this.isCurrentlyEnabled(),
+      configVersion: this._configVersion,
       queue: {
         length: this.metrics.queueLength,
-        maxSize: this.config.async.maxQueueSize,
+        maxSize: this.config.async?.maxQueueSize || 1000,
         utilization: Math.round(queueUtilization * 100) / 100
       },
       throughput: {
@@ -461,7 +446,261 @@ class PerformantRequestLogger {
         seconds: Math.floor(uptime / 1000),
         formatted: this.formatUptime(uptime)
       },
-      sampler: this.sampler.getStats()
+      sampler: this.sampler ? this.sampler.getStats() : null
+    }
+  }
+
+  // ==================== 配置热重载方法 ====================
+
+  /**
+   * 重新加载配置（热重载核心方法）
+   * @param {Object} newConfig 新的配置对象
+   * @returns {Promise<Object>} 重载结果状态
+   */
+  async reloadConfig(newConfig) {
+    logger.info('🔄 Starting configuration reload...')
+
+    try {
+      const oldEnabled = this._isEnabled
+      const newEnabled = newConfig.enabled
+
+      // 智能合并配置：保留现有完整结构，只更新传入的字段
+      this.config = this.mergeConfig(this.config, newConfig)
+      this._isEnabled = newEnabled
+      this._configVersion++
+
+      logger.debug(
+        `🔄 Config reload: enabled ${oldEnabled} → ${newEnabled}, version: ${this._configVersion}`
+      )
+
+      // 处理启用状态变更
+      if (!oldEnabled && newEnabled) {
+        // 从禁用变为启用：初始化所有组件
+        await this.enable()
+      } else if (oldEnabled && !newEnabled) {
+        // 从启用变为禁用：优雅关闭
+        await this.disable()
+      } else if (oldEnabled && newEnabled) {
+        // 都是启用状态：重新初始化组件以应用新配置
+        await this.reinitializeComponents()
+      }
+      // 如果都是禁用状态，无需特殊处理
+
+      logger.info(`✅ Configuration reload completed (version ${this._configVersion})`)
+
+      return {
+        success: true,
+        reloadedAt: new Date().toISOString(),
+        configApplied: newConfig,
+        statusChange: {
+          from: oldEnabled,
+          to: newEnabled
+        }
+      }
+    } catch (error) {
+      logger.error('❌ Configuration reload failed:', error)
+      this.metrics.totalErrors++
+
+      return {
+        success: false,
+        error: error.message,
+        reloadedAt: new Date().toISOString()
+      }
+    }
+  }
+
+  /**
+   * 智能合并配置（深度合并，保留现有结构）
+   * @param {Object} existingConfig 现有配置
+   * @param {Object} newConfig 新配置
+   * @returns {Object} 合并后的配置
+   */
+  mergeConfig(existingConfig, newConfig) {
+    // 深克隆现有配置以避免意外修改
+    const merged = JSON.parse(JSON.stringify(existingConfig))
+
+    // 只更新新配置中明确提供的字段
+    if (newConfig.enabled !== undefined) {
+      merged.enabled = newConfig.enabled
+    }
+    if (newConfig.mode !== undefined) {
+      merged.mode = newConfig.mode
+    }
+    if (newConfig.sampling && typeof newConfig.sampling === 'object') {
+      merged.sampling = { ...merged.sampling, ...newConfig.sampling }
+    }
+
+    // 从Web界面的字段映射到标准配置结构
+    if (newConfig.level !== undefined) {
+      merged.mode = newConfig.level === 'debug' ? 'detailed' : 'basic'
+    }
+    if (newConfig.retentionDays !== undefined) {
+      if (!merged.retention) {
+        merged.retention = {}
+      }
+      merged.retention.maxAge = newConfig.retentionDays * 24 * 60 * 60 * 1000
+    }
+
+    logger.debug('🔧 Configuration merged successfully:', {
+      originalKeys: Object.keys(existingConfig),
+      newKeys: Object.keys(newConfig),
+      mergedKeys: Object.keys(merged)
+    })
+
+    return merged
+  }
+
+  /**
+   * 运行时启用日志服务
+   * @returns {Promise<void>}
+   */
+  async enable() {
+    if (this._isEnabled) {
+      logger.debug('📝 Request logging is already enabled')
+      return
+    }
+
+    logger.info('🚀 Enabling request logging service...')
+    this._isEnabled = true
+    this._configVersion++
+
+    // 初始化所有组件
+    this.initializeAllComponents()
+
+    logger.info('✅ Request logging service enabled successfully')
+  }
+
+  /**
+   * 运行时禁用日志服务
+   * @returns {Promise<void>}
+   */
+  async disable() {
+    if (!this._isEnabled) {
+      logger.debug('📝 Request logging is already disabled')
+      return
+    }
+
+    logger.info('🛑 Disabling request logging service...')
+    this._isEnabled = false
+    this._configVersion++
+
+    // 清理定时器
+    this.clearTimers()
+
+    // 处理剩余的日志
+    if (this.logQueue && this.logQueue.length > 0) {
+      logger.info(`📝 Flushing ${this.logQueue.length} remaining logs before disable...`)
+      await this.flushLogs()
+    }
+
+    logger.info('✅ Request logging service disabled successfully')
+  }
+
+  /**
+   * 动态检查当前启用状态
+   * @returns {boolean} 当前是否启用
+   */
+  isCurrentlyEnabled() {
+    // 支持从配置管理器动态获取状态
+    if (this.configManager && typeof this.configManager.getRequestLoggingEnabled === 'function') {
+      return this.configManager.getRequestLoggingEnabled()
+    }
+    return this._isEnabled
+  }
+
+  /**
+   * 重新初始化组件（配置变更时调用）
+   * @returns {Promise<void>}
+   */
+  async reinitializeComponents() {
+    logger.info('🔄 Reinitializing components with new configuration...')
+
+    // 清理旧的定时器
+    this.clearTimers()
+
+    // 处理队列中的剩余日志
+    if (this.logQueue && this.logQueue.length > 0) {
+      logger.debug(`📝 Flushing ${this.logQueue.length} logs before reinitialization...`)
+      await this.flushLogs()
+    }
+
+    // 重新创建采样器（应用新的采样配置）
+    this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
+
+    // 更新错误处理配置
+    this.maxRetries = this.config.async?.maxRetries || 3
+    this.retryDelay = this.config.async?.retryDelay || 1000
+
+    // 重新启动监控和定时器
+    this.startPerformanceMonitoring()
+    this.startBatchTimer()
+
+    logger.info('✅ Components reinitialized successfully')
+  }
+
+  // ==================== 组件初始化方法 ====================
+
+  /**
+   * 初始化基础组件（最小化初始化，支持后续启用）
+   */
+  initializeBaseComponents() {
+    // 核心组件初始化
+    this.logQueue = []
+    this.isProcessing = false
+    this.batchTimer = null
+    this.retryQueue = []
+    this.monitoringTimer = null
+    this.batchIntervalTimer = null
+
+    // 性能监控（即使禁用状态也保持基础指标）
+    this.metrics = {
+      queueLength: 0,
+      totalEnqueued: 0,
+      totalWritten: 0,
+      totalDropped: 0,
+      totalErrors: 0,
+      lastBatchTime: 0,
+      lastBatchSize: 0,
+      avgWriteTime: 0,
+      memoryUsage: 0,
+      startTime: Date.now()
+    }
+
+    // 错误处理配置
+    this.maxRetries = this.config.async?.maxRetries || 3
+    this.retryDelay = this.config.async?.retryDelay || 1000
+  }
+
+  /**
+   * 初始化所有组件（完整初始化）
+   */
+  initializeAllComponents() {
+    // 先初始化基础组件
+    this.initializeBaseComponents()
+
+    // 采样器
+    this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
+
+    // 启动监控和清理定时器
+    this.startPerformanceMonitoring()
+    this.startBatchTimer()
+  }
+
+  /**
+   * 清理所有定时器
+   */
+  clearTimers() {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer)
+      this.batchTimer = null
+    }
+    if (this.monitoringTimer) {
+      clearInterval(this.monitoringTimer)
+      this.monitoringTimer = null
+    }
+    if (this.batchIntervalTimer) {
+      clearInterval(this.batchIntervalTimer)
+      this.batchIntervalTimer = null
     }
   }
 
@@ -475,7 +714,7 @@ class PerformantRequestLogger {
   handleQueueOverflow(logEntry) {
     this.metrics.totalDropped++
 
-    const strategy = this.config.async.queueFullStrategy
+    const strategy = this.config.async?.queueFullStrategy || 'drop_oldest'
 
     if (strategy === 'drop_oldest') {
       // 删除最老的日志，添加新日志
@@ -608,15 +847,20 @@ class PerformantRequestLogger {
    * 启动批量写入定时器
    */
   startBatchTimer() {
-    if (!this.isEnabled) {
+    if (!this.isCurrentlyEnabled()) {
       return
     }
 
-    setInterval(() => {
+    // 清理旧的定时器（防止重复启动）
+    if (this.batchIntervalTimer) {
+      clearInterval(this.batchIntervalTimer)
+    }
+
+    this.batchIntervalTimer = setInterval(() => {
       if (this.logQueue.length > 0 && !this.isProcessing) {
         this.flushLogs()
       }
-    }, this.config.async.batchTimeout)
+    }, this.config.async?.batchTimeout || 5000)
   }
 
   /**
@@ -671,7 +915,12 @@ class PerformantRequestLogger {
       return
     }
 
-    setInterval(() => {
+    // 清理旧的定时器（防止重复启动）
+    if (this.monitoringTimer) {
+      clearInterval(this.monitoringTimer)
+    }
+
+    this.monitoringTimer = setInterval(() => {
       const metrics = this.getMetrics()
 
       // 检查警告阈值
@@ -725,10 +974,11 @@ class PerformantRequestLogger {
   async shutdown() {
     logger.info('🛑 Shutting down request logger...')
 
-    // 清除定时器
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer)
-    }
+    // 标记为禁用状态
+    this._isEnabled = false
+
+    // 清除所有定时器
+    this.clearTimers()
 
     // 处理剩余的日志
     if (this.logQueue && this.logQueue.length > 0) {
@@ -750,7 +1000,11 @@ try {
     enqueueLog: () => false,
     shouldLog: async () => false,
     getMetrics: () => ({}),
-    shutdown: async () => {}
+    shutdown: async () => {},
+    reloadConfig: async () => false,
+    enable: async () => {},
+    disable: async () => {},
+    isCurrentlyEnabled: () => false
   }
 }
 

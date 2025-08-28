@@ -4,6 +4,71 @@ const database = require('../models/database')
 const { RateLimiterRedis } = require('rate-limiter-flexible')
 const config = require('../../config/config')
 const { requestLogger: requestLoggerService } = require('../services/requestLoggerService')
+const { dynamicConfigManager } = require('../services/dynamicConfigService')
+
+// 🔧 请求日志配置缓存和动态检查机制
+let cachedRequestLoggingConfig = {
+  enabled: config.requestLogging?.enabled || false,
+  lastUpdate: 0,
+  isUpdating: false
+}
+
+/**
+ * 高性能请求日志配置检查（零阻塞）
+ * 使用内存缓存 + 异步更新策略，确保主请求路径不被阻塞
+ * @returns {boolean} 是否启用请求日志记录
+ */
+const isRequestLoggingEnabled = () => {
+  const now = Date.now()
+  const cacheAge = now - cachedRequestLoggingConfig.lastUpdate
+
+  // 如果缓存新鲜（小于30秒），直接返回缓存值
+  if (cacheAge < 30000) {
+    return cachedRequestLoggingConfig.enabled
+  }
+
+  // 如果缓存过期但没有在更新中，触发异步更新
+  if (!cachedRequestLoggingConfig.isUpdating) {
+    cachedRequestLoggingConfig.isUpdating = true
+
+    // 异步更新配置，不阻塞当前请求
+    setImmediate(async () => {
+      try {
+        const enabled = await dynamicConfigManager.getConfig(
+          'requestLogging.enabled',
+          config.requestLogging?.enabled || false
+        )
+
+        cachedRequestLoggingConfig = {
+          enabled,
+          lastUpdate: Date.now(),
+          isUpdating: false
+        }
+
+        logger.debug(`📊 Request logging config updated: enabled=${enabled}`)
+      } catch (error) {
+        // 更新失败时保持当前缓存，重置更新标志
+        cachedRequestLoggingConfig.isUpdating = false
+        logger.debug('Failed to update request logging config, using cached value:', error.message)
+      }
+    })
+  }
+
+  // 返回当前缓存值（可能稍微过时，但保证零阻塞）
+  return cachedRequestLoggingConfig.enabled
+}
+
+// 监听动态配置变更事件，立即更新缓存
+dynamicConfigManager.on('configChanged', ({ key, value }) => {
+  if (key === 'requestLogging.enabled') {
+    cachedRequestLoggingConfig = {
+      enabled: value,
+      lastUpdate: Date.now(),
+      isUpdating: false
+    }
+    logger.info(`📊 Request logging config changed: enabled=${value}`)
+  }
+})
 
 // 🔑 API Key验证中间件（优化版）
 const authenticateApiKey = async (req, res, next) => {
@@ -460,6 +525,7 @@ const authenticateAdmin = async (req, res, next) => {
 
 // 注意：使用统计现在直接在/api/v1/messages路由中处理，
 // 以便从Claude API响应中提取真实的usage数据
+// 动态配置支持：请求日志记录现在支持实时配置变更
 
 // 🚦 CORS中间件（优化版）
 const corsMiddleware = (req, res, next) => {
@@ -589,8 +655,8 @@ const requestLogger = (req, res, next) => {
       )
     }
 
-    // 🚀 高性能日志记录集成 - 异步非阻塞处理
-    if (config.requestLogging?.enabled && req.apiKey) {
+    // 🚀 高性能日志记录集成 - 异步非阻塞处理（支持动态配置）
+    if (isRequestLoggingEnabled() && req.apiKey) {
       // 使用 setImmediate 确保完全异步，零阻塞主请求流程
       setImmediate(() => {
         try {
