@@ -196,18 +196,18 @@ const { queryStats } = apiStatsStore
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #7ab2d3 0%, #4a628a 100%);
   color: white;
   box-shadow:
-    0 10px 15px -3px rgba(102, 126, 234, 0.3),
-    0 4px 6px -2px rgba(102, 126, 234, 0.05);
+    0 10px 15px -3px rgba(122, 178, 211, 0.3),
+    0 4px 6px -2px rgba(122, 178, 211, 0.05);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow:
-    0 20px 25px -5px rgba(102, 126, 234, 0.3),
-    0 10px 10px -5px rgba(102, 126, 234, 0.1);
+    0 20px 25px -5px rgba(122, 178, 211, 0.3),
+    0 10px 10px -5px rgba(122, 178, 211, 0.1);
 }
 
 .btn-primary:disabled {

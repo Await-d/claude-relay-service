@@ -83,16 +83,16 @@ const createChart = () => {
         {
           label: '请求次数',
           data: dashboardStore.trendData.map((item) => item.requests),
-          borderColor: '#667eea',
-          backgroundColor: getGradient(ctx, '#667eea', 0.1),
+          borderColor: '#7AB2D3',
+          backgroundColor: getGradient(ctx, '#7AB2D3', 0.1),
           yAxisID: 'y',
           tension: 0.4
         },
         {
           label: 'Token使用量',
           data: dashboardStore.trendData.map((item) => item.tokens),
-          borderColor: '#f093fb',
-          backgroundColor: getGradient(ctx, '#f093fb', 0.1),
+          borderColor: '#B9E5E8',
+          backgroundColor: getGradient(ctx, '#B9E5E8', 0.1),
           yAxisID: 'y1',
           tension: 0.4
         }

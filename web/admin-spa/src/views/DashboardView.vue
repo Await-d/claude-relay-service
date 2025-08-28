@@ -806,8 +806,8 @@ function createUsageTrendChart() {
       {
         label: '输入Token',
         data: inputData,
-        borderColor: 'rgb(102, 126, 234)',
-        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+        borderColor: 'rgb(122, 178, 211)',
+        backgroundColor: 'rgba(122, 178, 211, 0.1)',
         tension: 0.3
       },
       {
