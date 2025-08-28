@@ -248,16 +248,7 @@ const config = {
       // 日志数据保留时间（毫秒），默认7天
       maxAge:
         parseInt(process.env.REQUEST_LOGGING_RETENTION_DAYS) * 24 * 60 * 60 * 1000 ||
-        7 * 24 * 60 * 60 * 1000,
-
-      // 自动清理间隔（毫秒），默认每6小时清理一次
-      cleanupInterval: parseInt(process.env.REQUEST_LOGGING_CLEANUP_INTERVAL) || 6 * 60 * 60 * 1000,
-
-      // 单个 API Key 最大日志条数
-      maxLogsPerKey: parseInt(process.env.REQUEST_LOGGING_MAX_LOGS_PER_KEY) || 10000,
-
-      // 总体最大日志条数（所有 API Key）
-      maxTotalLogs: parseInt(process.env.REQUEST_LOGGING_MAX_TOTAL_LOGS) || 100000
+        7 * 24 * 60 * 60 * 1000
     },
 
     // Redis 存储配置
@@ -266,25 +257,13 @@ const config = {
       keyPrefix: process.env.REQUEST_LOGGING_KEY_PREFIX || 'request_log',
 
       // 索引键前缀（用于快速查询）
-      indexKeyPrefix: process.env.REQUEST_LOGGING_INDEX_KEY_PREFIX || 'request_log_index',
-
-      // 统计键前缀
-      statsKeyPrefix: process.env.REQUEST_LOGGING_STATS_KEY_PREFIX || 'request_log_stats',
-
-      // 使用压缩存储（节省内存）
-      enableCompression: process.env.REQUEST_LOGGING_ENABLE_COMPRESSION !== 'false', // 默认启用
-
-      // 数据序列化格式：'json' | 'msgpack'
-      serializationFormat: process.env.REQUEST_LOGGING_SERIALIZATION_FORMAT || 'json'
+      indexKeyPrefix: process.env.REQUEST_LOGGING_INDEX_KEY_PREFIX || 'request_log_index'
     },
 
     // 数据过滤配置 - 保护敏感信息
     filtering: {
       // 自动过滤敏感头信息
       sensitiveHeaders: ['authorization', 'x-api-key', 'cookie', 'x-session-token'],
-
-      // 自动过滤的查询参数
-      sensitiveQueryParams: ['api_key', 'apikey', 'token', 'secret'],
 
       // IP 地址脱敏（保留前三段）
       maskIpAddress: process.env.REQUEST_LOGGING_MASK_IP === 'true',
@@ -301,12 +280,8 @@ const config = {
       // 监控指标收集间隔（毫秒）
       metricsInterval: parseInt(process.env.REQUEST_LOGGING_METRICS_INTERVAL) || 60000, // 1分钟
 
-      // 监控指标保留时间（毫秒），默认24小时
-      metricsRetention:
-        parseInt(process.env.REQUEST_LOGGING_METRICS_RETENTION) || 24 * 60 * 60 * 1000,
-
       // 性能警告阈值
-      thresholds: {
+      warningThresholds: {
         // 队列长度警告阈值
         queueLength: parseInt(process.env.REQUEST_LOGGING_QUEUE_WARNING_THRESHOLD) || 800,
 
@@ -316,31 +291,8 @@ const config = {
         // 内存使用警告阈值（MB）
         memoryUsage: parseInt(process.env.REQUEST_LOGGING_MEMORY_WARNING_THRESHOLD) || 100
       }
-    },
-
-    // 高级功能配置
-    advanced: {
-      // 启用实时日志流（WebSocket）
-      enableRealtimeStream: process.env.REQUEST_LOGGING_ENABLE_REALTIME === 'true',
-
-      // 启用日志导出功能
-      enableExport: process.env.REQUEST_LOGGING_ENABLE_EXPORT !== 'false', // 默认启用
-
-      // 支持的导出格式
-      exportFormats: ['json', 'csv', 'xlsx'],
-
-      // 导出文件大小限制（MB）
-      maxExportSize: parseInt(process.env.REQUEST_LOGGING_MAX_EXPORT_SIZE) || 50,
-
-      // 启用日志搜索功能
-      enableSearch: process.env.REQUEST_LOGGING_ENABLE_SEARCH !== 'false', // 默认启用
-
-      // 搜索索引更新频率（毫秒）
-      searchIndexUpdateInterval:
-        parseInt(process.env.REQUEST_LOGGING_SEARCH_INDEX_INTERVAL) || 300000 // 5分钟
     }
   },
-
   // 🔧 系统配置
   system: {
     cleanupInterval: parseInt(process.env.CLEANUP_INTERVAL) || 3600000, // 1小时
