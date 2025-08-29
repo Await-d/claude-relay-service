@@ -1032,8 +1032,8 @@ class RedisAdapter extends DatabaseAdapter {
       this.client.hgetall(accountMonthlyKey)
     ])
 
-    // 获取账户创建时间来计算平均值
-    const accountData = await this.client.hgetall(`claude_account:${accountId}`)
+    // 获取账户创建时间来计算平均值（修复键名不一致问题）
+    const accountData = await this.client.hgetall(`claude:account:${accountId}`)
     const createdAt = accountData.createdAt ? new Date(accountData.createdAt) : new Date()
     const now = new Date()
     const daysSinceCreated = Math.max(1, Math.ceil((now - createdAt) / (1000 * 60 * 60 * 24)))
@@ -1096,12 +1096,12 @@ class RedisAdapter extends DatabaseAdapter {
    */
   async getAllAccountsUsageStats() {
     try {
-      // 获取所有Claude账户
-      const accountKeys = await this.client.keys('claude_account:*')
+      // 获取所有Claude账户（修复键名不一致问题）
+      const accountKeys = await this.client.keys('claude:account:*')
       const accountStats = []
 
       for (const accountKey of accountKeys) {
-        const accountId = accountKey.replace('claude_account:', '')
+        const accountId = accountKey.replace('claude:account:', '')
         const accountData = await this.client.hgetall(accountKey)
 
         if (accountData.name) {
@@ -2137,10 +2137,16 @@ class RedisAdapter extends DatabaseAdapter {
    */
   async searchLogs(query = {}, options = {}) {
     const { offset = 0, limit = 20, sortBy = 'timestamp', sortOrder = 'desc' } = options
+    const startTime = Date.now()
 
     try {
       const client = this.getClientSafe()
       let matchingLogs = []
+
+      // 记录搜索参数
+      if (query.search) {
+        logger.debug(`执行文本搜索: "${query.search}", 限制: ${limit}, 偏移: ${offset}`)
+      }
 
       // 优化策略：基于查询条件选择最佳搜索方法
       if (query.status && query.dateRange) {
@@ -2181,16 +2187,74 @@ class RedisAdapter extends DatabaseAdapter {
           matchingLogs = []
         }
       } else {
-        // 降级到全量扫描，但限制数量
-        const allKeys = await client.keys('request_log:*')
-        // 按时间戳排序并截取最近的记录，避免内存溢出
-        matchingLogs = allKeys
+        // 🔧 修复：使用实际存在的键模式进行全量搜索
+        logger.info('🔍 DEBUGGING: Performing full scan for request logs')
+
+        // 搜索所有请求日志相关的键模式
+        const [indexKeys, statusKeys, modelKeys, errorKeys, timeKeys] = await Promise.all([
+          client.keys('request_log_index:*'),
+          client.keys('request_log_status:*'),
+          client.keys('request_log_model:*'),
+          client.keys('request_log_errors:*'),
+          client.keys('request_log_time:*')
+        ])
+
+        // 合并所有索引键，从中提取主日志键
+        const allIndexKeys = [...indexKeys, ...statusKeys, ...modelKeys, ...errorKeys, ...timeKeys]
+        logger.info('🔍 DEBUGGING: Found index keys:', {
+          indexKeys: indexKeys.length,
+          statusKeys: statusKeys.length,
+          modelKeys: modelKeys.length,
+          errorKeys: errorKeys.length,
+          timeKeys: timeKeys.length,
+          totalIndexKeys: allIndexKeys.length
+        })
+
+        // 从索引键中提取实际的日志键
+        const extractedLogKeys = new Set()
+        for (const indexKey of allIndexKeys) {
+          try {
+            // 对于集合索引，获取成员
+            if (
+              indexKey.includes('request_log_index:') ||
+              indexKey.includes('request_log_status:') ||
+              indexKey.includes('request_log_model:') ||
+              indexKey.includes('request_log_errors:')
+            ) {
+              const members = await client.smembers(indexKey)
+              members.forEach((member) => extractedLogKeys.add(member))
+            }
+            // 对于时间索引，获取成员
+            else if (indexKey.includes('request_log_time:')) {
+              const members = await client.smembers(indexKey)
+              members.forEach((member) => extractedLogKeys.add(member))
+            }
+          } catch (error) {
+            logger.debug(`Failed to extract from index ${indexKey}:`, error.message)
+          }
+        }
+
+        matchingLogs = Array.from(extractedLogKeys)
+        logger.info('🔍 DEBUGGING: Extracted log keys:', {
+          extractedCount: matchingLogs.length,
+          sampleKeys: matchingLogs.slice(0, 5)
+        })
+
+        // 按时间戳排序并截取最近的记录
+        matchingLogs = matchingLogs
+          .filter((key) => key && key.includes(':')) // 确保键格式正确
           .sort((a, b) => {
             const timestampA = parseInt(a.split(':')[2]) || 0
             const timestampB = parseInt(b.split(':')[2]) || 0
             return sortOrder === 'desc' ? timestampB - timestampA : timestampA - timestampB
           })
           .slice(0, Math.min(1000, offset + limit * 5)) // 限制最大扫描量
+      }
+
+      // 限制文本搜索的扫描范围，避免性能问题
+      if (query.search && matchingLogs.length > 2000) {
+        logger.warn(`文本搜索的结果集过大 (${matchingLogs.length})，限制到 2000 条`)
+        matchingLogs = matchingLogs.slice(0, 2000)
       }
 
       // 应用其他过滤条件
@@ -2209,12 +2273,26 @@ class RedisAdapter extends DatabaseAdapter {
 
       // 分页
       const paginatedLogs = matchingLogs.slice(offset, offset + limit)
+      logger.info('🔍 DEBUGGING: About to fetch log data:', {
+        totalMatching: matchingLogs.length,
+        paginatedCount: paginatedLogs.length,
+        samplePaginatedKeys: paginatedLogs.slice(0, 3)
+      })
 
       // 批量获取日志详情
       const pipeline = client.pipeline()
       paginatedLogs.forEach((logKey) => pipeline.hgetall(logKey))
 
       const results = await pipeline.exec()
+      logger.info('🔍 DEBUGGING: Pipeline results:', {
+        resultsCount: results.length,
+        sampleResults: results.slice(0, 2).map(([err, data]) => ({
+          error: err?.message,
+          dataKeys: data ? Object.keys(data) : null,
+          hasData: data && Object.keys(data).length > 0
+        }))
+      })
+
       const logs = results
         .map(([err, logData], index) => {
           if (err || !logData || Object.keys(logData).length === 0) return null
@@ -2225,6 +2303,24 @@ class RedisAdapter extends DatabaseAdapter {
           }
         })
         .filter(Boolean)
+
+      logger.info('🔍 DEBUGGING: Final processed logs:', {
+        processedCount: logs.length,
+        sampleLogData: logs.slice(0, 2).map((log) => ({
+          logId: log.logId,
+          keyId: log.keyId,
+          timestamp: log.timestamp,
+          fieldsCount: Object.keys(log).length
+        }))
+      })
+
+      const endTime = Date.now()
+      const searchTime = endTime - startTime
+
+      // 记录搜索结果和性能
+      if (query.search) {
+        logger.debug(`文本搜索完成: 耗时 ${searchTime}ms, 找到 ${logs.length} 条结果`)
+      }
 
       return logs
     } catch (error) {
@@ -2540,6 +2636,22 @@ class RedisAdapter extends DatabaseAdapter {
     const results = await pipeline.exec()
     const filteredKeys = []
 
+    // 如果有文本搜索，需要预加载API Key信息
+    let apiKeyCache = {}
+    if (query.search) {
+      try {
+        logger.debug(`预加载API Key信息以支持文本搜索: ${query.search}`)
+        const allApiKeys = await this.getAllApiKeys()
+        apiKeyCache = allApiKeys.reduce((cache, key) => {
+          cache[key.id] = key
+          return cache
+        }, {})
+        logger.debug(`已加载 ${Object.keys(apiKeyCache).length} 个API Key信息`)
+      } catch (error) {
+        logger.warn('加载API Key信息失败，文本搜索可能不完整:', error.message)
+      }
+    }
+
     results.forEach(([err, logData], index) => {
       if (err || !logData) return
 
@@ -2548,7 +2660,13 @@ class RedisAdapter extends DatabaseAdapter {
 
       // 应用各种过滤条件
       for (const [key, value] of Object.entries(query)) {
-        if (!this._checkLogFieldMatch(logData, logKey, key, value)) {
+        if (key === 'search') {
+          // 特殊处理文本搜索
+          if (!this._performTextSearch(logData, logKey, value, apiKeyCache)) {
+            matches = false
+            break
+          }
+        } else if (!this._checkLogFieldMatch(logData, logKey, key, value)) {
           matches = false
           break
         }
@@ -2588,6 +2706,10 @@ class RedisAdapter extends DatabaseAdapter {
       case 'model':
         return logData.model === value
 
+      case 'search':
+        // 文本搜索在上层处理，这里直接返回true
+        return true
+
       case 'dateRange':
         // 日期范围已在上层方法中处理
         return true
@@ -2613,6 +2735,64 @@ class RedisAdapter extends DatabaseAdapter {
         // 通用字段匹配
         return logData[fieldName] === value
     }
+  }
+
+  /**
+   * 执行文本搜索（多字段模糊匹配）
+   * @private
+   * @param {Object} logData 日志数据
+   * @param {string} logKey 日志键
+   * @param {string} searchText 搜索文本
+   * @param {Object} apiKeyCache API Key缓存对象
+   * @returns {boolean} 是否匹配
+   */
+  _performTextSearch(logData, logKey, searchText, apiKeyCache = {}) {
+    if (!searchText || typeof searchText !== 'string') {
+      return true
+    }
+
+    // 限制搜索词长度，避免过度复杂查询
+    if (searchText.length > 100) {
+      logger.warn(`搜索词过长，截断到100字符: ${searchText.substring(0, 100)}...`)
+      searchText = searchText.substring(0, 100)
+    }
+
+    // 不区分大小写的搜索
+    const searchLower = searchText.toLowerCase().trim()
+    if (!searchLower) {
+      return true
+    }
+
+    // 支持多词搜索（空格分割）
+    const searchTerms = searchLower.split(/\s+/).filter((term) => term.length > 0)
+    if (searchTerms.length === 0) {
+      return true
+    }
+
+    // 获取API Key名称（使用缓存提高性能）
+    let apiKeyName = ''
+    if (logData.keyId && apiKeyCache[logData.keyId]) {
+      apiKeyName = (apiKeyCache[logData.keyId].name || '').toLowerCase()
+    }
+
+    // 构建搜索字段数组（使用实际的字段名）
+    const searchFields = [
+      apiKeyName, // API Key 名称
+      (logData.path || '').toLowerCase(), // 请求路径
+      (logData.ipAddress || '').toLowerCase(), // IP 地址
+      (logData.userAgent || '').toLowerCase(), // User Agent
+      (logData.error || '').toLowerCase(), // 错误信息
+      (logData.method || '').toLowerCase(), // HTTP方法
+      (logData.model || '').toLowerCase(), // 模型名称
+      (logData.keyId || '').toLowerCase(), // API Key ID
+      (logData.statusCode || '').toString().toLowerCase() // 状态码
+    ].filter((field) => field.length > 0)
+
+    // 合并所有搜索字段为一个字符串
+    const searchableText = searchFields.join(' ')
+
+    // 检查是否所有搜索词都能在搜索文本中找到
+    return searchTerms.every((term) => searchableText.includes(term))
   }
 
   /**
@@ -2876,6 +3056,132 @@ class RedisAdapter extends DatabaseAdapter {
       logger.error('Failed to set request logs config:', error)
       throw error
     }
+  }
+
+  /**
+   * ==========================================
+   * 抽象日志存储接口 (Abstract Log Storage Interface)
+   * ==========================================
+   *
+   * 以下方法提供数据库无关的日志存储抽象接口
+   * 支持不同数据库后端的扩展 (Redis, MongoDB, PostgreSQL等)
+   */
+
+  /**
+   * 批量写入日志条目
+   * @param {Array} logEntries 日志条目数组
+   * @param {Object} options 配置选项
+   * @param {number} options.retentionMaxAge 数据保留时间 (毫秒)
+   * @returns {Promise<Object>} 写入结果 {success: boolean, results: Array, errors: Array}
+   */
+  async batchWriteLogs(logEntries, options = {}) {
+    const client = this.getClientSafe()
+    const pipeline = client.pipeline()
+    const results = { success: true, results: [], errors: [] }
+
+    try {
+      for (const logEntry of logEntries) {
+        const logKey = this._generateLogKey(logEntry)
+        const indexKey = this._generateIndexKey(logEntry)
+
+        // 处理hash数据
+        const dataEntries = Object.entries(logEntry.data).flat()
+        if (dataEntries.length > 0 && dataEntries.length % 2 === 0) {
+          // 清理null/undefined值
+          const sanitizedEntries = dataEntries.map((entry) =>
+            entry === null || entry === undefined ? '' : String(entry)
+          )
+
+          // 批量写入操作
+          pipeline.hmset(logKey, ...sanitizedEntries)
+          pipeline.expire(logKey, Math.floor(options.retentionMaxAge / 1000))
+
+          // 更新索引
+          pipeline.sadd(indexKey, logKey)
+          pipeline.expire(indexKey, Math.floor(options.retentionMaxAge / 1000))
+
+          results.results.push({ logKey, indexKey, status: 'queued' })
+        } else {
+          const error = `Invalid data structure for log entry: ${logKey}`
+          results.errors.push({ logKey, error })
+          logger.warn(`⚠️ ${error}`)
+        }
+      }
+
+      // 执行批量操作
+      const pipelineResults = await pipeline.exec()
+
+      // 处理执行结果
+      if (pipelineResults) {
+        const errorResults = pipelineResults.filter(([err]) => err !== null)
+        if (errorResults.length > 0) {
+          results.success = false
+          results.errors.push(
+            ...errorResults.map(([err, res]) => ({
+              error: err?.message || err,
+              result: res
+            }))
+          )
+        }
+      }
+
+      logger.debug(
+        `📊 Batch write completed: ${logEntries.length} logs, ${results.errors.length} errors`
+      )
+      return results
+    } catch (error) {
+      logger.error('❌ Batch write logs failed:', error)
+      results.success = false
+      results.errors.push({ error: error.message })
+      return results
+    }
+  }
+
+  /**
+   * 验证日志写入结果
+   * @param {string} logKey 日志键
+   * @returns {Promise<Object>} 验证结果 {success: boolean, data: Object|null}
+   */
+  async verifyLogWrite(logKey) {
+    try {
+      const client = this.getClientSafe()
+      const data = await client.hgetall(logKey)
+
+      return {
+        success: data && Object.keys(data).length > 0,
+        data: data || null,
+        fieldsCount: data ? Object.keys(data).length : 0
+      }
+    } catch (error) {
+      logger.error(`❌ Log write verification failed for ${logKey}:`, error)
+      return {
+        success: false,
+        data: null,
+        error: error.message
+      }
+    }
+  }
+
+  /**
+   * 生成日志键
+   * @private
+   * @param {Object} logEntry 日志条目
+   * @returns {string} 日志键
+   */
+  _generateLogKey(logEntry) {
+    return `request_log:${logEntry.keyId}:${logEntry.timestamp}`
+  }
+
+  /**
+   * 生成索引键
+   * @private
+   * @param {Object} logEntry 日志条目
+   * @returns {string} 索引键
+   */
+  _generateIndexKey(logEntry) {
+    // 使用时区转换的日期
+    const date = getDateStringInTimezone(new Date(logEntry.timestamp))
+    return `request_log_index:${logEntry.keyId}:${date}`
   }
 }
 

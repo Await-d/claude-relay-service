@@ -60,10 +60,13 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
 
   // Computed
   const filteredLogs = computed(() => {
-    if (!filters.value.search) return logs.value
+    // 确保 logs.value 是一个数组
+    const logsList = Array.isArray(logs.value) ? logs.value : []
+
+    if (!filters.value.search) return logsList
 
     const searchTerm = filters.value.search.toLowerCase()
-    return logs.value.filter(
+    return logsList.filter(
       (log) =>
         log.apiKey?.name?.toLowerCase().includes(searchTerm) ||
         log.request?.userAgent?.toLowerCase().includes(searchTerm) ||
@@ -81,10 +84,29 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
   const fetchLogs = async (params = {}) => {
     loading.value = true
     try {
+      // 转换参数映射：前端 -> 后端
       const queryParams = { ...filters.value, ...params }
-      const result = await apiClient.get('/admin/request-logs', { params: queryParams })
+      const backendParams = {
+        ...queryParams,
+        // 参数名映射
+        keyId: queryParams.apiKeyId, // apiKeyId -> keyId
+        status: queryParams.statusCode, // statusCode -> status
+        // 移除前端专用参数和已映射的参数
+        search: undefined, // 暂时移除搜索，改为前端过滤
+        apiKeyId: undefined,
+        statusCode: undefined
+      }
 
-      if (result && result.success) {
+      // 清理 undefined 值
+      Object.keys(backendParams).forEach((key) => {
+        if (backendParams[key] === undefined || backendParams[key] === '') {
+          delete backendParams[key]
+        }
+      })
+
+      const result = await apiClient.get('/admin/request-logs', { params: backendParams })
+
+      if (result && result.success && result.data) {
         logs.value = result.data.logs || []
         pagination.value = {
           page: result.data.page || 1,
@@ -110,9 +132,14 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       const queryParams = { ...params }
       const result = await apiClient.get(`/admin/request-logs/${apiKeyId}`, { params: queryParams })
 
-      if (result && result.success) {
+      if (result && result.success && result.data) {
         logs.value = result.data.logs || []
-        pagination.value = result.data.pagination || {}
+        pagination.value = {
+          page: result.data.page || 1,
+          limit: result.data.limit || 50,
+          total: result.data.total || 0,
+          totalPages: result.data.totalPages || 0
+        }
       }
       return result
     } catch (error) {
@@ -164,29 +191,69 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
   const exportLogs = async (format = 'json', params = {}) => {
     exporting.value = true
     try {
-      const exportParams = { format, ...filters.value, ...params }
-      const result = await apiClient.post('/admin/request-logs/export', exportParams)
-
-      if (result && result.success) {
-        // 创建下载链接
-        const blob = new Blob([result.data.content], {
-          type: format === 'csv' ? 'text/csv' : 'application/json'
-        })
-        const url = window.URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = result.data.filename || `request-logs-${new Date().getTime()}.${format}`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        window.URL.revokeObjectURL(url)
-
-        showToast(`日志已导出为 ${format.toUpperCase()} 格式`, 'success')
+      // 转换参数映射用��导出
+      const rawParams = { ...filters.value, ...params }
+      const exportParams = {
+        format,
+        ...rawParams,
+        // 参数名映射
+        keyId: rawParams.apiKeyId, // apiKeyId -> keyId
+        status: rawParams.statusCode, // statusCode -> status
+        // 移除前端专用参数和已映射的参数
+        search: undefined,
+        apiKeyId: undefined,
+        statusCode: undefined
       }
-      return result
+
+      // 清理 undefined 值
+      Object.keys(exportParams).forEach((key) => {
+        if (exportParams[key] === undefined || exportParams[key] === '') {
+          delete exportParams[key]
+        }
+      })
+
+      // 显示开始导出的提示
+      showToast(`正在导出日志为 ${format.toUpperCase()} 格式...`, 'info')
+
+      // 使用 apiClient 发起 GET 请求，这样可以自动携带认证信息
+      const response = await apiClient.get('/admin/request-logs/export', {
+        params: exportParams,
+        responseType: 'blob' // 获取 blob 响应
+      })
+
+      // 获取文件名，优先使用响应头中的文件名
+      let filename = `request-logs-${new Date().getTime()}.${format}`
+      const contentDisposition = response.headers?.get?.('Content-Disposition')
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) {
+          filename = match[1].replace(/['"]/g, '')
+        }
+      }
+
+      // 创建下载链接并触发下载
+      const blob = response.data
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.style.display = 'none'
+
+      // 添加到DOM并触发下载
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+      // 清理临时URL
+      window.URL.revokeObjectURL(url)
+
+      showToast(`日志已成功导出为 ${format.toUpperCase()} 格式`, 'success')
+
+      return { success: true, filename }
     } catch (error) {
       console.error('Failed to export logs:', error)
-      showToast('导出日志失败', 'error')
+      const errorMessage = error.message || '导出日志失败'
+      showToast(errorMessage, 'error')
       throw error
     } finally {
       exporting.value = false

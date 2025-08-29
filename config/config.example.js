@@ -189,7 +189,7 @@ const config = {
   },
 
   // 📊 API Key 请求日志记录配置
-  // 基于性能优先设计，采用异步批量处理和智能采样策略
+  // 记录所有请求（简化版本）
   requestLogging: {
     // 基础开关控制
     enabled: process.env.REQUEST_LOGGING_ENABLED === 'true', // 默认禁用，确保向后兼容
@@ -200,32 +200,13 @@ const config = {
     // debug: 记录调试信息（包括请求头、响应头摘要）
     mode: process.env.REQUEST_LOGGING_MODE || 'basic',
 
-    // 智能采样配置 - 优化性能，避免记录所有请求
-    sampling: {
-      // 采样率：0.0-1.0，0.1 表示记录 10% 的请求
-      rate: parseFloat(process.env.REQUEST_LOGGING_SAMPLING_RATE) || 0.1,
-
-      // 错误请求优先记录（覆盖采样率限制）
-      alwaysLogErrors: process.env.REQUEST_LOGGING_ALWAYS_LOG_ERRORS !== 'false', // 默认启用
-
-      // 慢请求优先记录（响应时间超过阈值的请求）
-      slowRequestThreshold: parseInt(process.env.REQUEST_LOGGING_SLOW_THRESHOLD) || 5000, // 5秒
-      alwaysLogSlowRequests: process.env.REQUEST_LOGGING_ALWAYS_LOG_SLOW !== 'false', // 默认启用
-
-      // 基于 API Key 的采样控制（未来功能）
-      perKeyRateLimit: parseInt(process.env.REQUEST_LOGGING_PER_KEY_RATE_LIMIT) || 100, // 每个 API Key 每小时最多记录 100 条
-
-      // 动态采样：基于系统负载自动调整采样率（未来功能）
-      enableDynamicSampling: process.env.REQUEST_LOGGING_DYNAMIC_SAMPLING === 'true' // 默认禁用
-    },
-
     // 异步批量处理配置 - 确保零阻塞关键路径
     async: {
-      // 批量大小：积累多少条日志后批量写入
-      batchSize: parseInt(process.env.REQUEST_LOGGING_BATCH_SIZE) || 50,
+      // 批量大小：积累多少条日志后批量写入（默认5条，更快写入）
+      batchSize: parseInt(process.env.REQUEST_LOGGING_BATCH_SIZE) || 5,
 
-      // 批量超时：即使未达到批量大小，多长时间后强制写入（毫秒）
-      batchTimeout: parseInt(process.env.REQUEST_LOGGING_BATCH_TIMEOUT) || 5000, // 5秒
+      // 批量超时：即使未达到批量大小，多长时间后强制写入（毫秒，默认2秒）
+      batchTimeout: parseInt(process.env.REQUEST_LOGGING_BATCH_TIMEOUT) || 2000,
 
       // 队列最大长度：防止内存溢出，超过此长度丢弃最旧的日志
       maxQueueSize: parseInt(process.env.REQUEST_LOGGING_MAX_QUEUE_SIZE) || 1000,

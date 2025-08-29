@@ -647,6 +647,29 @@ module.exports.resetAllUsageStats = async function (...args) {
   return await databaseProxy.resetAllUsageStats(...args)
 }
 
+// ==========================================
+// 日志存储抽象接口 (Log Storage Abstract Interface)
+// ==========================================
+
+/**
+ * 批量写入日志条目
+ * @param {Array} logEntries 日志条目数组
+ * @param {Object} options 配置选项
+ * @returns {Promise<Object>} 写入结果
+ */
+module.exports.batchWriteLogs = async function (...args) {
+  return await databaseProxy.batchWriteLogs(...args)
+}
+
+/**
+ * 验证日志写入结果
+ * @param {string} logKey 日志键
+ * @returns {Promise<Object>} 验证结果
+ */
+module.exports.verifyLogWrite = async function (...args) {
+  return await databaseProxy.verifyLogWrite(...args)
+}
+
 // 系统统计方法 - IDE识别 + 实际转发到Proxy
 module.exports.getSystemStats = async function (...args) {
   return await databaseProxy.getSystemStats(...args)

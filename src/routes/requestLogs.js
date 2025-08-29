@@ -452,12 +452,48 @@ router.get('/', authenticateAdmin, async (req, res) => {
       method,
       status,
       model,
+      search,
       sortBy = 'timestamp',
       sortOrder = 'desc'
     } = req.query
 
     const offset = (page - 1) * limit
     const query = {}
+
+    // 🔍 调试：检查Redis中的键
+    winston.info('🔍 DEBUGGING: Query request logs with params:', {
+      page,
+      limit,
+      keyId,
+      method,
+      status,
+      model,
+      search,
+      sortBy,
+      sortOrder
+    })
+
+    // 🔍 调试：检查Redis中存在的键
+    try {
+      const client = database.getClient()
+      if (client) {
+        const allKeys = await client.keys('*request*log*')
+        winston.info('🔍 DEBUGGING: Found Redis keys matching *request*log*:', {
+          count: allKeys.length,
+          keys: allKeys.slice(0, 10), // 只显示前10个
+          patterns: [...new Set(allKeys.map((key) => key.split(':').slice(0, 2).join(':')))]
+        })
+
+        // 检查具体的键模式
+        const requestLogKeys = await client.keys('request_log:*')
+        winston.info('🔍 DEBUGGING: Found Redis keys matching request_log:*:', {
+          count: requestLogKeys.length,
+          keys: requestLogKeys.slice(0, 5)
+        })
+      }
+    } catch (debugError) {
+      winston.warn('🔍 DEBUGGING: Failed to check Redis keys:', debugError.message)
+    }
 
     if (keyId) {
       query.keyId = keyId
@@ -471,13 +507,16 @@ router.get('/', authenticateAdmin, async (req, res) => {
     if (model) {
       query.model = model
     }
+    if (search) {
+      query.search = search
+    }
     if (startDate || endDate) {
-      query.timestamp = {}
+      query.dateRange = {}
       if (startDate) {
-        query.timestamp.$gte = new Date(startDate).getTime()
+        query.dateRange.start = startDate
       }
       if (endDate) {
-        query.timestamp.$lte = new Date(endDate).getTime()
+        query.dateRange.end = endDate
       }
     }
 
@@ -491,8 +530,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const totalLogs = await database.countLogs(query)
 
     res.json({
-      logs,
-      pagination: {
+      success: true,
+      data: {
+        logs,
         page: Number(page),
         limit: Number(limit),
         total: totalLogs,
@@ -502,6 +542,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
   } catch (error) {
     winston.error('查询请求日志错误', { error })
     res.status(500).json({
+      success: false,
       error: '查询日志失败',
       code: 'LOG_SEARCH_ERROR',
       timestamp: new Date().toISOString()
@@ -518,6 +559,7 @@ router.get('/:keyId', authenticateAdmin, async (req, res) => {
       limit = 20,
       startDate,
       endDate,
+      search,
       sortBy = 'timestamp',
       sortOrder = 'desc'
     } = req.query
@@ -525,13 +567,16 @@ router.get('/:keyId', authenticateAdmin, async (req, res) => {
     const offset = (page - 1) * limit
     const query = { keyId }
 
+    if (search) {
+      query.search = search
+    }
     if (startDate || endDate) {
-      query.timestamp = {}
+      query.dateRange = {}
       if (startDate) {
-        query.timestamp.$gte = new Date(startDate).getTime()
+        query.dateRange.start = startDate
       }
       if (endDate) {
-        query.timestamp.$lte = new Date(endDate).getTime()
+        query.dateRange.end = endDate
       }
     }
 
@@ -545,8 +590,9 @@ router.get('/:keyId', authenticateAdmin, async (req, res) => {
     const totalLogs = await database.countLogs(query)
 
     res.json({
-      logs,
-      pagination: {
+      success: true,
+      data: {
+        logs,
         page: Number(page),
         limit: Number(limit),
         total: totalLogs,
@@ -556,6 +602,7 @@ router.get('/:keyId', authenticateAdmin, async (req, res) => {
   } catch (error) {
     winston.error('获取API Key日志错误', { error })
     res.status(500).json({
+      success: false,
       error: '获取日志失败',
       code: 'API_KEY_LOG_RETRIEVAL_ERROR',
       timestamp: new Date().toISOString()
@@ -570,12 +617,16 @@ router.delete('/:keyId', authenticateAdmin, async (req, res) => {
     const deletedLogsCount = await database.deleteLogs({ keyId })
 
     res.json({
-      message: `已成功删除API Key ${keyId} 的所有日志`,
-      deletedLogsCount
+      success: true,
+      data: {
+        deletedLogsCount
+      },
+      message: `已成功删除API Key ${keyId} 的所有日志`
     })
   } catch (error) {
     winston.error('删除API Key日志错误', { error })
     res.status(500).json({
+      success: false,
       error: '删除日志失败',
       code: 'API_KEY_LOG_DELETION_ERROR',
       timestamp: new Date().toISOString()
@@ -586,24 +637,31 @@ router.delete('/:keyId', authenticateAdmin, async (req, res) => {
 // 日志统计信息
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
-    const { startDate, endDate } = req.query
+    const { startDate, endDate, search } = req.query
     const query = {}
 
+    if (search) {
+      query.search = search
+    }
     if (startDate || endDate) {
-      query.timestamp = {}
+      query.dateRange = {}
       if (startDate) {
-        query.timestamp.$gte = new Date(startDate).getTime()
+        query.dateRange.start = startDate
       }
       if (endDate) {
-        query.timestamp.$lte = new Date(endDate).getTime()
+        query.dateRange.end = endDate
       }
     }
 
     const stats = await database.aggregateLogs(query)
-    res.json(stats)
+    res.json({
+      success: true,
+      data: stats
+    })
   } catch (error) {
     winston.error('获取日志统计错误', { error })
     res.status(500).json({
+      success: false,
       error: '获取统计信息失败',
       code: 'LOG_STATS_ERROR',
       timestamp: new Date().toISOString()
@@ -611,14 +669,25 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
   }
 })
 
-// 导出日志
-router.post('/export', authenticateAdmin, async (req, res) => {
+// 导出日志处理函数（支持POST和GET请求）
+const exportLogsHandler = async (req, res) => {
   try {
-    const { startDate, endDate, keyId, format = 'csv' } = req.body
+    // 从请求体或查询参数中获取参数
+    const params = req.method === 'POST' ? req.body : req.query
+    const { startDate, endDate, keyId, format = 'csv', status, method, model } = params
 
     const query = {}
     if (keyId) {
       query.keyId = keyId
+    }
+    if (status) {
+      query.status = parseInt(status)
+    }
+    if (method) {
+      query.method = method
+    }
+    if (model) {
+      query.model = model
     }
     if (startDate || endDate) {
       query.timestamp = {}
@@ -630,21 +699,34 @@ router.post('/export', authenticateAdmin, async (req, res) => {
       }
     }
 
+    winston.info('导出日志请求', {
+      method: req.method,
+      query,
+      format,
+      userAgent: req.headers['user-agent']?.substring(0, 100)
+    })
+
     const exportFileName = `request_logs_${Date.now()}.${format}`
     const exportPath = await database.exportLogs(query, format, exportFileName)
+
+    // 设置响应头
+    res.setHeader('Content-Disposition', `attachment; filename="${exportFileName}"`)
+    res.setHeader('Content-Type', format === 'csv' ? 'text/csv' : 'application/json')
 
     // 发送文件
     res.download(exportPath, exportFileName, (err) => {
       if (err) {
         winston.error('日志导出下载错误', { error: err })
-        res.status(500).json({
-          error: '导出日志失败',
-          code: 'LOG_EXPORT_ERROR',
-          timestamp: new Date().toISOString()
-        })
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: '导出日志失败',
+            code: 'LOG_EXPORT_ERROR',
+            timestamp: new Date().toISOString()
+          })
+        }
       }
 
-      // 可选：在一段时间后删除导出的文件
+      // 在一段时间后删除导出的文件
       setTimeout(
         () => {
           try {
@@ -658,13 +740,19 @@ router.post('/export', authenticateAdmin, async (req, res) => {
     })
   } catch (error) {
     winston.error('导出日志错误', { error })
-    res.status(500).json({
-      error: '导出日志失败',
-      code: 'LOG_EXPORT_ERROR',
-      timestamp: new Date().toISOString()
-    })
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: '导出日志失败',
+        code: 'LOG_EXPORT_ERROR',
+        timestamp: new Date().toISOString()
+      })
+    }
   }
-})
+}
+
+// 同时支持POST和GET请求进行日志导出
+router.post('/export', authenticateAdmin, exportLogsHandler)
+router.get('/export', authenticateAdmin, exportLogsHandler)
 
 // 清理日志数据
 router.post('/cleanup', authenticateAdmin, async (req, res) => {
@@ -683,13 +771,16 @@ router.post('/cleanup', authenticateAdmin, async (req, res) => {
 
     res.json({
       success: true,
-      deletedCount,
-      cutoffDate: cutoffDate.toISOString(),
+      data: {
+        deletedCount,
+        cutoffDate: cutoffDate.toISOString()
+      },
       message: `成功清理 ${deletedCount} 条过期日志`
     })
   } catch (error) {
     winston.error('清理日志错误', { error })
     res.status(500).json({
+      success: false,
       error: '清理日志失败',
       code: 'LOG_CLEANUP_ERROR',
       timestamp: new Date().toISOString()

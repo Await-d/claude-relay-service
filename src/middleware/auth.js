@@ -700,28 +700,33 @@ const requestLogger = (req, res, next) => {
           let requestType = 'normal'
           if (res.statusCode >= 400) {
             requestType = 'error'
-          } else if (duration >= (config.requestLogging.sampling?.slowRequestThreshold || 5000)) {
+          } else if (duration >= 5000) {
+            // 默认5秒为慢请求阈值
             requestType = 'slow'
           }
 
           // 🎯 关键修复：添加采样器决策检查
+          logger.info(
+            `🔍 REQUEST LOGGING STATUS CHECK - Service Available: ${!!requestLoggerService}, shouldLog Function: ${!!(requestLoggerService && typeof requestLoggerService.shouldLog === 'function')}, Service Enabled: ${requestLoggerService?.isCurrentlyEnabled ? requestLoggerService.isCurrentlyEnabled() : 'unknown'}`
+          )
+
           const shouldLogResult = await requestLoggerService.shouldLog(req.apiKey.id, requestType, {
             responseTime: duration,
             statusCode: res.statusCode
           })
 
-          logger.debug(
+          logger.info(
             `🎯 Sampling decision for ${req.apiKey.id}: ${shouldLogResult} (type: ${requestType}, duration: ${duration}ms)`
           )
 
           if (!shouldLogResult) {
-            logger.debug(
+            logger.info(
               `📊 Request skipped by sampler: ${req.method} ${req.originalUrl} (${requestType})`
             )
             return
           }
 
-          logger.debug(
+          logger.info(
             `📊 Request selected for logging: ${req.method} ${req.originalUrl} (${requestType})`
           )
 
@@ -754,13 +759,13 @@ const requestLogger = (req, res, next) => {
           })
 
           if (enqueueSuccess) {
-            logger.debug(`📝 Log entry queued successfully for ${req.apiKey.id}`)
+            logger.info(`📝 Log entry queued successfully for ${req.apiKey.id}`)
           } else {
-            logger.debug(`⚠️  Log queue full or disabled for ${req.apiKey.id}`)
+            logger.info(`⚠️  Log queue full or disabled for ${req.apiKey.id}`)
           }
         } catch (logError) {
           // 静默处理日志错误，不影响主请求流程
-          logger.debug('High-performance logging error (non-critical):', logError.message)
+          logger.info('❌ High-performance logging error (non-critical):', logError.message)
         }
       })
     }

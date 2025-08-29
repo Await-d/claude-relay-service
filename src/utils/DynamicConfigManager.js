@@ -338,14 +338,6 @@ class DynamicConfigManager extends EventEmitter {
           return false
         }
 
-        // 验证采样率
-        if (rlConfig.sampling && typeof rlConfig.sampling.rate === 'number') {
-          if (rlConfig.sampling.rate < 0 || rlConfig.sampling.rate > 1) {
-            logger.warn('⚠️ Invalid sampling rate: must be between 0 and 1')
-            return false
-          }
-        }
-
         // 验证批量大小
         if (rlConfig.async && typeof rlConfig.async.batchSize === 'number') {
           if (rlConfig.async.batchSize < 1 || rlConfig.async.batchSize > 1000) {
@@ -461,13 +453,6 @@ class DynamicConfigManager extends EventEmitter {
       envConfig.mode = process.env.REQUEST_LOGGING_MODE
     }
 
-    if (process.env.REQUEST_LOGGING_SAMPLING_RATE) {
-      const rate = parseFloat(process.env.REQUEST_LOGGING_SAMPLING_RATE)
-      if (!isNaN(rate)) {
-        envConfig.sampling = { ...envConfig.sampling, rate }
-      }
-    }
-
     return envConfig
   }
 
@@ -480,8 +465,7 @@ class DynamicConfigManager extends EventEmitter {
     return {
       requestLogging: config.requestLogging || {
         enabled: false,
-        mode: 'basic',
-        sampling: { rate: 0.1 }
+        mode: 'basic'
       }
     }
   }
@@ -530,16 +514,6 @@ class DynamicConfigManager extends EventEmitter {
       }
     }
 
-    // 检查采样率变化
-    const oldRate = oldRL.sampling?.rate
-    const newRate = newRL.sampling?.rate
-    if (oldRate !== newRate) {
-      changes['requestLogging.sampling.rate'] = {
-        from: oldRate,
-        to: newRate
-      }
-    }
-
     return changes
   }
 
@@ -555,11 +529,7 @@ class DynamicConfigManager extends EventEmitter {
 
     try {
       // 通知请求日志服务重载
-      if (
-        changes['requestLogging.enabled'] ||
-        changes['requestLogging.mode'] ||
-        changes['requestLogging.sampling.rate']
-      ) {
+      if (changes['requestLogging.enabled'] || changes['requestLogging.mode']) {
         logger.info('📨 Notifying requestLoggerService to reload...')
 
         try {

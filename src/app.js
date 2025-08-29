@@ -410,18 +410,72 @@ class Application {
   async checkRedisHealth() {
     try {
       const start = Date.now()
-      await database.getClient().ping()
+      const client = database.getClient()
+      await client.ping()
       const latency = Date.now() - start
+      
+      // 🔍 调试：检查Redis中的请求日志键
+      let requestLogKeys = []
+      try {
+        const allRequestKeys = await client.keys('*request*log*')
+        const specificKeys = await client.keys('request_log:*')
+        requestLogKeys = {
+          all: allRequestKeys.slice(0, 10),
+          specific: specificKeys.slice(0, 10),
+          totalCount: allRequestKeys.length
+        }
+      } catch (keyError) {
+        requestLogKeys = { error: keyError.message }
+      }
 
       return {
         status: 'healthy',
         connected: database.isConnected,
-        latency: `${latency}ms`
+        latency: `${latency}ms`,
+        debug: {
+          requestLogKeys,
+          // 🔍 测试修复的searchLogs方法
+          testSearchLogs: await this.testSearchLogs()
+        }
       }
     } catch (error) {
       return {
         status: 'unhealthy',
         connected: false,
+        error: error.message
+      }
+    }
+  }
+
+  // 🔍 测试searchLogs修复
+  async testSearchLogs() {
+    try {
+      // 先测试单个键是否存在
+      const client = database.getClient()
+      const testKey = 'request_log:bb3dd7bd-10d8-4240-a810-ccdcc59b4c71:1756392164715'
+      const keyExists = await client.exists(testKey)
+      const keyData = await client.hgetall(testKey)
+      
+      const logs = await database.searchLogs({}, { limit: 3 })
+      return {
+        success: true,
+        logCount: logs.length,
+        testKey: {
+          key: testKey,
+          exists: keyExists,
+          dataKeys: keyData ? Object.keys(keyData) : null,
+          hasData: keyData && Object.keys(keyData).length > 0
+        },
+        sampleData: logs.slice(0, 2).map(log => ({
+          id: log.id,
+          keyId: log.keyId,
+          method: log.method,
+          status: log.statusCode
+        }))
+      }
+    } catch (error) {
+      return {
+        success: false,
         error: error.message
       }
     }

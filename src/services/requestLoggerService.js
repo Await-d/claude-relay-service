@@ -21,18 +21,12 @@
 const config = require('../../config/config')
 const logger = require('../utils/logger')
 const database = require('../models/database')
-const os = require('os')
 
 /**
- * 智能采样器类
- *
- * 负责基于多种因素决定是否记录请求日志：
- * - 系统负载（CPU、内存使用率）
- * - API Key 特定的采样率
- * - 请求类型（错误、慢请求优先记录）
- * - 时间窗口限制
+ * 简化的日志记录器 - 记录所有请求
+ * 移除了智能采样功能，直接记录所有请求
  */
-class IntelligentSampler {
+class SimpleLogger {
   constructor(options = {}) {
     this.config = options.config || config.requestLogging.sampling
     this.keyQuotas = new Map() // API Key 配额跟踪
@@ -45,209 +39,10 @@ class IntelligentSampler {
    * @param {Object} context 请求上下文
    * @returns {Promise<boolean>} 是否应该记录
    */
-  async shouldLog(context) {
-    const {
-      apiKeyId,
-      requestType = 'normal', // 'normal', 'error', 'slow'
-      responseTime = 0,
-      statusCode = 200
-    } = context
-
-    try {
-      // 1. 错误请求优先记录
-      if (this.config.alwaysLogErrors && (statusCode >= 400 || requestType === 'error')) {
-        logger.debug(`🎯 Sampler: Always logging error request (status: ${statusCode})`)
-        return true
-      }
-
-      // 2. 慢请求优先记录
-      if (this.config.alwaysLogSlowRequests && responseTime >= this.config.slowRequestThreshold) {
-        logger.debug(`🎯 Sampler: Always logging slow request (${responseTime}ms)`)
-        return true
-      }
-
-      // 3. 检查 API Key 配额限制
-      if (apiKeyId && !(await this.checkApiKeyQuota(apiKeyId))) {
-        logger.debug(`🎯 Sampler: API Key ${apiKeyId} exceeded quota`)
-        return false
-      }
-
-      // 4. 动态采样（基于系统负载）
-      if (this.config.enableDynamicSampling) {
-        const dynamicRate = await this.calculateDynamicSamplingRate()
-        if (Math.random() > dynamicRate) {
-          return false
-        }
-      } else {
-        // 5. 静态采样率
-        if (Math.random() > this.config.rate) {
-          return false
-        }
-      }
-
-      // 6. 更新 API Key 配额
-      if (apiKeyId) {
-        this.incrementApiKeyQuota(apiKeyId)
-      }
-
-      logger.debug('🎯 Sampler: Request selected for logging')
-      return true
-    } catch (error) {
-      logger.error('❌ Sampler error, defaulting to log:', error)
-      return true // 出错时默认记录，确保重要日志不丢失
-    }
-  }
-
-  /**
-   * 检查 API Key 是否超出配额限制
-   * @param {string} apiKeyId API Key ID
-   * @returns {Promise<boolean>} 是否在配额内
-   */
-  async checkApiKeyQuota(apiKeyId) {
-    const now = Date.now()
-    const hourlyWindow = 60 * 60 * 1000 // 1小时
-
-    // 清理过期数据
-    if (now - this.lastCleanup > this.cleanupInterval) {
-      this.cleanupExpiredQuotas()
-    }
-
-    if (!this.keyQuotas.has(apiKeyId)) {
-      this.keyQuotas.set(apiKeyId, {
-        count: 0,
-        windowStart: now
-      })
-      return true
-    }
-
-    const quota = this.keyQuotas.get(apiKeyId)
-
-    // 检查是否需要重置窗口
-    if (now - quota.windowStart >= hourlyWindow) {
-      quota.count = 0
-      quota.windowStart = now
-      return true
-    }
-
-    // 检查是否超出限制
-    return quota.count < this.config.perKeyRateLimit
-  }
-
-  /**
-   * 增加 API Key 配额计数
-   * @param {string} apiKeyId API Key ID
-   */
-  incrementApiKeyQuota(apiKeyId) {
-    if (!this.keyQuotas.has(apiKeyId)) {
-      this.keyQuotas.set(apiKeyId, {
-        count: 1,
-        windowStart: Date.now()
-      })
-    } else {
-      this.keyQuotas.get(apiKeyId).count++
-    }
-  }
-
-  /**
-   * 计算动态采样率（基于系统负载）
-   * @returns {Promise<number>} 采样率 (0-1)
-   */
-  async calculateDynamicSamplingRate() {
-    try {
-      const systemLoad = this.getSystemLoad()
-      let dynamicRate = this.config.rate
-
-      // CPU 负载调整
-      if (systemLoad.cpu > 0.8) {
-        dynamicRate *= 0.3 // 高CPU负载时大幅降低采样
-      } else if (systemLoad.cpu > 0.6) {
-        dynamicRate *= 0.6 // 中等负载时适度降低
-      }
-
-      // 内存使用调整
-      if (systemLoad.memory > 0.9) {
-        dynamicRate *= 0.2 // 高内存使用时大幅降低采样
-      } else if (systemLoad.memory > 0.7) {
-        dynamicRate *= 0.5
-      }
-
-      // 确保采样率不会过低，保证基本监控能力
-      dynamicRate = Math.max(dynamicRate, 0.01) // 最低1%
-
-      logger.debug(
-        `🎯 Dynamic sampling rate: ${dynamicRate} (CPU: ${systemLoad.cpu}, MEM: ${systemLoad.memory})`
-      )
-      return dynamicRate
-    } catch (error) {
-      logger.error('❌ Error calculating dynamic sampling rate:', error)
-      return this.config.rate // 返回默认采样率
-    }
-  }
-
-  /**
-   * 获取系统负载指标
-   * @returns {Object} 系统负载信息
-   */
-  getSystemLoad() {
-    try {
-      const cpus = os.cpus()
-      let totalIdle = 0
-      let totalTick = 0
-
-      cpus.forEach((cpu) => {
-        for (const type in cpu.times) {
-          totalTick += cpu.times[type]
-        }
-        totalIdle += cpu.times.idle
-      })
-
-      const cpuUsage = 1 - totalIdle / totalTick
-
-      const totalMem = os.totalmem()
-      const freeMem = os.freemem()
-      const memoryUsage = (totalMem - freeMem) / totalMem
-
-      return {
-        cpu: Math.max(0, Math.min(1, cpuUsage)), // 确保在 0-1 范围内
-        memory: Math.max(0, Math.min(1, memoryUsage))
-      }
-    } catch (error) {
-      logger.error('❌ Error getting system load:', error)
-      return { cpu: 0.5, memory: 0.5 } // 返回中等负载作为默认值
-    }
-  }
-
-  /**
-   * 清理过期的配额数据
-   */
-  cleanupExpiredQuotas() {
-    const now = Date.now()
-    const expireTime = 2 * 60 * 60 * 1000 // 2小时
-
-    for (const [keyId, quota] of this.keyQuotas.entries()) {
-      if (now - quota.windowStart > expireTime) {
-        this.keyQuotas.delete(keyId)
-      }
-    }
-
-    this.lastCleanup = now
-    logger.debug(`🧹 Cleaned up expired quota data, remaining keys: ${this.keyQuotas.size}`)
-  }
-
-  /**
-   * 获取采样器统计信息
-   * @returns {Object} 统计信息
-   */
-  getStats() {
-    return {
-      trackedApiKeys: this.keyQuotas.size,
-      lastCleanup: this.lastCleanup,
-      config: {
-        rate: this.config.rate,
-        perKeyRateLimit: this.config.perKeyRateLimit,
-        enableDynamicSampling: this.config.enableDynamicSampling
-      }
-    }
+  async shouldLog(_context) {
+    // 记录所有请求，不进行智能采样
+    logger.debug('📝 All requests will be logged (sampling disabled)')
+    return true
   }
 }
 
@@ -322,6 +117,16 @@ class PerformantRequestLogger {
       logger.info(
         `🚀 PerformantRequestLogger initialized successfully (enabled: ${this._isEnabled})`
       )
+
+      // 🔍 添加详细的状态报告
+      logger.info(`📊 REQUEST LOGGING SERVICE STATUS REPORT:`)
+      logger.info(`   ✅ Service Initialized: ${this._initialized}`)
+      logger.info(`   🔧 Service Enabled: ${this._isEnabled}`)
+      logger.info(`   📝 Sampling Strategy: DISABLED - All requests will be logged`)
+      logger.info(`   ⚡ Async Queue Size: ${this.config.async?.maxQueueSize || 1000}`)
+      logger.info(`   📦 Batch Size: ${this.config.async?.batchSize || 50}`)
+      logger.info(`   📋 Configuration Source: ${dynamicConfig ? 'Dynamic' : 'Static'}`)
+      logger.info(`📊 REQUEST LOGGING SERVICE STATUS REPORT END`)
     } catch (error) {
       logger.error('❌ Failed to initialize PerformantRequestLogger:', error)
       // 降级到静态配置初始化
@@ -358,9 +163,13 @@ class PerformantRequestLogger {
       this.metrics.queueLength = this.logQueue.length
       this.metrics.totalEnqueued++
 
-      // 检查是否需要立即处理
-      if (this.logQueue.length >= (this.config.async?.batchSize || 50)) {
+      // 更积极的批量写入触发策略
+      if (this.logQueue.length >= (this.config.async?.batchSize || 5)) {
+        // 达到批量大小时立即处理
         this.scheduleBatchWrite()
+      } else if (this.logQueue.length === 1) {
+        // 队列中第一条日志时，启动延迟写入
+        this.scheduleDelayedWrite()
       }
 
       return true
@@ -378,28 +187,20 @@ class PerformantRequestLogger {
    * @param {Object} context 请求上下文 {responseTime, statusCode}
    * @returns {Promise<boolean>} 是否应该记录
    */
-  async shouldLog(apiKeyId, requestType = 'normal', context = {}) {
-    if (!this.isCurrentlyEnabled()) {
+  async shouldLog(apiKeyId, requestType = 'normal', _context = {}) {
+    const currentlyEnabled = this.isCurrentlyEnabled()
+    logger.info(
+      `🔍 shouldLog called - Service Enabled: ${currentlyEnabled}, API Key: ${apiKeyId}, Type: ${requestType}`
+    )
+
+    if (!currentlyEnabled) {
+      logger.info(`❌ Request logging disabled - skipping log for ${apiKeyId}`)
       return false
     }
 
-    // 如果采样器未初始化（服务刚启用），先初始化
-    if (!this.sampler) {
-      this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
-      logger.debug(`🎯 Sampler initialized with config:`, {
-        rate: this.config.sampling?.rate || 0.1,
-        alwaysLogErrors: this.config.sampling?.alwaysLogErrors !== false,
-        slowRequestThreshold: this.config.sampling?.slowRequestThreshold || 5000,
-        alwaysLogSlowRequests: this.config.sampling?.alwaysLogSlowRequests !== false
-      })
-    }
-
-    return await this.sampler.shouldLog({
-      apiKeyId,
-      requestType,
-      responseTime: context.responseTime || 0,
-      statusCode: context.statusCode || 200
-    })
+    // 简化版本：记录所有请求
+    logger.info(`✅ All requests will be logged (sampling disabled) - API Key: ${apiKeyId}`)
+    return true
   }
 
   /**
@@ -413,46 +214,73 @@ class PerformantRequestLogger {
 
     this.isProcessing = true
     const batchStartTime = Date.now()
+    let batch = [] // 声明batch变量在try块之外
 
     try {
       // 取出要处理的批次
       const batchSize = Math.min(this.logQueue.length, this.config.async?.batchSize || 50)
-      const batch = this.logQueue.splice(0, batchSize)
+      batch = this.logQueue.splice(0, batchSize)
 
-      logger.debug(`📝 Processing batch of ${batch.length} logs`)
+      logger.info(`📝 Processing batch of ${batch.length} logs`)
 
-      // 使用 Redis Pipeline 进行批量写入
-      const client = await database.getDatabase()
-      const pipeline = client.client.pipeline()
+      // 使用数据库抽象接口进行批量写入
+      const database_instance = await database.getDatabase()
+      const writeResult = await database_instance.batchWriteLogs(batch, {
+        retentionMaxAge: this.config.retention.maxAge
+      })
 
-      for (const logEntry of batch) {
-        const logKey = this.generateLogKey(logEntry)
-        const indexKey = this.generateIndexKey(logEntry)
-
-        // 写入日志条目 - 使用 hset 替代已弃用的 hmset
-        const dataEntries = Object.entries(logEntry.data).flat()
-        pipeline.hset(logKey, ...dataEntries)
-        pipeline.expire(logKey, Math.floor(this.config.retention.maxAge / 1000))
-
-        // 更新索引
-        pipeline.sadd(indexKey, logKey)
-        pipeline.expire(indexKey, Math.floor(this.config.retention.maxAge / 1000))
+      // 检查写入结果
+      if (writeResult.success) {
+        logger.info('🔍 DEBUGGING: Batch write successful:', {
+          totalLogs: batch.length,
+          successCount: writeResult.results.length,
+          errorCount: writeResult.errors.length
+        })
+      } else {
+        logger.error('🔍 DEBUGGING: Batch write had errors:', {
+          totalLogs: batch.length,
+          errorCount: writeResult.errors.length,
+          sampleErrors: writeResult.errors.slice(0, 3)
+        })
       }
 
-      // 执行批量写入
-      await pipeline.exec()
+      // 验证写入：随机选择一个日志进行验证
+      if (batch.length > 0 && writeResult.results.length > 0) {
+        try {
+          const testLogKey = writeResult.results[0].logKey
+          const verification = await database_instance.verifyLogWrite(testLogKey)
+
+          if (verification.success) {
+            logger.info('🔍 DEBUGGING: Write verification successful:', {
+              testKey: testLogKey,
+              fieldsCount: verification.fieldsCount,
+              hasData: !!verification.data
+            })
+          } else {
+            logger.error('🔍 DEBUGGING: Write verification FAILED:', {
+              testKey: testLogKey,
+              error: verification.error
+            })
+          }
+        } catch (verifyError) {
+          logger.error('🔍 DEBUGGING: Write verification error:', verifyError.message)
+        }
+      }
 
       // 更新性能指标
       const writeTime = Date.now() - batchStartTime
       this.updateMetrics(batch.length, writeTime)
 
-      logger.debug(`✅ Batch write completed: ${batch.length} logs in ${writeTime}ms`)
+      logger.info(`✅ Batch write completed: ${batch.length} logs in ${writeTime}ms`)
     } catch (error) {
       logger.error('❌ Batch write failed:', error)
       this.metrics.totalErrors++
 
-      // 错误恢复：将失败的日志加入重试队列
-      this.handleWriteError(error)
+      // 错误恢复：将失败的日志重新放回队列（在末尾，避免无限重试）
+      if (batch && batch.length > 0) {
+        this.logQueue.push(...batch)
+        logger.warn(`⚠️ Re-queued ${batch.length} logs for retry`)
+      }
     } finally {
       this.isProcessing = false
       this.metrics.queueLength = this.logQueue.length
@@ -503,7 +331,7 @@ class PerformantRequestLogger {
         seconds: Math.floor(uptime / 1000),
         formatted: this.formatUptime(uptime)
       },
-      sampler: this.sampler ? this.sampler.getStats() : null
+      sampler: null // 智能采样已移除
     }
   }
 
@@ -666,14 +494,22 @@ class PerformantRequestLogger {
   isCurrentlyEnabled() {
     // 如果正在初始化，返回false（确保初始化完成后再处理请求）
     if (this._initializing || !this._initialized) {
+      logger.debug(
+        `🔍 Service not ready: initializing=${this._initializing}, initialized=${this._initialized}`
+      )
       return false
     }
 
     // 支持从配置管理器动态获取状态
     if (this.configManager && typeof this.configManager.getRequestLoggingEnabled === 'function') {
-      return this.configManager.getRequestLoggingEnabled()
+      const dynamicEnabled = this.configManager.getRequestLoggingEnabled()
+      logger.debug(`🔍 Dynamic config enabled: ${dynamicEnabled}`)
+      return dynamicEnabled
     }
-    return this._isEnabled || false
+
+    const enabled = this._isEnabled || false
+    logger.debug(`🔍 Static config enabled: ${enabled}`)
+    return enabled
   }
 
   /**
@@ -692,8 +528,7 @@ class PerformantRequestLogger {
       await this.flushLogs()
     }
 
-    // 重新创建采样器（应用新的采样配置）
-    this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
+    // 智能采样已移除，无需重新创建采样器
 
     // 更新错误处理配置 - 安全访问属性
     const asyncConfig = this.config.async || {}
@@ -747,8 +582,7 @@ class PerformantRequestLogger {
     // 先初始化基础组件
     this.initializeBaseComponents()
 
-    // 采样器
-    this.sampler = new IntelligentSampler({ config: this.config.sampling || { rate: 0.1 } })
+    // 智能采样已移除
 
     // 启动监控和清理定时器
     this.startPerformanceMonitoring()
@@ -762,6 +596,10 @@ class PerformantRequestLogger {
     if (this.batchTimer) {
       clearTimeout(this.batchTimer)
       this.batchTimer = null
+    }
+    if (this.delayedWriteTimer) {
+      clearTimeout(this.delayedWriteTimer)
+      this.delayedWriteTimer = null
     }
     if (this.monitoringTimer) {
       clearInterval(this.monitoringTimer)
@@ -833,25 +671,6 @@ class PerformantRequestLogger {
   }
 
   /**
-   * 生成日志存储键名
-   * @param {Object} logEntry 日志条目
-   * @returns {string} Redis 键名
-   */
-  generateLogKey(logEntry) {
-    return `${this.config.storage.keyPrefix}:${logEntry.keyId}:${logEntry.timestamp}`
-  }
-
-  /**
-   * 生成索引键名
-   * @param {Object} logEntry 日志条目
-   * @returns {string} Redis 索引键名
-   */
-  generateIndexKey(logEntry) {
-    const date = new Date(logEntry.timestamp).toISOString().split('T')[0]
-    return `${this.config.storage.indexKeyPrefix}:${logEntry.keyId}:${date}`
-  }
-
-  /**
    * 净化用户代理字符串
    * @param {string} userAgent 原始用户代理
    * @returns {string} 净化后的用户代理
@@ -895,6 +714,25 @@ class PerformantRequestLogger {
     }
 
     return ipAddress
+  }
+
+  /**
+   * 安排延迟写入任务（用于小批量快速写入）
+   */
+  scheduleDelayedWrite() {
+    // 如果已有延迟写入任务，不重复创建
+    if (this.delayedWriteTimer) {
+      return
+    }
+
+    // 设置较短的延迟写入时间（1秒）
+    this.delayedWriteTimer = setTimeout(() => {
+      if (this.logQueue.length > 0 && !this.isProcessing) {
+        logger.info(`⏰ Delayed write triggered for ${this.logQueue.length} logs`)
+        this.flushLogs()
+      }
+      this.delayedWriteTimer = null
+    }, 1000) // 1秒延迟写入
   }
 
   /**
@@ -1114,6 +952,6 @@ process.on('SIGTERM', async () => {
 
 module.exports = {
   PerformantRequestLogger,
-  IntelligentSampler,
+  SimpleLogger,
   requestLogger // 单例实例，供其他模块使用
 }
