@@ -302,9 +302,20 @@ class ConfigWatcher extends EventEmitter {
       return false
     }
 
+    // 检查数据库连接状态
     const dbClient = database.getClient()
     if (!dbClient) {
-      throw new Error('Database client not available')
+      // 优雅地处理数据库不可用的情况
+      logger.debug('ConfigWatcher: Database client not available, skipping check')
+      return false
+    }
+
+    // 检查客户端连接状态
+    if (dbClient.status !== 'ready' && dbClient.status !== 'connect') {
+      logger.debug(
+        `ConfigWatcher: Database client not ready (status: ${dbClient.status}), skipping check`
+      )
+      return false
     }
 
     this.stats.totalChecks++
@@ -475,6 +486,13 @@ class ConfigWatcher extends EventEmitter {
    * @private
    */
   handleCheckError(error) {
+    // 区分数据库不可用和真正的错误
+    if (error.message === 'Database client not available') {
+      // 数据库不可用不应该记录为错误，这是正常的临时状态
+      logger.debug(`ConfigWatcher: Database not available, will retry next check`)
+      return
+    }
+
     this.stats.errors++
     this.lastError = {
       message: error.message,

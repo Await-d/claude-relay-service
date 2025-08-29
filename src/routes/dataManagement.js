@@ -28,9 +28,26 @@ const upload = multer({
   dest: './temp/uploads/',
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB限制
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/zip' || file.mimetype === 'application/json') {
+    // 支持的MIME类型
+    const allowedMimeTypes = [
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/x-zip',
+      'multipart/x-zip',
+      'application/json',
+      'text/json'
+    ]
+
+    // 也检查文件扩展名作为备选
+    const allowedExtensions = ['.zip', '.json']
+    const fileExtension = require('path').extname(file.originalname).toLowerCase()
+
+    if (allowedMimeTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
       cb(null, true)
     } else {
+      logger.warn(
+        `文件上传被拒绝: ${file.originalname}, MIME类型: ${file.mimetype}, 扩展名: ${fileExtension}`
+      )
       cb(new Error('仅支持ZIP和JSON文件'))
     }
   }
@@ -97,7 +114,7 @@ router.get('/overview', authenticateAdmin, async (req, res) => {
       // 忽略获取最后导出时间的错误
     }
 
-    await db.disconnect()
+    // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
 
     res.json({
       success: true,
@@ -190,7 +207,7 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
 
     const fullAdminInfo = await db.getSession('admin_credentials')
     if (!fullAdminInfo || !fullAdminInfo.passwordHash) {
-      await db.disconnect()
+      // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
       return res.status(401).json({
         success: false,
         error: '管理员信息不完整'
@@ -200,7 +217,7 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
     const isPasswordValid = await bcrypt.compare(password, fullAdminInfo.passwordHash)
 
     if (!isPasswordValid) {
-      await db.disconnect()
+      // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
       return res.status(401).json({
         success: false,
         error: '管理员密码错误'
@@ -211,7 +228,7 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
     const is2FAEnabled = await twoFactorAuthService.is2FAEnabled(req.admin.username)
 
     if (!is2FAEnabled) {
-      await db.disconnect()
+      // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
       return res.status(400).json({
         success: false,
         error: '请先启用2FA'
@@ -219,7 +236,7 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
     }
 
     if (!token) {
-      await db.disconnect()
+      // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
       return res.status(400).json({
         success: false,
         error: '请输入2FA验证码'
@@ -241,7 +258,7 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
       15 * 60
     ) // 15分钟
 
-    await db.disconnect()
+    // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
 
     logger.info(`✅ 管理员 ${req.admin.username} 通过敏感操作验证`)
 
@@ -253,14 +270,6 @@ router.post('/2fa/verify', authenticateAdmin, async (req, res) => {
       }
     })
   } catch (error) {
-    // 确保数据库连接被正确关闭
-    try {
-      const db = database
-      await db.disconnect()
-    } catch (disconnectError) {
-      logger.warn('数据库断开连接失败:', disconnectError.message)
-    }
-
     logger.error('❌ 2FA验证失败:', error)
     res.status(400).json({
       success: false,
@@ -282,7 +291,7 @@ router.post('/export', authenticateAdmin, async (req, res) => {
 
     const sensitiveSession = await db.getSession(`sensitive_session:${sessionToken}`)
     if (!sensitiveSession || sensitiveSession.adminUsername !== req.admin.username) {
-      await db.disconnect()
+      // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
       return res.status(401).json({
         success: false,
         error: '敏感操作会话无效或已过期'
@@ -324,8 +333,8 @@ router.post('/export', authenticateAdmin, async (req, res) => {
     // 清理敏感操作会话
     await db.deleteSession(`sensitive_session:${sessionToken}`)
 
-    // 断开数据库连接
-    await db.disconnect()
+    // 注意：不要断开全局数据库连接，因为其他服务(如ConfigWatcher)可能仍在使用
+    // 数据库连接会在应用关闭时统一管理
 
     logger.info(`✅ 管理员 ${req.admin.username} 数据导出完成: ${exportResult.totalRecords} 条记录`)
 
@@ -401,7 +410,7 @@ router.post('/import', authenticateAdmin, upload.single('dataFile'), async (req,
 
     const sensitiveSession = await db.getSession(`sensitive_session:${sessionToken}`)
     if (!sensitiveSession || sensitiveSession.adminUsername !== req.admin.username) {
-      await db.disconnect()
+      // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
       return res.status(401).json({
         success: false,
         error: '敏感操作会话无效或已过期'
@@ -413,10 +422,24 @@ router.post('/import', authenticateAdmin, upload.single('dataFile'), async (req,
     let importDir = req.file.path
 
     // 如果是ZIP文件，先解压
-    if (req.file.mimetype === 'application/zip') {
+    const zipMimeTypes = [
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/x-zip',
+      'multipart/x-zip'
+    ]
+    const fileExtension = path.extname(req.file.originalname).toLowerCase()
+
+    if (zipMimeTypes.includes(req.file.mimetype) || fileExtension === '.zip') {
+      logger.info(
+        `🗜️ 检测到ZIP文件: ${req.file.originalname}, MIME: ${req.file.mimetype}, 开始解压...`
+      )
       const extractDir = path.join('./temp/imports', Date.now().toString())
       await extractZipArchive(req.file.path, extractDir)
       importDir = extractDir
+      logger.info(`✅ ZIP文件解压完成，解压目录: ${extractDir}`)
+    } else {
+      logger.info(`📄 检测到JSON文件: ${req.file.originalname}, 直接导入`)
     }
 
     // 执行数据导入
@@ -428,7 +451,7 @@ router.post('/import', authenticateAdmin, upload.single('dataFile'), async (req,
       dryRun: false
     })
 
-    await db.disconnect()
+    // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
 
     // 清理敏感操作会话
     await db.deleteSession(`sensitive_session:${sessionToken}`)
@@ -485,7 +508,7 @@ router.post('/migrate', authenticateAdmin, upload.single('configFile'), async (r
 
     const sensitiveSession = await db.getSession(`sensitive_session:${sessionToken}`)
     if (!sensitiveSession || sensitiveSession.adminUsername !== req.admin.username) {
-      await db.disconnect()
+      // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
       return res.status(401).json({
         success: false,
         error: '敏感操作会话无效或已过期'
@@ -512,7 +535,7 @@ router.post('/migrate', authenticateAdmin, upload.single('configFile'), async (r
       }
     )
 
-    await db.disconnect()
+    // 注意：不要断开全局数据库连接，因为其他服务可能仍在使用
 
     // 清理敏感操作会话
     await db.deleteSession(`sensitive_session:${sessionToken}`)
@@ -586,39 +609,80 @@ async function createZipArchive(sourceDir, outputPath) {
  */
 async function extractZipArchive(zipPath, extractDir) {
   const yauzl = require('yauzl')
+
+  logger.info(`🗂️ 创建解压目录: ${extractDir}`)
   await fs.mkdir(extractDir, { recursive: true })
 
   return new Promise((resolve, reject) => {
+    logger.debug(`📂 开始解压ZIP文件: ${zipPath}`)
+
     yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
       if (err) {
+        logger.error(`❌ 打开ZIP文件失败: ${err.message}`)
         return reject(err)
       }
 
+      let entryCount = 0
+      let extractedCount = 0
+
       zipfile.readEntry()
+
       zipfile.on('entry', (entry) => {
+        entryCount++
+        logger.debug(`📄 发现ZIP条目: ${entry.fileName}`)
+
         if (/\/$/.test(entry.fileName)) {
+          // 跳过目录条目
+          logger.debug(`📁 跳过目录: ${entry.fileName}`)
           zipfile.readEntry()
         } else {
           zipfile.openReadStream(entry, (error, readStream) => {
             if (error) {
+              logger.error(`❌ 打开ZIP条目流失败: ${entry.fileName}, 错误: ${error.message}`)
               return reject(error)
             }
 
             const outputPath = path.join(extractDir, entry.fileName)
             const outputDir = path.dirname(outputPath)
 
+            logger.debug(`💾 解压文件: ${entry.fileName} -> ${outputPath}`)
+
             fs.mkdir(outputDir, { recursive: true })
               .then(() => {
                 const writeStream = require('fs').createWriteStream(outputPath)
+
+                writeStream.on('error', (writeError) => {
+                  logger.error(`❌ 写入文件失败: ${outputPath}, 错误: ${writeError.message}`)
+                  reject(writeError)
+                })
+
+                writeStream.on('close', () => {
+                  extractedCount++
+                  logger.debug(
+                    `✅ 文件解压完成: ${entry.fileName} (${extractedCount}/${entryCount})`
+                  )
+                  zipfile.readEntry()
+                })
+
                 readStream.pipe(writeStream)
-                writeStream.on('close', () => zipfile.readEntry())
               })
-              .catch(reject)
+              .catch((mkdirError) => {
+                logger.error(`❌ 创建目录失败: ${outputDir}, 错误: ${mkdirError.message}`)
+                reject(mkdirError)
+              })
           })
         }
       })
 
-      zipfile.on('end', resolve)
+      zipfile.on('end', () => {
+        logger.info(`🎉 ZIP解压完成! 总计${extractedCount}个文件解压到: ${extractDir}`)
+        resolve()
+      })
+
+      zipfile.on('error', (zipError) => {
+        logger.error(`❌ ZIP解压过程出错: ${zipError.message}`)
+        reject(zipError)
+      })
     })
   })
 }

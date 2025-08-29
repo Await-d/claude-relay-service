@@ -1096,11 +1096,12 @@ class RedisAdapter extends DatabaseAdapter {
    */
   async getAllAccountsUsageStats() {
     try {
-      // 获取所有Claude账户（修复键名不一致问题）
-      const accountKeys = await this.client.keys('claude:account:*')
       const accountStats = []
 
-      for (const accountKey of accountKeys) {
+      // 获取所有Claude账户（修复键名不一致问题）
+      const claudeAccountKeys = await this.client.keys('claude:account:*')
+
+      for (const accountKey of claudeAccountKeys) {
         const accountId = accountKey.replace('claude:account:', '')
         const accountData = await this.client.hgetall(accountKey)
 
@@ -1112,6 +1113,28 @@ class RedisAdapter extends DatabaseAdapter {
             email: accountData.email || '',
             status: accountData.status || 'unknown',
             isActive: accountData.isActive === 'true',
+            accountType: 'claude',
+            ...stats
+          })
+        }
+      }
+
+      // 获取所有Claude Console账户
+      const claudeConsoleAccountKeys = await this.client.keys('claude_console_account:*')
+
+      for (const accountKey of claudeConsoleAccountKeys) {
+        const accountId = accountKey.replace('claude_console_account:', '')
+        const accountData = await this.client.hgetall(accountKey)
+
+        if (accountData.name || accountData.email) {
+          const stats = await this.getAccountUsageStats(accountId)
+          accountStats.push({
+            id: accountId,
+            name: accountData.name || accountData.email || accountId,
+            email: accountData.email || '',
+            status: accountData.status || 'unknown',
+            isActive: accountData.isActive === 'true',
+            accountType: 'claude_console',
             ...stats
           })
         }
@@ -1557,6 +1580,33 @@ class RedisAdapter extends DatabaseAdapter {
   }
 
   /**
+   * 获取所有Claude Console账户
+   * @returns {Promise<Array>} Claude Console账户数据数组
+   */
+  async getAllClaudeConsoleAccounts() {
+    const keys = await this.client.keys('claude_console_account:*')
+    const accounts = []
+    for (const key of keys) {
+      const accountData = await this.client.hgetall(key)
+      if (accountData && Object.keys(accountData).length > 0) {
+        // 确保所有调度策略字段都有默认值（向后兼容）
+        const enrichedAccount = {
+          id: key.replace('claude_console_account:', ''),
+          ...accountData,
+          schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+          schedulingWeight: accountData.schedulingWeight || '1',
+          sequentialOrder: accountData.sequentialOrder || '1',
+          roundRobinIndex: accountData.roundRobinIndex || '0',
+          usageCount: accountData.usageCount || '0',
+          lastScheduledAt: accountData.lastScheduledAt || ''
+        }
+        accounts.push(enrichedAccount)
+      }
+    }
+    return accounts
+  }
+
+  /**
    * 删除Claude账户
    * @param {string} accountId 账户ID
    * @returns {Promise<number>} 删除的记录数
@@ -1909,6 +1959,131 @@ class RedisAdapter extends DatabaseAdapter {
     }
   }
 
+  // ==================== Gemini 账户管理 (4个方法) ====================
+
+  /**
+   * 获取所有Gemini账户
+   * @returns {Promise<Array>} Gemini账户数组
+   */
+  async getAllGeminiAccounts() {
+    try {
+      const keys = await this.client.keys('gemini:account:*')
+      const accounts = []
+
+      for (const key of keys) {
+        const accountData = await this.client.hgetall(key)
+        if (accountData && Object.keys(accountData).length > 0) {
+          // 确保所有调度策略字段都有默认值（向后兼容）
+          const enrichedAccount = {
+            id: key.replace('gemini:account:', ''),
+            ...accountData,
+            schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+            schedulingWeight: accountData.schedulingWeight || '1',
+            sequentialOrder: accountData.sequentialOrder || '1',
+            roundRobinIndex: accountData.roundRobinIndex || '0',
+            usageCount: accountData.usageCount || '0',
+            lastScheduledAt: accountData.lastScheduledAt || ''
+          }
+          accounts.push(enrichedAccount)
+        }
+      }
+
+      return accounts
+    } catch (error) {
+      logger.error('❌ Failed to get all Gemini accounts:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 获取单个Gemini账户
+   * @param {string} accountId Gemini账户ID
+   * @returns {Promise<Object|null>} Gemini账户数据对象或null
+   */
+  async getGeminiAccount(accountId) {
+    try {
+      const key = `gemini:account:${accountId}`
+      const accountData = await this.client.hgetall(key)
+
+      if (!accountData || Object.keys(accountData).length === 0) {
+        return null
+      }
+
+      // 确保所有调度策略字段都有默认值（向后兼容）
+      return {
+        id: accountId,
+        ...accountData,
+        schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+        schedulingWeight: accountData.schedulingWeight || '1',
+        sequentialOrder: accountData.sequentialOrder || '1',
+        roundRobinIndex: accountData.roundRobinIndex || '0',
+        usageCount: accountData.usageCount || '0',
+        lastScheduledAt: accountData.lastScheduledAt || ''
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to get Gemini account ${accountId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 设置Gemini账户数据
+   * @param {string} accountId Gemini账户ID
+   * @param {Object} accountData Gemini账户数据对象
+   * @returns {Promise<void>}
+   * @throws {Error} 账户数据无效时抛出错误
+   */
+  async setGeminiAccount(accountId, accountData) {
+    try {
+      const key = `gemini:account:${accountId}`
+      const client = this.getClientSafe()
+
+      // 验证账户数据
+      if (
+        !accountData ||
+        typeof accountData !== 'object' ||
+        Object.keys(accountData).length === 0
+      ) {
+        throw new Error('Invalid Gemini account data provided')
+      }
+
+      // 确保新的调度策略字段有默认值
+      const enrichedAccountData = {
+        ...accountData,
+        // 调度策略字段（向后兼容）
+        schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+        schedulingWeight: accountData.schedulingWeight || '1',
+        sequentialOrder: accountData.sequentialOrder || '1',
+        roundRobinIndex: accountData.roundRobinIndex || '0',
+        usageCount: accountData.usageCount || '0',
+        lastScheduledAt: accountData.lastScheduledAt || ''
+      }
+
+      await client.hmset(key, enrichedAccountData)
+      logger.info(`🤖 Gemini account ${accountId} data updated`)
+    } catch (error) {
+      logger.error(`❌ Failed to set Gemini account ${accountId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 删除Gemini账户
+   * @param {string} accountId Gemini账户ID
+   * @returns {Promise<number>} 删除的记录数
+   */
+  async deleteGeminiAccount(accountId) {
+    try {
+      const key = `gemini:account:${accountId}`
+      const result = await this.client.del(key)
+      logger.info(`🗑️ Gemini account ${accountId} deleted`)
+      return result
+    } catch (error) {
+      logger.error(`❌ Failed to delete Gemini account ${accountId}:`, error)
+      throw error
+    }
+  }
+
   // ==================== OpenAI 账户管理 (4个方法) ====================
 
   /**
@@ -1997,6 +2172,140 @@ class RedisAdapter extends DatabaseAdapter {
     return accounts
   }
 
+  // ==================== 品牌设置管理 (3个方法) ====================
+
+  /**
+   * 获取品牌配置
+   * @returns {Promise<Object|null>} 品牌配置对象或null
+   */
+  async getBrandingConfig() {
+    try {
+      const key = 'system:branding_config'
+      const brandingConfig = await this.client.hgetall(key)
+
+      if (!brandingConfig || Object.keys(brandingConfig).length === 0) {
+        return null
+      }
+
+      return brandingConfig
+    } catch (error) {
+      logger.error('❌ Failed to get branding config:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 设置品牌配置
+   * @param {Object} config 品牌配置对象
+   * @returns {Promise<void>}
+   * @throws {Error} 配置数据无效时抛出错误
+   */
+  async setBrandingConfig(brandingConfig) {
+    try {
+      const key = 'system:branding_config'
+      const client = this.getClientSafe()
+
+      // 验证配置数据
+      if (
+        !brandingConfig ||
+        typeof brandingConfig !== 'object' ||
+        Object.keys(brandingConfig).length === 0
+      ) {
+        throw new Error('Invalid branding configuration data provided')
+      }
+
+      // 使用hset方法设置多个hash字段
+      await client.hmset(key, brandingConfig)
+      logger.info('🎨 Branding configuration updated')
+    } catch (error) {
+      logger.error('❌ Failed to set branding config:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 删除品牌配置
+   * @returns {Promise<number>} 删除的记录数
+   */
+  async deleteBrandingConfig() {
+    try {
+      const key = 'system:branding_config'
+      const result = await this.client.del(key)
+      logger.info('🗑️ Branding configuration deleted')
+      return result
+    } catch (error) {
+      logger.error('❌ Failed to delete branding config:', error)
+      throw error
+    }
+  }
+
+  // ==================== 通知设置管理 (3个方法) ====================
+
+  /**
+   * 获取通知配置
+   * @returns {Promise<Object|null>} 通知配置对象或null
+   */
+  async getNotificationConfig() {
+    try {
+      const key = 'system:notification_config'
+      const notificationConfig = await this.client.hgetall(key)
+
+      if (!notificationConfig || Object.keys(notificationConfig).length === 0) {
+        return null
+      }
+
+      return notificationConfig
+    } catch (error) {
+      logger.error('❌ Failed to get notification config:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 设置通知配置
+   * @param {Object} config 通知配置对象
+   * @returns {Promise<void>}
+   * @throws {Error} 配置数据无效时抛出错误
+   */
+  async setNotificationConfig(notificationConfig) {
+    try {
+      const key = 'system:notification_config'
+      const client = this.getClientSafe()
+
+      // 验证配置数据
+      if (
+        !notificationConfig ||
+        typeof notificationConfig !== 'object' ||
+        Object.keys(notificationConfig).length === 0
+      ) {
+        throw new Error('Invalid notification configuration data provided')
+      }
+
+      // 使用hset方法设置多个hash字段
+      await client.hmset(key, notificationConfig)
+      logger.info('🔔 Notification configuration updated')
+    } catch (error) {
+      logger.error('❌ Failed to set notification config:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 删除通知配置
+   * @returns {Promise<number>} 删除的记录数
+   */
+  async deleteNotificationConfig() {
+    try {
+      const key = 'system:notification_config'
+      const result = await this.client.del(key)
+      logger.info('🗑️ Notification configuration deleted')
+      return result
+    } catch (error) {
+      logger.error('❌ Failed to delete notification config:', error)
+      throw error
+    }
+  }
+
   // ==================== 配置管理 (3个方法) ====================
 
   /**
@@ -2050,6 +2359,220 @@ class RedisAdapter extends DatabaseAdapter {
   async deleteSystemSchedulingConfig() {
     const key = 'system:scheduling_config'
     return await this.client.del(key)
+  }
+
+  // ==================== 管理员信息管理 (4个方法) ====================
+
+  /**
+   * 获取所有管理员信息
+   * @returns {Promise<Array>} 管理员信息数组
+   */
+  async getAllAdmins() {
+    try {
+      const keys = await this.client.keys('admin:*')
+      const admins = []
+
+      for (const key of keys) {
+        // 过滤掉用户名映射键，只处理实际的管理员数据
+        if (key.startsWith('admin_username:')) {
+          continue
+        }
+
+        const adminData = await this.client.hgetall(key)
+        if (adminData && Object.keys(adminData).length > 0) {
+          const adminId = key.replace('admin:', '')
+          admins.push({
+            id: adminId,
+            ...adminData
+          })
+        }
+      }
+
+      return admins
+    } catch (error) {
+      logger.error('❌ Failed to get all admins:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 根据ID获取管理员信息
+   * @param {string} adminId 管理员ID
+   * @returns {Promise<Object|null>} 管理员信息对象或null
+   */
+  async getAdminById(adminId) {
+    try {
+      const key = `admin:${adminId}`
+      const adminData = await this.client.hgetall(key)
+
+      if (!adminData || Object.keys(adminData).length === 0) {
+        return null
+      }
+
+      return {
+        id: adminId,
+        ...adminData
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to get admin by ID ${adminId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 设置管理员数据
+   * @param {string} adminId 管理员ID
+   * @param {Object} adminData 管理员数据对象
+   * @returns {Promise<void>}
+   * @throws {Error} 管理员数据无效时抛出错误
+   */
+  async setAdmin(adminId, adminData) {
+    try {
+      const key = `admin:${adminId}`
+      const client = this.getClientSafe()
+
+      // 验证管理员数据
+      if (!adminData || typeof adminData !== 'object' || Object.keys(adminData).length === 0) {
+        throw new Error('Invalid admin data provided')
+      }
+
+      // 设置管理员数据
+      await client.hmset(key, adminData)
+
+      // 维护用户名映射（如果提供了用户名）
+      if (adminData.username) {
+        const usernameMapKey = `admin_username:${adminData.username}`
+        await client.set(usernameMapKey, adminId)
+      }
+
+      logger.info(`👤 Admin ${adminId} data updated`)
+    } catch (error) {
+      logger.error(`❌ Failed to set admin ${adminId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 删除管理员
+   * @param {string} adminId 管理员ID
+   * @returns {Promise<number>} 删除的记录数
+   */
+  async deleteAdmin(adminId) {
+    try {
+      const key = `admin:${adminId}`
+
+      // 获取管理员数据以便清理用户名映射
+      const adminData = await this.client.hgetall(key)
+
+      // 删除管理员数据
+      const result = await this.client.del(key)
+
+      // 清理用户名映射
+      if (adminData && adminData.username) {
+        const usernameMapKey = `admin_username:${adminData.username}`
+        await this.client.del(usernameMapKey)
+      }
+
+      logger.info(`🗑️ Admin ${adminId} deleted`)
+      return result
+    } catch (error) {
+      logger.error(`❌ Failed to delete admin ${adminId}:`, error)
+      throw error
+    }
+  }
+
+  // ==================== 2FA配置管理 (3个方法) ====================
+
+  /**
+   * 获取指定用户名的2FA配置
+   * @param {string} username 用户名
+   * @returns {Promise<Object|null>} 2FA配置对象或null
+   */
+  async getTwoFactorConfig(username) {
+    try {
+      const key = `2fa:config:${username}`
+      const twoFactorConfig = await this.client.hgetall(key)
+
+      if (!twoFactorConfig || Object.keys(twoFactorConfig).length === 0) {
+        return null
+      }
+
+      return {
+        username,
+        ...twoFactorConfig
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to get 2FA config for ${username}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 设置指定用户名的2FA配置
+   * @param {string} username 用户名
+   * @param {Object} config 2FA配置对象
+   * @returns {Promise<void>}
+   * @throws {Error} 配置数据无效时抛出错误
+   */
+  async setTwoFactorConfig(username, twoFactorConfig) {
+    try {
+      const key = `2fa:config:${username}`
+      const client = this.getClientSafe()
+
+      // 验证配置数据
+      if (
+        !twoFactorConfig ||
+        typeof twoFactorConfig !== 'object' ||
+        Object.keys(twoFactorConfig).length === 0
+      ) {
+        throw new Error('Invalid 2FA configuration data provided')
+      }
+
+      // 验证用户名
+      if (!username || typeof username !== 'string' || username.trim().length === 0) {
+        throw new Error('Invalid username provided')
+      }
+
+      // 设置2FA配置，包含安全敏感信息的处理
+      const configToStore = {
+        ...twoFactorConfig,
+        createdAt: twoFactorConfig.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+
+      await client.hmset(key, configToStore)
+      logger.info(`🔐 2FA configuration updated for user: ${username}`)
+    } catch (error) {
+      logger.error(`❌ Failed to set 2FA config for ${username}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 获取所有2FA配置
+   * @returns {Promise<Array>} 所有2FA配置数组
+   */
+  async getAllTwoFactorConfigs() {
+    try {
+      const keys = await this.client.keys('2fa:config:*')
+      const configs = []
+
+      for (const key of keys) {
+        const configData = await this.client.hgetall(key)
+        if (configData && Object.keys(configData).length > 0) {
+          const username = key.replace('2fa:config:', '')
+          configs.push({
+            username,
+            ...configData
+          })
+        }
+      }
+
+      return configs
+    } catch (error) {
+      logger.error('❌ Failed to get all 2FA configs:', error)
+      throw error
+    }
   }
 
   /**
@@ -2136,7 +2659,7 @@ class RedisAdapter extends DatabaseAdapter {
    * @returns {Promise<Array>} 日志数组
    */
   async searchLogs(query = {}, options = {}) {
-    const { offset = 0, limit = 20, sortBy = 'timestamp', sortOrder = 'desc' } = options
+    const { offset = 0, limit = 20, sortOrder = 'desc' } = options
     const startTime = Date.now()
 
     try {
@@ -2295,7 +2818,9 @@ class RedisAdapter extends DatabaseAdapter {
 
       const logs = results
         .map(([err, logData], index) => {
-          if (err || !logData || Object.keys(logData).length === 0) return null
+          if (err || !logData || Object.keys(logData).length === 0) {
+            return null
+          }
           return {
             ...logData,
             logId: paginatedLogs[index],
@@ -2434,7 +2959,9 @@ class RedisAdapter extends DatabaseAdapter {
       }
 
       results.forEach(([err, logData]) => {
-        if (err || !logData) return
+        if (err || !logData) {
+          return
+        }
 
         stats.totalRequests++
         stats.totalTokens += parseInt(logData.tokens) || 0
@@ -2627,7 +3154,9 @@ class RedisAdapter extends DatabaseAdapter {
    * @returns {Promise<Array>} 过滤后的日志键数组
    */
   async _filterLogsByQuery(client, logKeys, query) {
-    if (logKeys.length === 0) return []
+    if (logKeys.length === 0) {
+      return []
+    }
 
     // 批量获取日志数据以支持复杂过滤
     const pipeline = client.pipeline()
@@ -2653,7 +3182,9 @@ class RedisAdapter extends DatabaseAdapter {
     }
 
     results.forEach(([err, logData], index) => {
-      if (err || !logData) return
+      if (err || !logData) {
+        return
+      }
 
       const logKey = logKeys[index]
       let matches = true
@@ -3005,7 +3536,9 @@ class RedisAdapter extends DatabaseAdapter {
    * @returns {Promise<void>}
    */
   async _cleanupLogIndexes(client, deletedLogKeys) {
-    if (deletedLogKeys.length === 0) return
+    if (deletedLogKeys.length === 0) {
+      return
+    }
 
     try {
       // 获取所有索引键
@@ -3048,9 +3581,9 @@ class RedisAdapter extends DatabaseAdapter {
    * @param {Object} config 配置对象
    * @returns {Promise<void>}
    */
-  async setRequestLogsConfig(config) {
+  async setRequestLogsConfig(requestLogsConfig) {
     try {
-      await this.set('request_logs_config', JSON.stringify(config))
+      await this.set('request_logs_config', JSON.stringify(requestLogsConfig))
       logger.info('请求日志配置已更新')
     } catch (error) {
       logger.error('Failed to set request logs config:', error)
