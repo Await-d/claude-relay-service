@@ -1726,6 +1726,7 @@ const savingScheduling = ref(false)
 
 // 监听activeSection变化，加载对应配置
 const sectionWatcher = watch(activeSection, async (newSection) => {
+  console.log('[DEBUG] activeSection 变化为:', newSection, 'isMounted:', isMounted.value)
   if (!isMounted.value) return
   if (newSection === 'webhook') {
     await loadWebhookConfig()
@@ -1734,7 +1735,9 @@ const sectionWatcher = watch(activeSection, async (newSection) => {
   } else if (newSection === 'data-management') {
     await loadDataOverview()
   } else if (newSection === 'request-logging') {
+    console.log('[DEBUG] 切换到请求日志配置，开始加载')
     await loadRequestLoggingConfig()
+    console.log('[DEBUG] 请求日志配置加载完成')
   }
 })
 
@@ -2647,15 +2650,20 @@ const formatDate = (dateString) => {
 
 // 加载请求日志配置
 const loadRequestLoggingConfig = async () => {
+  console.log('[DEBUG] loadRequestLoggingConfig 开始执行, isMounted:', isMounted.value)
   if (!isMounted.value) return
   try {
+    console.log('[DEBUG] 调用 requestLogsStore.loadConfig()')
     await requestLogsStore.loadConfig()
+    console.log('[DEBUG] requestLogsStore.loadConfig() 完成, requestLoggingConfig:', requestLoggingConfig.value)
     // 加载统计信息
+    console.log('[DEBUG] 开始加载统计信息')
     await loadRequestLoggingStats()
+    console.log('[DEBUG] loadRequestLoggingStats() 完成')
   } catch (error) {
     if (error.name === 'AbortError') return
     if (!isMounted.value) return
-    console.error('加载请求日志配置失败:', error)
+    console.error('[DEBUG] 加载请求日志配置失败:', error)
   }
 }
 
@@ -2678,18 +2686,54 @@ const saveRequestLoggingConfig = async () => {
 
 // 加载请求日志统计信息
 const loadRequestLoggingStats = async () => {
+  console.log('[DEBUG] loadRequestLoggingStats 开始执行, isMounted:', isMounted.value)
   if (!isMounted.value) return
   try {
+    console.log('[DEBUG] 发送请求到 /admin/request-logs/stats')
     const response = await apiClient.get('/admin/request-logs/stats', {
       signal: abortController.value.signal
     })
-    if (response.success && isMounted.value) {
-      Object.assign(requestLoggingStats.value, response.data)
+    console.log('[DEBUG] 收到响应:', response)
+    if (response.success && isMounted.value && response.data) {
+      console.log('[DEBUG] 更新 requestLoggingStats, response.data:', response.data)
+      // 将后端统计数据映射到前端期望的格式
+      const backendData = response.data
+      console.log('[DEBUG] 分析后端统计数据结构:', backendData)
+      const mappedStats = {
+        // 使用后端实际返回的统计数据
+        todayLogs: backendData.todayLogs || 0,
+        totalLogs: backendData.totalRequests || backendData.totalLogs || 0,
+        storageUsed: backendData.storageUsed || 0,
+        // 计算错误日志数量
+        errorLogs: (() => {
+          if (backendData.errorLogs) return backendData.errorLogs
+          if (backendData.statusCodes) {
+            // 计算4xx和5xx状态码的总数
+            return Object.entries(backendData.statusCodes)
+              .filter(([code]) => {
+                const statusCode = parseInt(code)
+                return statusCode >= 400 && statusCode < 600
+              })
+              .reduce((sum, [, count]) => sum + count, 0)
+          }
+          return 0
+        })()
+      }
+      console.log('[DEBUG] 映射计算过程:', {
+        totalRequests: backendData.totalRequests,
+        statusCodes: backendData.statusCodes,
+        计算的errorLogs: mappedStats.errorLogs,
+        最终映射结果: mappedStats
+      })
+      Object.assign(requestLoggingStats.value, mappedStats)
+      console.log('[DEBUG] requestLoggingStats 映射后:', requestLoggingStats.value)
+    } else {
+      console.log('[DEBUG] 统计信息响应格式异常:', response)
     }
   } catch (error) {
     if (error.name === 'AbortError') return
     if (!isMounted.value) return
-    console.error('加载请求日志统计失败:', error)
+    console.error('[DEBUG] 加载请求日志统计失败:', error)
   }
 }
 
