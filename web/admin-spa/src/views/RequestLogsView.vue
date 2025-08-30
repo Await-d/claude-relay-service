@@ -1048,19 +1048,8 @@ const getApiKeyName = (keyId) => {
     return 'Unknown'
   }
 
-  // 调试日志
-  console.log('[getApiKeyName] 查找API Key:', {
-    keyId,
-    apiKeyLoading: apiKeyLoading.value,
-    apiKeyError: apiKeyError.value,
-    apiKeyMapSize: apiKeyMap.value?.size || 0,
-    hasApiKeyMap: !!apiKeyMap.value,
-    apiKeyListLength: apiKeyList?.length || 0
-  })
-
   // 如果API Key数据加载失败，显示无法验证状态
   if (apiKeyError.value) {
-    console.log('[getApiKeyName] API Key加载失败:', apiKeyError.value)
     return `${keyId} (无法验证)`
   }
 
@@ -1070,28 +1059,13 @@ const getApiKeyName = (keyId) => {
   }
 
   // 从apiKeyMap中查找名称
-  console.log('[getApiKeyName] apiKeyMap详情:', {
-    hasMap: !!apiKeyMap,
-    mapType: typeof apiKeyMap,
-    mapValue: apiKeyMap.value,
-    mapSize: apiKeyMap.value?.size,
-    isMap: apiKeyMap.value instanceof Map,
-    keys: apiKeyMap.value ? Array.from(apiKeyMap.value.keys()) : []
-  })
-  
   const apiKey = apiKeyMap.value?.get(keyId)
-  console.log('[getApiKeyName] 映射查找结果:', {
-    keyId,
-    found: !!apiKey,
-    apiKey: apiKey
-  })
-  
+
   if (apiKey?.name) {
     return apiKey.name
   }
 
   // 找不到时返回keyId + "已删除"标识
-  console.log('[getApiKeyName] API Key未找到，标记为已删除:', keyId)
   return `${keyId} (已删除)`
 }
 
@@ -1197,10 +1171,10 @@ const debouncedCustomTimeUpdate = createDebounce(async () => {
 // 新增方法
 const getResultsText = () => {
   const total = pagination?.total || 0
-  const current = displayedLogs?.length || 0
+  const current = displayedLogs.value?.length || 0
 
   if (filters?.search) {
-    return `找到 ${searchResults ? searchResults.length : 0} 条匹配结果，共 ${total} 条记录`
+    return `找到 ${searchResults.value ? searchResults.value.length : 0} 条匹配结果，共 ${total} 条记录`
   }
   return `显示 ${current} 条记录，共 ${total} 条`
 }

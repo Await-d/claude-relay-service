@@ -90,8 +90,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
   // API Key 映射计算属性
   const apiKeyMap = computed(() => {
     const map = new Map()
-    console.log('[apiKeyMap] 重新计算映射，apiKeyList.value:', apiKeyList.value)
-    
+
     if (Array.isArray(apiKeyList.value)) {
       apiKeyList.value.forEach((apiKey) => {
         if (apiKey && apiKey.id) {
@@ -101,12 +100,10 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
             status: apiKey.status || 'unknown'
           }
           map.set(apiKey.id, mappedKey)
-          console.log('[apiKeyMap] 添加映射:', apiKey.id, '->', mappedKey)
         }
       })
     }
-    
-    console.log('[apiKeyMap] 最终映射大小:', map.size)
+
     return map
   })
 
@@ -122,7 +119,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
     const lastLoadTime = apiKeyLoadTime.value
     const CACHE_DURATION = 5 * 60 * 1000 // 5分钟
 
-    return !lastLoadTime || (now - lastLoadTime) > CACHE_DURATION
+    return !lastLoadTime || now - lastLoadTime > CACHE_DURATION
   }
 
   // 带重试机制的API Key获取函数
@@ -132,7 +129,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
 
     try {
       console.log(`[fetchApiKeys] 尝试获取 API Keys，重试次数: ${retryCount}`)
-      
+
       const result = await apiClient.get('/admin/api-keys')
 
       // 验证响应结构
@@ -149,7 +146,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       }
 
       let processedData = []
-      
+
       // 处理不同的数据格式
       if (Array.isArray(result.data)) {
         processedData = result.data
@@ -170,7 +167,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       }
 
       // 验证数据格式
-      processedData = processedData.filter(item => {
+      processedData = processedData.filter((item) => {
         if (!item || typeof item !== 'object') {
           console.warn('[fetchApiKeys] 跳过无效的 API Key 项:', item)
           return false
@@ -179,7 +176,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       })
 
       // 为每个 API Key 添加必要的默认值
-      processedData = processedData.map(apiKey => ({
+      processedData = processedData.map((apiKey) => ({
         id: apiKey.id || apiKey.keyId || apiKey._id || null,
         name: apiKey.name || apiKey.keyName || `API Key ${apiKey.id || 'Unknown'}`,
         status: apiKey.status || 'active',
@@ -193,9 +190,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       apiKeyRetryCount.value = 0
 
       console.log(`[fetchApiKeys] 成功获取 ${processedData.length} 个 API Keys`)
-      console.log('[fetchApiKeys] API Key 详细数据:', processedData)
       return { success: true, data: processedData }
-
     } catch (error) {
       console.error(`[fetchApiKeys] 获取失败 (重试 ${retryCount}/${MAX_RETRIES}):`, {
         message: error.message,
@@ -209,9 +204,9 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       if (retryCount < MAX_RETRIES) {
         const delay = RETRY_DELAYS[retryCount] || 4000
         console.log(`[fetchApiKeys] ${delay}ms 后进行第 ${retryCount + 1} 次重试...`)
-        
+
         // 延迟后重试
-        await new Promise(resolve => setTimeout(resolve, delay))
+        await new Promise((resolve) => setTimeout(resolve, delay))
         return fetchApiKeysWithRetry(retryCount + 1)
       }
 
@@ -223,7 +218,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
         timestamp: Date.now(),
         retryCount
       }
-      
+
       apiKeyRetryCount.value = retryCount
 
       // 提供友好的错误提示
@@ -258,16 +253,16 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       console.log('[fetchApiKeys] 正在加载中，等待完成...')
       // 等待当前加载完成
       while (apiKeyLoading.value) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
       return { success: true, data: apiKeyList.value, waited: true }
     }
 
     apiKeyLoading.value = true
-    
+
     try {
       const result = await fetchApiKeysWithRetry(0)
-      
+
       // 确保数据正确设置到响应式状态中
       if (result.success && result.data) {
         console.log('[fetchApiKeys] 设置API Key数据到响应式状态:', result.data.length)
@@ -277,7 +272,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
           apiKeyList.value = result.data
         }
       }
-      
+
       return result
     } finally {
       apiKeyLoading.value = false
