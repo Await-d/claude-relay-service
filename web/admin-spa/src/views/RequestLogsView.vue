@@ -73,7 +73,7 @@
           <div>
             <p class="text-sm font-medium text-gray-600 dark:text-gray-400">总请求数</p>
             <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">
-              {{ stats.totalRequests || 0 }}
+              {{ stats?.totalRequests || pagination?.total || 0 }}
             </p>
           </div>
           <i class="fas fa-chart-line text-2xl text-blue-500"></i>
@@ -84,7 +84,7 @@
           <div>
             <p class="text-sm font-medium text-gray-600 dark:text-gray-400">错误率</p>
             <p class="text-2xl font-bold text-red-600 dark:text-red-400">
-              {{ formatPercentage(stats.errorRate || 0) }}
+              {{ formatPercentage(stats?.errorRate || 0) }}
             </p>
           </div>
           <i class="fas fa-exclamation-triangle text-2xl text-red-500"></i>
@@ -95,7 +95,7 @@
           <div>
             <p class="text-sm font-medium text-gray-600 dark:text-gray-400">平均响应时间</p>
             <p class="text-2xl font-bold text-green-600 dark:text-green-400">
-              {{ formatDuration(stats.averageResponseTime || 0) }}
+              {{ formatDuration(stats?.averageResponseTime || 0) }}
             </p>
           </div>
           <i class="fas fa-clock text-2xl text-green-500"></i>
@@ -106,7 +106,7 @@
           <div>
             <p class="text-sm font-medium text-gray-600 dark:text-gray-400">活跃 API Keys</p>
             <p class="text-2xl font-bold text-purple-600 dark:text-purple-400">
-              {{ stats.topApiKeys?.length || 0 }}
+              {{ stats?.topApiKeys?.length || 0 }}
             </p>
           </div>
           <i class="fas fa-key text-2xl text-purple-500"></i>
@@ -191,12 +191,34 @@
           <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
             API Key
           </label>
-          <select v-model="filters.apiKeyId" class="form-select w-full" @change="applyFilters">
-            <option value="">全部</option>
-            <option v-for="apiKey in stats.topApiKeys" :key="apiKey.id" :value="apiKey.id">
-              {{ apiKey.name }}
-            </option>
-          </select>
+          <div class="relative">
+            <select
+              v-model="filters.apiKeyId"
+              class="form-select w-full"
+              :disabled="apiKeyLoading"
+              @change="applyFilters"
+            >
+              <option value="">全部</option>
+              <option v-for="apiKey in formattedTopApiKeys" :key="apiKey.id" :value="apiKey.id">
+                {{ apiKey.displayText }}
+              </option>
+            </select>
+            <!-- API Key加载状态提示 -->
+            <div v-if="apiKeyLoading" class="absolute right-3 top-1/2 -translate-y-1/2">
+              <div class="loading-spinner h-4 w-4"></div>
+            </div>
+          </div>
+          <!-- API Key加载错误提示 -->
+          <div v-if="apiKeyError" class="mt-1 text-xs text-red-600 dark:text-red-400">
+            <i class="fas fa-exclamation-triangle mr-1"></i>
+            {{ apiKeyError }}
+            <button
+              class="ml-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              @click="retryApiKeys"
+            >
+              重试
+            </button>
+          </div>
         </div>
 
         <!-- 状态码筛选 -->
@@ -482,58 +504,61 @@
           <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
             <tr
               v-for="log in displayedLogs"
-              :key="log.id"
+              :key="log.logId || log.timestamp"
               class="transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
               :class="{ 'animate-pulse bg-green-50 dark:bg-green-900/20': log._isNew }"
             >
               <td class="table-cell">
                 <div class="text-sm text-gray-900 dark:text-gray-100">
-                  {{ formatLogEntry(log).timestamp }}
+                  {{ new Date(log.timestamp).toLocaleString('zh-CN') }}
                 </div>
               </td>
               <td class="table-cell">
                 <div class="flex items-center space-x-2">
-                  <div
-                    :aria-label="log.apiKey?.active ? 'API Key 活跃' : 'API Key 未活跃'"
-                    class="h-2 w-2 rounded-full"
-                    :class="log.apiKey?.active ? 'bg-green-500' : 'bg-gray-400'"
-                  ></div>
-                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {{ log.apiKey?.name || 'Unknown' }}
+                  <div aria-label="API Key 活跃" class="h-2 w-2 rounded-full bg-green-500"></div>
+                  <span
+                    class="text-sm font-medium"
+                    :class="
+                      log.formattedKeyName && log.formattedKeyName.includes('(已删除)')
+                        ? 'text-gray-500 dark:text-gray-400'
+                        : 'text-gray-900 dark:text-gray-100'
+                    "
+                  >
+                    {{ log.formattedKeyName }}
                   </span>
                 </div>
               </td>
               <td class="table-cell">
                 <span
                   class="inline-flex rounded-full px-2 py-1 text-xs font-semibold"
-                  :class="getMethodClass(log.request?.method)"
+                  :class="getMethodClass(log.method)"
                 >
-                  {{ log.request?.method || 'N/A' }}
+                  {{ log.method || 'N/A' }}
                 </span>
               </td>
               <td class="table-cell">
                 <span
                   class="max-w-32 truncate text-sm text-gray-900 dark:text-gray-100"
-                  :title="log.request?.path"
+                  :title="log.path"
                 >
-                  {{ log.request?.path || '/' }}
+                  {{ log.path || '/' }}
                 </span>
               </td>
               <td class="table-cell">
                 <span
                   class="inline-flex rounded-full px-2 py-1 text-xs font-semibold"
-                  :class="getStatusClass(log.response?.statusCode)"
+                  :class="getStatusClass(log.statusCode)"
                 >
-                  {{ log.response?.statusCode || 'N/A' }}
+                  {{ log.statusCode || 'N/A' }}
                 </span>
               </td>
               <td class="table-cell">
                 <div class="flex items-center space-x-1">
                   <span class="text-sm text-gray-900 dark:text-gray-100">
-                    {{ formatLogEntry(log).duration }}
+                    {{ log.responseTime ? `${log.responseTime}ms` : 'N/A' }}
                   </span>
                   <i
-                    v-if="log.response?.duration > 5000"
+                    v-if="parseInt(log.responseTime) > 5000"
                     class="fas fa-exclamation-triangle text-xs text-yellow-500"
                     title="响应时间较慢"
                   ></i>
@@ -541,12 +566,12 @@
               </td>
               <td class="table-cell">
                 <span class="text-sm text-gray-600 dark:text-gray-400">
-                  {{ log.request?.ip || 'N/A' }}
+                  {{ log.ipAddress || 'N/A' }}
                 </span>
               </td>
               <td class="table-cell">
                 <button
-                  :aria-label="`查看日志详情: ${log.apiKey?.name || 'Unknown'} ${log.request?.method} ${log.request?.path}`"
+                  :aria-label="`查看日志详情: ${log.formattedKeyName || 'Unknown'} ${log.method} ${log.path}`"
                   class="rounded p-1 text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/20 dark:hover:text-blue-300"
                   @click="showLogDetails(log)"
                 >
@@ -562,7 +587,7 @@
       <div v-else class="divide-y divide-gray-200 dark:divide-gray-700 md:hidden">
         <div
           v-for="log in displayedLogs"
-          :key="log.id"
+          :key="log.logId || log.timestamp"
           class="p-4 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
           :class="{ 'animate-pulse bg-green-50 dark:bg-green-900/20': log._isNew }"
         >
@@ -572,15 +597,19 @@
               <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-3">
                   <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {{ formatLogEntry(log).timestamp.split(' ')[1] }}
+                    {{ new Date(log.timestamp).toLocaleString('zh-CN').split(' ')[1] }}
                   </span>
                   <div class="flex items-center space-x-1">
-                    <div
-                      class="h-2 w-2 rounded-full"
-                      :class="log.apiKey?.active ? 'bg-green-500' : 'bg-gray-400'"
-                    ></div>
-                    <span class="text-sm text-gray-600 dark:text-gray-400">
-                      {{ log.apiKey?.name || 'Unknown' }}
+                    <div class="h-2 w-2 rounded-full bg-green-500"></div>
+                    <span
+                      class="text-sm"
+                      :class="
+                        log.formattedKeyName && log.formattedKeyName.includes('(已删除)')
+                          ? 'text-gray-500 dark:text-gray-400'
+                          : 'text-gray-600 dark:text-gray-400'
+                      "
+                    >
+                      {{ log.formattedKeyName }}
                     </span>
                   </div>
                 </div>
@@ -596,12 +625,12 @@
               <div class="flex items-center space-x-2">
                 <span
                   class="inline-flex rounded-full px-2 py-1 text-xs font-semibold"
-                  :class="getMethodClass(log.request?.method)"
+                  :class="getMethodClass(log.method)"
                 >
-                  {{ log.request?.method || 'N/A' }}
+                  {{ log.method || 'N/A' }}
                 </span>
                 <span class="truncate text-sm text-gray-900 dark:text-gray-100">
-                  {{ log.request?.path || '/' }}
+                  {{ log.path || '/' }}
                 </span>
               </div>
               <!-- 第三行：状态码、响应时间、IP -->
@@ -609,16 +638,16 @@
                 <div class="flex items-center space-x-3">
                   <span
                     class="inline-flex rounded-full px-2 py-1 text-xs font-semibold"
-                    :class="getStatusClass(log.response?.statusCode)"
+                    :class="getStatusClass(log.statusCode)"
                   >
-                    {{ log.response?.statusCode || 'N/A' }}
+                    {{ log.statusCode || 'N/A' }}
                   </span>
                   <span class="text-gray-600 dark:text-gray-400">
-                    ⏱️ {{ formatLogEntry(log).duration }}
+                    ⏱️ {{ log.responseTime ? `${log.responseTime}ms` : 'N/A' }}
                   </span>
                 </div>
                 <span class="text-gray-500 dark:text-gray-500">
-                  🌐 {{ log.request?.ip || 'N/A' }}
+                  🌐 {{ log.ipAddress || 'N/A' }}
                 </span>
               </div>
             </div>
@@ -628,24 +657,24 @@
 
       <!-- 分页 -->
       <div
-        v-if="pagination.totalPages > 1"
+        v-if="(pagination?.totalPages || 0) > 1"
         class="flex items-center justify-between border-t border-gray-200 px-4 py-3 dark:border-gray-700"
       >
         <div class="flex items-center space-x-2">
           <button
             class="btn btn-secondary btn-sm"
-            :disabled="pagination.page <= 1"
-            @click="changePage(pagination.page - 1)"
+            :disabled="(pagination?.page || 1) <= 1"
+            @click="changePage((pagination?.page || 1) - 1)"
           >
             <i class="fas fa-chevron-left"></i>
           </button>
           <span class="text-sm text-gray-600 dark:text-gray-400">
-            第 {{ pagination.page }} 页，共 {{ pagination.totalPages }} 页
+            第 {{ pagination?.page || 1 }} 页，共 {{ pagination?.totalPages || 1 }} 页
           </span>
           <button
             class="btn btn-secondary btn-sm"
-            :disabled="pagination.page >= pagination.totalPages"
-            @click="changePage(pagination.page + 1)"
+            :disabled="(pagination?.page || 1) >= (pagination?.totalPages || 1)"
+            @click="changePage((pagination?.page || 1) + 1)"
           >
             <i class="fas fa-chevron-right"></i>
           </button>
@@ -694,8 +723,29 @@
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
                     >API Key</label
                   >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.apiKey?.name || 'Unknown' }}
+                  <p
+                    class="mt-1 text-sm"
+                    :class="
+                      (selectedLog.formattedKeyName ||
+                        getApiKeyName(selectedLog.keyId) ||
+                        selectedLog.apiKey?.name ||
+                        'Unknown') &&
+                      (
+                        selectedLog.formattedKeyName ||
+                        getApiKeyName(selectedLog.keyId) ||
+                        selectedLog.apiKey?.name ||
+                        'Unknown'
+                      ).includes('(已删除)')
+                        ? 'text-gray-500 dark:text-gray-400'
+                        : 'text-gray-900 dark:text-gray-100'
+                    "
+                  >
+                    {{
+                      selectedLog.formattedKeyName ||
+                      getApiKeyName(selectedLog.keyId) ||
+                      selectedLog.apiKey?.name ||
+                      'Unknown'
+                    }}
                   </p>
                 </div>
                 <div>
@@ -929,6 +979,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRequestLogsStore } from '@/stores/requestLogs'
 import { showToast } from '@/utils/toast'
 
@@ -944,23 +995,20 @@ const createDebounce = (func, delay) => {
 // Store
 const requestLogsStore = useRequestLogsStore()
 
-// State
-const showExportMenu = ref(false)
-const selectedLog = ref(null)
-const timeRange = ref('24h')
-const timeRangeError = ref('')
-const error = ref(null)
-const connectionError = ref(false)
-const searching = ref(false)
-const showMobileFilters = ref(false)
-const viewMode = ref('table')
-const autoRefreshEnabled = ref(false)
-const showErrorDetails = ref(false)
-const retryCount = ref(0)
-
-// Computed
-const { logs, loading, exporting, stats, filters, pagination, filteredLogs, hasFilters } =
-  requestLogsStore
+// State - 使用storeToRefs保持响应式
+const {
+  logs,
+  loading,
+  exporting,
+  stats,
+  filters,
+  pagination,
+  filteredLogs,
+  hasFilters,
+  apiKeyList,
+  apiKeyLoading,
+  apiKeyMap
+} = storeToRefs(requestLogsStore)
 
 // Methods
 const {
@@ -973,10 +1021,92 @@ const {
   formatLogEntry,
   getStatusClass,
   getMethodClass,
-  formatDuration
+  formatDuration,
+  fetchApiKeys
 } = requestLogsStore
 
+// Local State
+const showExportMenu = ref(false)
+const selectedLog = ref(null)
+const timeRange = ref('24h')
+const timeRangeError = ref('')
+const error = ref(null)
+const connectionError = ref(false)
+const apiKeyError = ref(null)
+const searching = ref(false)
+const showMobileFilters = ref(false)
+const viewMode = ref('table')
+const autoRefreshEnabled = ref(false)
+const showErrorDetails = ref(false)
+const retryCount = ref(0)
+
 // Computed properties
+// 根据keyId获取API Key名称的函数
+const getApiKeyName = (keyId) => {
+  // 空值检查
+  if (!keyId || keyId === null || keyId === undefined) {
+    return 'Unknown'
+  }
+
+  // 调试日志
+  console.log('[getApiKeyName] 查找API Key:', {
+    keyId,
+    apiKeyLoading: apiKeyLoading.value,
+    apiKeyError: apiKeyError.value,
+    apiKeyMapSize: apiKeyMap.value?.size || 0,
+    hasApiKeyMap: !!apiKeyMap.value,
+    apiKeyListLength: apiKeyList?.length || 0
+  })
+
+  // 如果API Key数据加载失败，显示无法验证状态
+  if (apiKeyError.value) {
+    console.log('[getApiKeyName] API Key加载失败:', apiKeyError.value)
+    return `${keyId} (无法验证)`
+  }
+
+  // 如果正在加载中，显示加载状态
+  if (apiKeyLoading.value) {
+    return `${keyId} (加载中...)`
+  }
+
+  // 从apiKeyMap中查找名称
+  console.log('[getApiKeyName] apiKeyMap详情:', {
+    hasMap: !!apiKeyMap,
+    mapType: typeof apiKeyMap,
+    mapValue: apiKeyMap.value,
+    mapSize: apiKeyMap.value?.size,
+    isMap: apiKeyMap.value instanceof Map,
+    keys: apiKeyMap.value ? Array.from(apiKeyMap.value.keys()) : []
+  })
+  
+  const apiKey = apiKeyMap.value?.get(keyId)
+  console.log('[getApiKeyName] 映射查找结果:', {
+    keyId,
+    found: !!apiKey,
+    apiKey: apiKey
+  })
+  
+  if (apiKey?.name) {
+    return apiKey.name
+  }
+
+  // 找不到时返回keyId + "已删除"标识
+  console.log('[getApiKeyName] API Key未找到，标记为已删除:', keyId)
+  return `${keyId} (已删除)`
+}
+
+// 格式化的Top API Keys列表
+const formattedTopApiKeys = computed(() => {
+  const topKeys = stats.value?.topApiKeys || []
+
+  return topKeys.map((item) => ({
+    id: item.keyId,
+    name: getApiKeyName(item.keyId),
+    count: item.count,
+    displayText: `${getApiKeyName(item.keyId)} (${item.count}次使用)`
+  }))
+})
+
 const searchResults = computed(() => {
   // 确保 logs.value 是一个数组
   const logsList = Array.isArray(logs.value) ? logs.value : []
@@ -988,19 +1118,30 @@ const searchResults = computed(() => {
 
   return logsList.filter(
     (log) =>
-      log?.apiKey?.name?.toLowerCase().includes(searchTerm) ||
-      log?.request?.userAgent?.toLowerCase().includes(searchTerm) ||
-      log?.request?.ip?.includes(searchTerm) ||
-      log?.request?.path?.toLowerCase().includes(searchTerm)
+      log?.keyName?.toLowerCase().includes(searchTerm) ||
+      log?.userAgent?.toLowerCase().includes(searchTerm) ||
+      log?.ipAddress?.includes(searchTerm) ||
+      log?.path?.toLowerCase().includes(searchTerm)
   )
 })
 
+// 增强的displayedLogs计算属性，添加格式化的keyName
 const displayedLogs = computed(() => {
+  let logsToDisplay = []
+
   if (filters.search) {
-    return searchResults.value
+    logsToDisplay = searchResults.value
+  } else {
+    // 确保 filteredLogs.value 是一个数组
+    logsToDisplay = Array.isArray(filteredLogs.value) ? filteredLogs.value : []
   }
-  // 确保 filteredLogs.value 是一个数组
-  return Array.isArray(filteredLogs.value) ? filteredLogs.value : []
+
+  // 为每个log添加格式化的keyName属性
+  return logsToDisplay.map((log) => ({
+    ...log,
+    // 优先使用原始keyName，没有则通过keyId查找
+    formattedKeyName: log.keyName || getApiKeyName(log.keyId)
+  }))
 })
 
 // 防抖搜索
@@ -1055,11 +1196,11 @@ const debouncedCustomTimeUpdate = createDebounce(async () => {
 
 // 新增方法
 const getResultsText = () => {
-  const total = pagination.total
-  const current = displayedLogs.value.length
+  const total = pagination?.total || 0
+  const current = displayedLogs?.length || 0
 
-  if (filters.search) {
-    return `找到 ${searchResults.value ? searchResults.value.length : 0} 条匹配结果，共 ${total} 条记录`
+  if (filters?.search) {
+    return `找到 ${searchResults ? searchResults.length : 0} 条匹配结果，共 ${total} 条记录`
   }
   return `显示 ${current} 条记录，共 ${total} 条`
 }
@@ -1248,8 +1389,8 @@ const applyTimeRange = () => {
 
 // 排序
 const sort = (field) => {
-  const currentSort = filters.sortBy
-  const currentOrder = filters.sortOrder
+  const currentSort = filters?.sortBy
+  const currentOrder = filters?.sortOrder
 
   if (currentSort === field) {
     updateFilters({
@@ -1266,13 +1407,14 @@ const sort = (field) => {
 
 // 获取排序图标
 const getSortIcon = (field) => {
-  if (filters.sortBy !== field) return 'fa-sort'
-  return filters.sortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down'
+  if (filters?.sortBy !== field) return 'fa-sort'
+  return filters?.sortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down'
 }
 
 // 切换页面
 const changePage = (page) => {
-  if (page >= 1 && page <= pagination.totalPages) {
+  const totalPages = pagination?.totalPages || 1
+  if (page >= 1 && page <= totalPages) {
     updateFilters({ page })
     applyFilters()
   }
@@ -1289,11 +1431,36 @@ const exportData = async (format) => {
   await exportLogs(format)
 }
 
+// 重试API Key加载
+const retryApiKeys = async () => {
+  try {
+    apiKeyError.value = null
+    await fetchApiKeys(true) // 强制刷新
+    showToast('API Key数据重新加载成功', 'success')
+  } catch (err) {
+    console.error('API Key重试失败:', err)
+    apiKeyError.value = '重试失败，请稍后再试'
+    showToast('API Key重新加载失败', 'error')
+  }
+}
+
 // 刷新数据
 const refreshData = async () => {
   try {
     error.value = null
     connectionError.value = false
+    apiKeyError.value = null
+
+    // 先刷新 API Key 列表
+    try {
+      await fetchApiKeys(true)
+    } catch (apiKeyErr) {
+      console.warn('API Key加载失败，使用现有数据:', apiKeyErr)
+      apiKeyError.value = 'API Key数据加载失败'
+      // 不阻断主要的日志刷新流程
+    }
+
+    // 然后刷新日志数据
     await refreshLogs()
   } catch (err) {
     console.error('Refresh failed:', err)
@@ -1309,6 +1476,15 @@ let refreshInterval = null
 // 页面挂载时加载数据
 onMounted(async () => {
   try {
+    // 先加载 API Key 列表（非阻塞）
+    try {
+      await fetchApiKeys()
+    } catch (apiKeyErr) {
+      console.warn('API Key初始加载失败:', apiKeyErr)
+      apiKeyError.value = 'API Key数据加载失败，可能影响显示效果'
+      // 不阻断主要的初始化流程
+    }
+
     // 应用默认时间范围
     applyTimeRange()
 
