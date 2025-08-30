@@ -189,8 +189,6 @@ const handleKeyDown = (event) => {
 
 // 初始化
 onMounted(() => {
-  console.log('API Stats Page loaded')
-
   // 初始化主题（因为该页面不在 MainLayout 内）
   themeStore.initTheme()
 

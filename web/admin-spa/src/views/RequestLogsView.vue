@@ -1005,7 +1005,6 @@ const {
   pagination,
   filteredLogs,
   hasFilters,
-  apiKeyList,
   apiKeyLoading,
   apiKeyMap
 } = storeToRefs(requestLogsStore)
