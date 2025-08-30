@@ -28,29 +28,18 @@ const DEFAULT_LOG_CONFIG = {
  */
 router.get('/config', authenticateAdmin, async (req, res) => {
   try {
-    console.log('[DEBUG] 请求日志配置 API 被调用')
-
-    // 1. 从传统配置系统获取基础配置
-    console.log('[DEBUG] 从数据库获取传统配置')
     const legacyConfig = (await database.getRequestLogsConfig()) || DEFAULT_LOG_CONFIG
-    console.log('[DEBUG] 传统配置:', legacyConfig)
-
     // 2. 从动态配置系统获取最新状态
     let dynamicEnabled = legacyConfig.enabled
-    console.log('[DEBUG] 初始 dynamicEnabled 值:', dynamicEnabled)
     try {
       const { dynamicConfigManager } = require('../services/dynamicConfigService')
-
       // 优先使用动态配置系统的enabled状态
       const currentEnabled = await dynamicConfigManager.getConfig('requestLogging.enabled')
-      console.log('[DEBUG] 动态配置中的 enabled 值:', currentEnabled)
       if (currentEnabled !== undefined) {
         dynamicEnabled = currentEnabled
-        console.log('[DEBUG] 使用动态配置的 enabled 值:', dynamicEnabled)
       }
     } catch (dynamicError) {
       winston.warn('⚠️ Failed to get dynamic config, using legacy config:', dynamicError.message)
-      console.log('[DEBUG] 动态配置获取失败:', dynamicError.message)
     }
 
     // 3. 构建响应配置，优先使用动态配置的enabled状态
@@ -108,8 +97,6 @@ router.get('/config', authenticateAdmin, async (req, res) => {
       serviceStatus,
       timestamp: new Date().toISOString()
     }
-
-    console.log('[DEBUG] 最终响应配置:', response)
     res.json({
       success: true,
       data: response
@@ -455,12 +442,8 @@ router.get('/status', authenticateAdmin, async (req, res) => {
 // 日志统计信息 - 必须放在 /:keyId 路由之前，避免路由冲突
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
-    console.log('[DEBUG] 请求日志统计信息 API 被调用')
     const { startDate, endDate, search } = req.query
-    console.log('[DEBUG] 查询参数:', { startDate, endDate, search })
-
     const query = {}
-
     if (search) {
       query.search = search
     }
@@ -473,17 +456,12 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
         query.dateRange.end = endDate
       }
     }
-
-    console.log('[DEBUG] 构建的查询对象:', query)
     const stats = await database.aggregateLogs(query)
-    console.log('[DEBUG] 获取到的统计数据:', stats)
-
     res.json({
       success: true,
       data: stats
     })
   } catch (error) {
-    console.log('[DEBUG] 获取日志统计错误:', error)
     winston.error('获取日志统计错误', { error })
     res.status(500).json({
       success: false,

@@ -359,10 +359,6 @@ async function handleMessagesRequest(req, res) {
 
       // 根据账号类型选择对应的转发服务
       let response
-      logger.debug(`[DEBUG] Request query params: ${JSON.stringify(req.query)}`)
-      logger.debug(`[DEBUG] Request URL: ${req.url}`)
-      logger.debug(`[DEBUG] Request path: ${req.path}`)
-
       if (accountType === 'claude-official') {
         // 官方Claude账号使用原有的转发服务
         response = await claudeRelayService.relayRequest(
@@ -373,10 +369,6 @@ async function handleMessagesRequest(req, res) {
           req.headers
         )
       } else if (accountType === 'claude-console') {
-        // Claude Console账号使用Console转发服务
-        logger.debug(
-          `[DEBUG] Calling claudeConsoleRelayService.relayRequest with accountId: ${accountId}`
-        )
         response = await claudeConsoleRelayService.relayRequest(
           req.body,
           req.apiKey,

@@ -94,15 +94,8 @@ class ClaudeConsoleRelayService {
         // 默认使用 messages 端点
         apiEndpoint = cleanUrl.endsWith('/v1/messages') ? cleanUrl : `${cleanUrl}/v1/messages`
       }
-
-      logger.debug(`🎯 Final API endpoint: ${apiEndpoint}`)
-      logger.debug(`[DEBUG] Options passed to relayRequest: ${JSON.stringify(options)}`)
-      logger.debug(`[DEBUG] Client headers received: ${JSON.stringify(clientHeaders)}`)
-
       // 过滤客户端请求头
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
-      logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
-
       // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
       const userAgent =
         account.userAgent ||
@@ -131,32 +124,15 @@ class ClaudeConsoleRelayService {
       if (account.apiKey && account.apiKey.startsWith('sk-ant-')) {
         // Anthropic 官方 API Key 使用 x-api-key
         requestConfig.headers['x-api-key'] = account.apiKey
-        logger.debug('[DEBUG] Using x-api-key authentication for sk-ant-* API key')
       } else {
         // 其他 API Key 使用 Authorization Bearer
         requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
-        logger.debug('[DEBUG] Using Authorization Bearer authentication')
       }
-
-      logger.debug(
-        `[DEBUG] Initial headers before beta: ${JSON.stringify(requestConfig.headers, null, 2)}`
-      )
-
       // 添加beta header如果需要
       if (options.betaHeader) {
-        logger.debug(`[DEBUG] Adding beta header: ${options.betaHeader}`)
         requestConfig.headers['anthropic-beta'] = options.betaHeader
-      } else {
-        logger.debug('[DEBUG] No beta header to add')
       }
-
-      // 发送请求
-      logger.debug(
-        '📤 Sending request to Claude Console API with headers:',
-        JSON.stringify(requestConfig.headers, null, 2)
-      )
       const response = await axios(requestConfig)
-
       // 移除监听器（请求成功完成）
       if (clientRequest) {
         clientRequest.removeListener('close', handleClientDisconnect)
@@ -164,17 +140,6 @@ class ClaudeConsoleRelayService {
       if (clientResponse) {
         clientResponse.removeListener('close', handleClientDisconnect)
       }
-
-      logger.debug(`🔗 Claude Console API response: ${response.status}`)
-      logger.debug(`[DEBUG] Response headers: ${JSON.stringify(response.headers)}`)
-      logger.debug(`[DEBUG] Response data type: ${typeof response.data}`)
-      logger.debug(
-        `[DEBUG] Response data length: ${response.data ? (typeof response.data === 'string' ? response.data.length : JSON.stringify(response.data).length) : 0}`
-      )
-      logger.debug(
-        `[DEBUG] Response data preview: ${typeof response.data === 'string' ? response.data.substring(0, 200) : JSON.stringify(response.data).substring(0, 200)}`
-      )
-
       // 检查是否为限流错误
       if (response.status === 429) {
         logger.warn(`🚫 Rate limit detected for Claude Console account ${accountId}`)
@@ -186,14 +151,10 @@ class ClaudeConsoleRelayService {
           await claudeConsoleAccountService.removeAccountRateLimit(accountId)
         }
       }
-
       // 更新最后使用时间
       await this._updateLastUsedTime(accountId)
-
       const responseBody =
         typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
-      logger.debug(`[DEBUG] Final response body to return: ${responseBody}`)
-
       return {
         statusCode: response.status,
         headers: response.headers,
@@ -305,13 +266,9 @@ class ClaudeConsoleRelayService {
       // 构建完整的API URL
       const cleanUrl = account.apiUrl.replace(/\/$/, '') // 移除末尾斜杠
       const apiEndpoint = cleanUrl.endsWith('/v1/messages') ? cleanUrl : `${cleanUrl}/v1/messages`
-
       logger.debug(`🎯 Final API endpoint for stream: ${apiEndpoint}`)
-
       // 过滤客户端请求头
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
-      logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
-
       // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
       const userAgent =
         account.userAgent ||
@@ -340,11 +297,9 @@ class ClaudeConsoleRelayService {
       if (account.apiKey && account.apiKey.startsWith('sk-ant-')) {
         // Anthropic 官方 API Key 使用 x-api-key
         requestConfig.headers['x-api-key'] = account.apiKey
-        logger.debug('[DEBUG] Using x-api-key authentication for sk-ant-* API key')
       } else {
         // 其他 API Key 使用 Authorization Bearer
         requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
-        logger.debug('[DEBUG] Using Authorization Bearer authentication')
       }
 
       // 添加beta header如果需要
