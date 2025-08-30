@@ -2653,13 +2653,8 @@ const loadRequestLoggingConfig = async () => {
   console.log('[DEBUG] loadRequestLoggingConfig 开始执行, isMounted:', isMounted.value)
   if (!isMounted.value) return
   try {
-    console.log('[DEBUG] 调用 requestLogsStore.loadConfig()')
     await requestLogsStore.loadConfig()
-    console.log('[DEBUG] requestLogsStore.loadConfig() 完成, requestLoggingConfig:', requestLoggingConfig.value)
-    // 加载统计信息
-    console.log('[DEBUG] 开始加载统计信息')
     await loadRequestLoggingStats()
-    console.log('[DEBUG] loadRequestLoggingStats() 完成')
   } catch (error) {
     if (error.name === 'AbortError') return
     if (!isMounted.value) return

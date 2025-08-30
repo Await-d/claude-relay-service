@@ -18,7 +18,6 @@
 ## ⭐ If You Find It Useful, Please Give It a Star!
 
 > Open source is not easy, your Star is my motivation to continue updating 🚀  
-> Join [Telegram Channel](https://t.me/claude_relay_service) for the latest updates
 
 ---
 
@@ -30,14 +29,18 @@
 
 📖 **Disclaimer**: This project is for technical learning and research purposes only. The author is not responsible for any account bans, service interruptions, or other losses caused by using this project.
 
----
 
-> 💡 **Thanks to [@vista8](https://x.com/vista8) for the recommendation!**
-> 
-> If you're interested in Vibe coding, follow:
-> 
-> - 🐦 **X**: [@vista8](https://x.com/vista8) - Sharing cutting-edge tech trends
-> - 📱 **WeChat**: 向阳乔木推荐看  
+[//]: # (> 💡 **Thanks to [@vista8]&#40;https://x.com/vista8&#41; for the recommendation!**)
+
+[//]: # (> )
+
+[//]: # (> If you're interested in Vibe coding, follow:)
+
+[//]: # (> )
+
+[//]: # (> - 🐦 **X**: [@vista8]&#40;https://x.com/vista8&#41; - Sharing cutting-edge tech trends)
+
+[//]: # (> - 📱 **WeChat**: 向阳乔木推荐看  )
 
 ---
 
