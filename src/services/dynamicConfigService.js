@@ -131,13 +131,31 @@ class DynamicConfigManager extends EventEmitter {
         throw new Error('Database client not available')
       }
 
-      await dbClient.set(redisKey, JSON.stringify(value), 'EX', Math.floor(this.cacheTTL / 1000))
+      // 判断是否为持久配置（关键配置不设置过期时间）
+      const isPersistentConfig = this.isPersistentConfig(key)
+
+      if (isPersistentConfig) {
+        // 持久配置：永不过期，确保服务重启后配置保持
+        await dbClient.set(redisKey, JSON.stringify(value))
+        logger.info(`💾 Persistent config saved: ${key} = ${JSON.stringify(value)} (no expiration)`)
+      } else {
+        // 临时配置：设置过期时间
+        await dbClient.set(redisKey, JSON.stringify(value), 'EX', Math.floor(this.cacheTTL / 1000))
+        logger.info(
+          `⏰ Temporary config saved: ${key} = ${JSON.stringify(value)} (${Math.floor(this.cacheTTL / 1000)}s TTL)`
+        )
+      }
 
       // 更新内存缓存
       this.setCacheEntry(key, value)
 
       // 发出配置更新事件
-      this.emit('configChanged', { key, value, timestamp: Date.now() })
+      this.emit('configChanged', {
+        key,
+        value,
+        timestamp: Date.now(),
+        persistent: isPersistentConfig
+      })
 
       logger.info(`✅ Config updated: ${key} = ${JSON.stringify(value)}`)
       return true
@@ -304,6 +322,22 @@ class DynamicConfigManager extends EventEmitter {
    */
   validateConfigKey(key) {
     return Object.prototype.hasOwnProperty.call(this.supportedConfigs, key)
+  }
+
+  /**
+   * 判断配置是否需要持久化（永不过期）
+   * @param {string} key - 配置键名
+   * @returns {boolean} 是否为持久配置
+   * @private
+   */
+  isPersistentConfig(key) {
+    // 关键的用户配置应该持久化，避免服务重启后丢失
+    const persistentConfigs = [
+      'requestLogging.enabled', // 日志开关状态 - 用户明确设置的应该保持
+      'requestLogging.mode' // 日志模式 - 用户偏好设置
+    ]
+
+    return persistentConfigs.includes(key)
   }
 
   /**
