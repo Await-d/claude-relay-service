@@ -346,9 +346,7 @@
         </div>
         <div class="flex items-center space-x-2">
           <!-- 视图切换 -->
-          <div
-            class="hidden items-center space-x-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800 sm:flex"
-          >
+          <div class="flex items-center space-x-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
             <button
               class="rounded px-2 py-1 text-xs font-medium transition-colors"
               :class="
@@ -440,8 +438,8 @@
         </div>
       </div>
 
-      <!-- 桌面端表格视图 -->
-      <div v-else-if="viewMode === 'table'" class="hidden overflow-x-auto md:block">
+      <!-- 表格视图 -->
+      <div v-else-if="viewMode === 'table'" class="overflow-x-auto">
         <table
           aria-label="请求日志列表"
           class="min-w-full divide-y divide-gray-200 dark:divide-gray-700"
@@ -497,6 +495,8 @@
                   ></i>
                 </div>
               </th>
+              <th class="table-header" role="columnheader">Tokens</th>
+              <th class="table-header" role="columnheader">成本</th>
               <th class="table-header" role="columnheader">IP 地址</th>
               <th class="table-header" role="columnheader">操作</th>
             </tr>
@@ -526,6 +526,15 @@
                   >
                     {{ log.formattedKeyName }}
                   </span>
+                  <!-- 合并记录指示器 -->
+                  <div
+                    v-if="log.mergeInfo"
+                    class="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+                    :title="log.mergeInfo.tooltip"
+                  >
+                    <i class="fas fa-layer-group mr-1 text-xs"></i>
+                    {{ log.mergeInfo.count }}
+                  </div>
                 </div>
               </td>
               <td class="table-cell">
@@ -565,6 +574,29 @@
                 </div>
               </td>
               <td class="table-cell">
+                <div class="text-sm">
+                  <div class="flex items-center space-x-1 text-blue-600 dark:text-blue-400">
+                    <i class="fas fa-coins text-xs"></i>
+                    <span>{{ getTokenSummary(log) }}</span>
+                  </div>
+                  <div
+                    v-if="getCacheTokens(log) > 0"
+                    class="mt-1 text-xs text-green-600 dark:text-green-400"
+                  >
+                    <i class="fas fa-memory text-xs"></i>
+                    {{ getCacheTokens(log) }} 缓存
+                  </div>
+                </div>
+              </td>
+              <td class="table-cell">
+                <div class="text-sm font-medium">
+                  <span v-if="getLogCost(log) > 0" class="text-green-600 dark:text-green-400">
+                    ${{ formatCost(getLogCost(log)) }}
+                  </span>
+                  <span v-else class="text-gray-400">-</span>
+                </div>
+              </td>
+              <td class="table-cell">
                 <span class="text-sm text-gray-600 dark:text-gray-400">
                   {{ log.ipAddress || 'N/A' }}
                 </span>
@@ -583,8 +615,8 @@
         </table>
       </div>
 
-      <!-- 移动端卡片视图 -->
-      <div v-else class="divide-y divide-gray-200 dark:divide-gray-700 md:hidden">
+      <!-- 卡片视图 -->
+      <div v-else class="divide-y divide-gray-200 dark:divide-gray-700">
         <div
           v-for="log in displayedLogs"
           :key="log.logId || log.timestamp"
@@ -611,6 +643,15 @@
                     >
                       {{ log.formattedKeyName }}
                     </span>
+                    <!-- 合并记录指示器 (移动端) -->
+                    <div
+                      v-if="log.mergeInfo"
+                      class="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+                      :title="log.mergeInfo.tooltip"
+                    >
+                      <i class="fas fa-layer-group mr-0.5 text-xs"></i>
+                      {{ log.mergeInfo.count }}
+                    </div>
                   </div>
                 </div>
                 <button
@@ -633,9 +674,9 @@
                   {{ log.path || '/' }}
                 </span>
               </div>
-              <!-- 第三行：状态码、响应时间、IP -->
+              <!-- 第三行：状态码、响应时间、Tokens -->
               <div class="flex items-center justify-between text-sm">
-                <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-2">
                   <span
                     class="inline-flex rounded-full px-2 py-1 text-xs font-semibold"
                     :class="getStatusClass(log.statusCode)"
@@ -646,9 +687,19 @@
                     ⏱️ {{ log.responseTime ? `${log.responseTime}ms` : 'N/A' }}
                   </span>
                 </div>
-                <span class="text-gray-500 dark:text-gray-500">
-                  🌐 {{ log.ipAddress || 'N/A' }}
-                </span>
+                <div class="flex flex-col items-end text-xs">
+                  <div class="flex items-center space-x-1 text-blue-600 dark:text-blue-400">
+                    <i class="fas fa-coins"></i>
+                    <span>{{ getTokenSummary(log) }}</span>
+                  </div>
+                  <div v-if="getLogCost(log) > 0" class="text-green-600 dark:text-green-400">
+                    ${{ formatCost(getLogCost(log)) }}
+                  </div>
+                </div>
+              </div>
+              <!-- 第四行：IP地址 -->
+              <div class="mt-2 text-xs text-gray-500 dark:text-gray-500">
+                🌐 {{ log.ipAddress || 'N/A' }}
               </div>
             </div>
           </div>
@@ -683,218 +734,138 @@
     </div>
 
     <!-- 日志详情模态框 -->
-    <div
-      v-if="selectedLog"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-      @click.self="selectedLog = null"
-    >
+    <Teleport to="body">
       <div
-        class="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800"
+        v-if="selectedLog"
+        class="modal fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
       >
-        <!-- 模态框头部 -->
+        <!-- 背景遮罩 -->
         <div
-          class="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700"
+          class="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm"
+          @click="closeLogDetails"
+        />
+
+        <!-- 模态框 -->
+        <div
+          class="modal-content relative mx-auto flex max-h-[95vh] w-[95%] max-w-6xl flex-col p-4 sm:w-full sm:p-6"
         >
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">日志详情</h3>
-          <button
-            class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            @click="selectedLog = null"
-          >
-            <i class="fas fa-times text-xl"></i>
-          </button>
-        </div>
-
-        <!-- 模态框内容 -->
-        <div class="max-h-[calc(90vh-120px)] overflow-y-auto p-6">
-          <div class="space-y-6">
-            <!-- 基本信息 -->
-            <div>
-              <h4 class="text-md mb-3 font-semibold text-gray-900 dark:text-gray-100">基本信息</h4>
-              <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >时间</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ formatLogEntry(selectedLog).timestamp }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >API Key</label
-                  >
-                  <p
-                    class="mt-1 text-sm"
-                    :class="
-                      (selectedLog.formattedKeyName ||
-                        getApiKeyName(selectedLog.keyId) ||
-                        selectedLog.apiKey?.name ||
-                        'Unknown') &&
-                      (
-                        selectedLog.formattedKeyName ||
-                        getApiKeyName(selectedLog.keyId) ||
-                        selectedLog.apiKey?.name ||
-                        'Unknown'
-                      ).includes('(已删除)')
-                        ? 'text-gray-500 dark:text-gray-400'
-                        : 'text-gray-900 dark:text-gray-100'
-                    "
-                  >
-                    {{
-                      selectedLog.formattedKeyName ||
-                      getApiKeyName(selectedLog.keyId) ||
-                      selectedLog.apiKey?.name ||
-                      'Unknown'
-                    }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >请求方法</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.request?.method || 'N/A' }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >状态码</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.response?.statusCode || 'N/A' }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >响应时间</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ formatLogEntry(selectedLog).duration }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >IP 地址</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.request?.ip || 'N/A' }}
-                  </p>
-                </div>
+          <!-- 标题栏 -->
+          <div class="mb-4 flex items-center justify-between sm:mb-6">
+            <div class="flex items-center gap-3">
+              <div
+                class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600"
+              >
+                <i class="fas fa-file-alt text-white" />
+              </div>
+              <div>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100">日志详情</h3>
+                <p class="text-sm text-gray-600 dark:text-gray-400">
+                  {{
+                    selectedLog.formattedKeyName || getApiKeyName(selectedLog.keyId) || 'Unknown'
+                  }}
+                </p>
               </div>
             </div>
+            <button
+              class="p-2 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300"
+              @click="closeLogDetails"
+            >
+              <i class="fas fa-times text-xl" />
+            </button>
+          </div>
 
-            <!-- 请求信息 -->
-            <div>
-              <h4 class="text-md mb-3 font-semibold text-gray-900 dark:text-gray-100">请求信息</h4>
-              <div class="space-y-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >请求路径</label
-                  >
-                  <p
-                    class="mt-1 rounded bg-gray-100 p-2 text-sm text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    {{ selectedLog.request?.path || '/' }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >User Agent</label
-                  >
-                  <p
-                    class="mt-1 rounded bg-gray-100 p-2 text-sm text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    {{ selectedLog.request?.userAgent || 'N/A' }}
-                  </p>
-                </div>
-                <div v-if="selectedLog.request?.headers">
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >请求头</label
-                  >
-                  <pre
-                    class="mt-1 max-h-40 overflow-y-auto rounded bg-gray-100 p-2 text-xs text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                    >{{ JSON.stringify(selectedLog.request.headers, null, 2) }}</pre
-                  >
-                </div>
-                <div v-if="selectedLog.request?.body">
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >请求体</label
-                  >
-                  <pre
-                    class="mt-1 max-h-40 overflow-y-auto rounded bg-gray-100 p-2 text-xs text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                    >{{ JSON.stringify(selectedLog.request.body, null, 2) }}</pre
-                  >
-                </div>
-              </div>
+          <!-- 标签页导航 -->
+          <div class="mb-6 border-b border-gray-200 dark:border-gray-700">
+            <nav aria-label="Tabs" class="-mb-px flex space-x-8">
+              <button
+                v-for="tab in logDetailTabs"
+                :key="tab.id"
+                :class="[
+                  activeLogTab === tab.id
+                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300',
+                  'flex items-center gap-2 whitespace-nowrap border-b-2 px-1 py-2 text-sm font-medium'
+                ]"
+                @click="activeLogTab = tab.id"
+              >
+                <i :class="tab.icon" />
+                {{ tab.name }}
+                <span
+                  v-if="tab.badge && getTabBadgeCount(tab.id)"
+                  class="ml-2 inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+                >
+                  {{ getTabBadgeCount(tab.id) }}
+                </span>
+              </button>
+            </nav>
+          </div>
+
+          <!-- 标签页内容 -->
+          <div class="modal-scroll-content custom-scrollbar flex-1 overflow-y-auto">
+            <!-- 概览标签页 -->
+            <div v-if="activeLogTab === 'overview'" class="tab-content">
+              <RequestOverview :log="selectedLog" />
             </div>
 
-            <!-- 响应信息 -->
-            <div v-if="selectedLog.response">
-              <h4 class="text-md mb-3 font-semibold text-gray-900 dark:text-gray-100">响应信息</h4>
-              <div class="space-y-4">
-                <div v-if="selectedLog.response.headers">
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >响应头</label
-                  >
-                  <pre
-                    class="mt-1 max-h-40 overflow-y-auto rounded bg-gray-100 p-2 text-xs text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                    >{{ JSON.stringify(selectedLog.response.headers, null, 2) }}</pre
-                  >
-                </div>
-                <div v-if="selectedLog.response.body">
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >响应体</label
-                  >
-                  <pre
-                    class="mt-1 max-h-40 overflow-y-auto rounded bg-gray-100 p-2 text-xs text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                    >{{ JSON.stringify(selectedLog.response.body, null, 2) }}</pre
-                  >
-                </div>
-              </div>
+            <!-- Token详情标签页 -->
+            <div v-if="activeLogTab === 'tokens'" class="tab-content">
+              <TokenBreakdown
+                :cost-details="selectedLog.costDetails || {}"
+                :token-details="selectedLog.tokenDetails || {}"
+              />
             </div>
 
-            <!-- 使用统计 -->
-            <div v-if="selectedLog.usage">
-              <h4 class="text-md mb-3 font-semibold text-gray-900 dark:text-gray-100">使用统计</h4>
-              <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >输入 Tokens</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.usage.inputTokens || 0 }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >输出 Tokens</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.usage.outputTokens || 0 }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >总 Tokens</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.usage.totalTokens || 0 }}
-                  </p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >模型</label
-                  >
-                  <p class="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                    {{ selectedLog.usage.model || 'N/A' }}
-                  </p>
-                </div>
+            <!-- 请求头标签页 -->
+            <div v-if="activeLogTab === 'headers'" class="tab-content">
+              <HeadersViewer
+                :request-headers="selectedLog.requestHeaders || {}"
+                :response-headers="selectedLog.responseHeaders || {}"
+              />
+            </div>
+
+            <!-- 消息内容标签页 -->
+            <div v-if="activeLogTab === 'content'" class="tab-content">
+              <MessageContent
+                :request-body="selectedLog.request?.body || selectedLog.requestBody"
+                :response-body="selectedLog.response?.body || selectedLog.responseBody"
+              />
+            </div>
+          </div>
+
+          <!-- 底部操作栏 -->
+          <div class="mt-6 flex justify-between border-t border-gray-200 pt-6 dark:border-gray-700">
+            <div class="flex items-center space-x-4">
+              <div class="text-sm text-gray-500 dark:text-gray-400">
+                <i class="fas fa-clock mr-1" />
+                {{ formatLogEntry(selectedLog).timestamp }}
               </div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">
+                <i class="fas fa-tachometer-alt mr-1" />
+                {{ formatLogEntry(selectedLog).duration }}
+              </div>
+            </div>
+            <div class="flex gap-3">
+              <button
+                class="btn btn-secondary px-4 py-2 text-sm"
+                :disabled="exporting"
+                type="button"
+                @click="exportLogDetails"
+              >
+                <i class="fas fa-download mr-2" :class="{ 'animate-spin': exporting }" />
+                导出
+              </button>
+              <button
+                class="btn btn-primary px-4 py-2 text-sm"
+                type="button"
+                @click="closeLogDetails"
+              >
+                关闭
+              </button>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
     <!-- 错误详情模态框 -->
     <div
@@ -983,6 +954,12 @@ import { storeToRefs } from 'pinia'
 import { useRequestLogsStore } from '@/stores/requestLogs'
 import { showToast } from '@/utils/toast'
 
+// 导入组件
+import RequestOverview from '@/components/requestLogs/RequestOverview.vue'
+import TokenBreakdown from '@/components/requestLogs/TokenBreakdown.vue'
+import HeadersViewer from '@/components/requestLogs/HeadersViewer.vue'
+import MessageContent from '@/components/requestLogs/MessageContent.vue'
+
 // 原生JavaScript实现debounce函数
 const createDebounce = (func, delay) => {
   let timeoutId
@@ -1021,7 +998,8 @@ const {
   getStatusClass,
   getMethodClass,
   formatDuration,
-  fetchApiKeys
+  fetchApiKeys,
+  fetchLogDetails
 } = requestLogsStore
 
 // Local State
@@ -1038,6 +1016,36 @@ const viewMode = ref('table')
 const autoRefreshEnabled = ref(false)
 const showErrorDetails = ref(false)
 const retryCount = ref(0)
+
+// 日志详情模态框状态
+const activeLogTab = ref('overview')
+
+// 标签页配置
+const logDetailTabs = ref([
+  {
+    id: 'overview',
+    name: '概览',
+    icon: 'fas fa-info-circle'
+  },
+  {
+    id: 'tokens',
+    name: 'Token详情',
+    icon: 'fas fa-coins',
+    badge: true
+  },
+  {
+    id: 'headers',
+    name: '请求头',
+    icon: 'fas fa-list-ul',
+    badge: true
+  },
+  {
+    id: 'content',
+    name: '消息内容',
+    icon: 'fas fa-file-text',
+    badge: true
+  }
+])
 
 // Computed properties
 // 根据keyId获取API Key名称的函数
@@ -1098,22 +1106,27 @@ const searchResults = computed(() => {
   )
 })
 
-// 增强的displayedLogs计算属性，添加格式化的keyName
+// 增强的displayedLogs计算属性，添加去重和格式化的keyName
 const displayedLogs = computed(() => {
   let logsToDisplay = []
 
-  if (filters.search) {
-    logsToDisplay = searchResults.value
-  } else {
-    // 确保 filteredLogs.value 是一个数组
-    logsToDisplay = Array.isArray(filteredLogs.value) ? filteredLogs.value : []
-  }
+  // 不再在前端搜索，直接使用后端返回的过滤结果
+  // 确保 filteredLogs.value 是一个数组，并应用去重
+  logsToDisplay = Array.isArray(filteredLogs.value) ? filteredLogs.value : []
 
-  // 为每个log添加格式化的keyName属性
+  // 为每个log添加格式化的keyName属性和优化数据
   return logsToDisplay.map((log) => ({
     ...log,
     // 优先使用原始keyName，没有则通过keyId查找
-    formattedKeyName: log.keyName || getApiKeyName(log.keyId)
+    formattedKeyName: log.keyName || getApiKeyName(log.keyId),
+    // 添加合并信息显示
+    mergeInfo:
+      log._mergedCount > 1
+        ? {
+            count: log._mergedCount,
+            tooltip: `此记录合并了 ${log._mergedCount} 条相关日志`
+          }
+        : null
   }))
 })
 
@@ -1229,6 +1242,73 @@ const formatPercentage = (value) => {
   return `${(value * 100).toFixed(1)}%`
 }
 
+// 获取Token摘要（优化版，支持合并数据）
+const getTokenSummary = (log) => {
+  // 优先使用tokenDetails中的数据
+  if (log.tokenDetails) {
+    const input = log.tokenDetails.inputTokens || 0
+    const output = log.tokenDetails.outputTokens || 0
+    const total = log.tokenDetails.totalTokens || input + output
+
+    if (total > 0) {
+      if (input > 0 && output > 0) {
+        // 显示合并标识
+        const mergedIndicator = log._mergedCount > 1 ? ` (×${log._mergedCount})` : ''
+        return `${input}→${output}${mergedIndicator}`
+      }
+      return total.toString()
+    }
+  }
+
+  // 回退到usage字段
+  const usage = log.usage || {}
+  const input = usage.input_tokens || log.inputTokens || 0
+  const output = usage.output_tokens || log.outputTokens || 0
+  const total = log.tokens || input + output
+
+  if (total > 0) {
+    if (input > 0 && output > 0) {
+      const mergedIndicator = log._mergedCount > 1 ? ` (×${log._mergedCount})` : ''
+      return `${input}→${output}${mergedIndicator}`
+    }
+    return total.toString()
+  }
+
+  return '-'
+}
+
+// 格式化成本
+const formatCost = (cost) => {
+  // 如果传入的是日志对象，提取成本
+  if (typeof cost === 'object' && cost !== null) {
+    const log = cost
+    cost = log.costDetails?.totalCost || log.cost || 0
+  }
+
+  if (!cost || cost === 0) return '0.00'
+
+  if (cost < 0.01) {
+    return '< 0.01'
+  }
+
+  return cost.toFixed(4)
+}
+
+// 获取日志的成本数据
+const getLogCost = (log) => {
+  return log.costDetails?.totalCost || log.cost || 0
+}
+
+// 获取缓存Token数量（优化版，支持合并数据）
+const getCacheTokens = (log) => {
+  if (log.tokenDetails) {
+    return (log.tokenDetails.cacheReadTokens || 0) + (log.tokenDetails.cacheCreateTokens || 0)
+  }
+  const usageCacheRead = log.usage?.cache_read_input_tokens || 0
+  const usageCacheCreate = log.usage?.cache_creation_input_tokens || 0
+  return usageCacheRead + usageCacheCreate
+}
+
 // 应用筛选（不含时间范围处理）
 const applyFilters = async () => {
   try {
@@ -1280,6 +1360,7 @@ const applyCustomTimeFilters = async () => {
 
 // 使用指定时间范围应用筛选
 const applyFiltersWithTimeRange = async (startDateISO, endDateISO) => {
+  console.log('📅 applyFiltersWithTimeRange被调用:', { startDateISO, endDateISO })
   // 临时保存原始时间格式
   const originalStart = filters.startDate
   const originalEnd = filters.endDate
@@ -1289,8 +1370,9 @@ const applyFiltersWithTimeRange = async (startDateISO, endDateISO) => {
     startDate: startDateISO,
     endDate: endDateISO
   })
-
+  console.log('📊 调用fetchLogs前，filters状态:', filters.value)
   await fetchLogs()
+  console.log('✅ fetchLogs调用完成')
 
   // 恢复显示格式（如果需要的话）
   if (timeRange.value !== 'custom') {
@@ -1327,9 +1409,11 @@ const toDatetimeLocal = (date) => {
 
 // 应用时间范围
 const applyTimeRange = () => {
+  console.log('🕐 applyTimeRange被调用, timeRange.value:', timeRange.value)
   timeRangeError.value = ''
 
   if (timeRange.value === 'custom') {
+    console.log('⚠️ timeRange是custom，跳过自动更新')
     // 自定义时间范围需要用户设置，不自动更新
     return
   }
@@ -1394,8 +1478,122 @@ const changePage = (page) => {
 }
 
 // 显示日志详情
-const showLogDetails = (log) => {
+const showLogDetails = async (log) => {
   selectedLog.value = log
+  activeLogTab.value = 'overview' // 重置到概览标签页
+
+  // 如果日志还没有详细信息，从API获取
+  if (!log.tokenDetails && !log.costDetails && !log.requestHeaders && !log.responseHeaders) {
+    try {
+      console.log('获取日志详情:', log.id || log.logId)
+      const detailedLog = await fetchLogDetails(log.id || log.logId)
+      if (detailedLog) {
+        console.log('获取到的详细日志:', detailedLog)
+        // 合并详细信息到当前日志对象
+        selectedLog.value = {
+          ...log,
+          ...detailedLog,
+          // 确保数据结构正确
+          tokenDetails: detailedLog.tokenDetails || detailedLog.usage || {},
+          costDetails: detailedLog.costDetails || {
+            totalCost: detailedLog.cost || 0,
+            currency: 'USD'
+          },
+          requestHeaders: detailedLog.requestHeaders || {},
+          responseHeaders: detailedLog.responseHeaders || {},
+          // 处理请求和响应数据
+          request: detailedLog.request || log.request || {},
+          response: detailedLog.response || log.response || {},
+          requestBody: detailedLog.requestBody || detailedLog.request?.body,
+          responseBody: detailedLog.responseBody || detailedLog.response?.body
+        }
+        console.log('合并后的日志对象:', selectedLog.value)
+      }
+    } catch (error) {
+      console.error('获取日志详情失败:', error)
+      showToast('获取日志详情失败', 'error')
+    }
+  }
+}
+
+// 关闭日志详情
+const closeLogDetails = () => {
+  selectedLog.value = null
+  activeLogTab.value = 'overview'
+}
+
+// 获取标签页徽章计数
+const getTabBadgeCount = (tabId) => {
+  if (!selectedLog.value) return 0
+
+  switch (tabId) {
+    case 'tokens': {
+      const hasTokenDetails =
+        selectedLog.value.tokenDetails && Object.keys(selectedLog.value.tokenDetails).length > 0
+      const hasCostDetails =
+        selectedLog.value.costDetails && Object.keys(selectedLog.value.costDetails).length > 0
+      return (hasTokenDetails ? 1 : 0) + (hasCostDetails ? 1 : 0)
+    }
+    case 'headers': {
+      const requestHeaders = selectedLog.value.requestHeaders
+        ? Object.keys(selectedLog.value.requestHeaders).length
+        : 0
+      const responseHeaders = selectedLog.value.responseHeaders
+        ? Object.keys(selectedLog.value.responseHeaders).length
+        : 0
+      return requestHeaders + responseHeaders
+    }
+    case 'content': {
+      let contentCount = 0
+      if (selectedLog.value.request?.body || selectedLog.value.requestBody) contentCount++
+      if (selectedLog.value.response?.body || selectedLog.value.responseBody) contentCount++
+      return contentCount
+    }
+    default:
+      return 0
+  }
+}
+
+// 导出单个日志详情
+const exportLogDetails = async () => {
+  if (!selectedLog.value) return
+
+  try {
+    const logData = {
+      metadata: {
+        timestamp: selectedLog.value.timestamp,
+        apiKey:
+          selectedLog.value.formattedKeyName || getApiKeyName(selectedLog.value.keyId) || 'Unknown',
+        method: selectedLog.value.request?.method || 'N/A',
+        path: selectedLog.value.request?.path || '/',
+        statusCode: selectedLog.value.response?.statusCode || 'N/A',
+        responseTime: selectedLog.value.responseTime || 'N/A',
+        ipAddress: selectedLog.value.request?.ip || 'N/A'
+      },
+      request: selectedLog.value.request || {},
+      response: selectedLog.value.response || {},
+      usage: selectedLog.value.usage || {}
+    }
+
+    const blob = new Blob([JSON.stringify(logData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `log-detail-${new Date(selectedLog.value.timestamp).getTime()}.json`
+    link.style.display = 'none'
+
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    URL.revokeObjectURL(url)
+
+    showToast('日志详情已导出', 'success')
+  } catch (err) {
+    console.error('导出日志详情失败:', err)
+    showToast('导出失败', 'error')
+  }
 }
 
 // 导出数据

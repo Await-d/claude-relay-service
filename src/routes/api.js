@@ -9,11 +9,78 @@ const { authenticateApiKey } = require('../middleware/auth')
 const logger = require('../utils/logger')
 const database = require('../models/database')
 const sessionHelper = require('../utils/sessionHelper')
-const { requestLogger } = require('../services/requestLoggerService')
+const { unifiedLogServiceFactory } = require('../services/UnifiedLogServiceFactory')
 
 const router = express.Router()
 
-// 🔧 共享的消息处理函数
+// 🔧 统一日志服务实例获取
+let unifiedLogService = null
+const getUnifiedLogService = async () => {
+  if (!unifiedLogService) {
+    try {
+      unifiedLogService = await unifiedLogServiceFactory.getSingleton()
+    } catch (error) {
+      logger.error('❌ Failed to get UnifiedLogService instance:', error)
+      throw error
+    }
+  }
+  return unifiedLogService
+}
+
+// 🔧 统一日志记录函数
+const logRequestWithUnifiedService = async (req, res, usageData, startTime, accountId) => {
+  try {
+    const logService = await getUnifiedLogService()
+
+    // 构建统一的日志数据
+    const logData = {
+      // 基础请求信息
+      path: req.originalUrl,
+      method: req.method,
+      statusCode: res.statusCode,
+      responseTime: Date.now() - startTime,
+      userAgent: req.headers['user-agent'],
+      ipAddress: req.ip,
+
+      // 请求和响应数据
+      requestHeaders: req.headers,
+      responseHeaders: res.getHeaders(),
+      requestBody: req.body,
+
+      // Token 和使用统计
+      inputTokens: usageData?.input_tokens || 0,
+      outputTokens: usageData?.output_tokens || 0,
+      totalTokens: (usageData?.input_tokens || 0) + (usageData?.output_tokens || 0),
+      cacheCreateTokens: usageData?.cache_creation_input_tokens || 0,
+      cacheReadTokens: usageData?.cache_read_input_tokens || 0,
+
+      // 详细缓存信息
+      ephemeral5mTokens: usageData?.cache_creation?.ephemeral_5m_input_tokens || 0,
+      ephemeral1hTokens: usageData?.cache_creation?.ephemeral_1h_input_tokens || 0,
+
+      // 账户和模型信息
+      accountId,
+      model: usageData?.model || 'unknown',
+
+      // 流式标识
+      isStreaming: true,
+
+      // 时间戳
+      timestamp: Date.now()
+    }
+
+    // 记录日志
+    const logId = await logService.logRequest(req.apiKey.id, logData)
+    logger.debug(`✅ Request logged with UnifiedLogService: ${logId}`)
+
+    return logId
+  } catch (error) {
+    logger.error('❌ UnifiedLogService logging failed:', error)
+    // 不抛出错误，避免影响主流程
+    return null
+  }
+}
+
 async function handleMessagesRequest(req, res) {
   const startTime = Date.now()
   let shouldLogRequest = false
@@ -51,33 +118,12 @@ async function handleMessagesRequest(req, res) {
     // 智能采样决策：检查是否应该记录此请求到日志系统
     shouldLogRequest = false
     try {
-      logger.info(
-        `🔍 Checking request logging: requestLogger available: ${!!requestLogger}, shouldLog function: ${!!(requestLogger && typeof requestLogger.shouldLog === 'function')}`
-      )
-      if (requestLogger && typeof requestLogger.shouldLog === 'function') {
-        shouldLogRequest = await requestLogger.shouldLog(
-          req.apiKey.id,
-          'normal', // 请求类型：normal, error, slow
-          {
-            responseTime: 0, // 稍后更新
-            statusCode: 200 // 预期状态码，稍后更新
-          }
-        )
-        logger.info(
-          `🎯 Sampling decision for key ${req.apiKey.name}: shouldLog = ${shouldLogRequest}`
-        )
-
-        if (shouldLogRequest) {
-          logger.debug(`🎯 Request selected for logging by intelligent sampler`)
-        } else {
-          logger.info(`📊 Request not selected for logging (sampling decision)`)
-        }
-      } else {
-        logger.warn('⚠️ requestLogger not available or shouldLog method missing')
-      }
+      // 🔧 UnifiedLogService 内置智能重复检测，默认启用日志记录
+      shouldLogRequest = true
+      logger.debug('🔍 Request logging enabled with UnifiedLogService')
     } catch (samplingError) {
-      logger.warn('⚠️ Request logging sampling failed:', samplingError.message)
-      // 不影响主要请求处理流程
+      logger.warn('⚠️ Request logging initialization failed:', samplingError.message)
+      shouldLogRequest = false
     }
 
     if (isStream) {
@@ -183,6 +229,20 @@ async function handleMessagesRequest(req, res) {
               }
 
               usageDataCaptured = true
+
+              // 🔍 使用统一日志服务记录 (Claude Official)
+              if (shouldLogRequest) {
+                logger.info(`🚀 Logging with UnifiedLogService (Claude Official)`)
+                logRequestWithUnifiedService(req, res, usageData, startTime, usageAccountId).catch(
+                  (error) => {
+                    logger.error(
+                      '❌ UnifiedLogService logging failed (Claude Official):',
+                      error.message
+                    )
+                  }
+                )
+              }
+
               logger.api(
                 `📊 Stream usage recorded (real) - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Cache Create: ${cacheCreateTokens}, Cache Read: ${cacheReadTokens}, Total: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
               )
@@ -268,6 +328,20 @@ async function handleMessagesRequest(req, res) {
               }
 
               usageDataCaptured = true
+
+              // 🔍 使用统一日志服务记录 (Claude Console)
+              if (shouldLogRequest) {
+                logger.info(`🚀 Logging with UnifiedLogService (Claude Console)`)
+                logRequestWithUnifiedService(req, res, usageData, startTime, usageAccountId).catch(
+                  (error) => {
+                    logger.error(
+                      '❌ UnifiedLogService logging failed (Claude Console):',
+                      error.message
+                    )
+                  }
+                )
+              }
+
               logger.api(
                 `📊 Stream usage recorded (real) - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Cache Create: ${cacheCreateTokens}, Cache Read: ${cacheReadTokens}, Total: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
               )
@@ -515,13 +589,16 @@ async function handleMessagesRequest(req, res) {
           error: null
         }
 
-        if (requestLogger && typeof requestLogger.enqueueLog === 'function') {
-          const queued = requestLogger.enqueueLog(logEntry)
-          if (queued) {
-            logger.debug(`📝 Request logged successfully for key: ${req.apiKey.name}`)
-          } else {
-            logger.warn(`⚠️ Failed to queue request log for key: ${req.apiKey.name}`)
-          }
+        // 🔧 使用统一日志服务记录完成的请求
+        try {
+          const logService = await getUnifiedLogService()
+          await logService.logRequest(req.apiKey.id, logEntry)
+          logger.debug(`📝 Request completed and logged successfully for key: ${req.apiKey.name}`)
+        } catch (logError) {
+          logger.warn(
+            `⚠️ UnifiedLogService logging failed for key: ${req.apiKey.name}:`,
+            logError.message
+          )
         }
       } catch (loggingError) {
         logger.warn('⚠️ Request logging failed:', loggingError.message)
@@ -538,31 +615,8 @@ async function handleMessagesRequest(req, res) {
     })
 
     // 错误情况下的日志记录
-    // 错误请求很重要，即使没有被原始采样选中也应该记录
-    let shouldLogError = shouldLogRequest
-    if (!shouldLogError && requestLogger && typeof requestLogger.shouldLog === 'function') {
-      try {
-        // 重新采样检查，错误请求类型会被智能采样器优先记录
-        shouldLogError = await requestLogger.shouldLog(
-          req.apiKey.id,
-          'error', // 错误请求类型
-          {
-            responseTime: duration,
-            statusCode: 500
-          }
-        )
-        if (shouldLogError) {
-          logger.debug(`🎯 Error request selected for logging by intelligent sampler`)
-        }
-      } catch (samplingError) {
-        // 采样失败时也记录错误请求
-        shouldLogError = true
-        logger.warn(
-          '⚠️ Error sampling failed, logging error request anyway:',
-          samplingError.message
-        )
-      }
-    }
+    // 🔧 UnifiedLogService 处理错误请求，默认启用
+    const shouldLogError = true
 
     if (shouldLogError) {
       try {
@@ -581,11 +635,16 @@ async function handleMessagesRequest(req, res) {
           error: error.message || 'An unexpected error occurred'
         }
 
-        if (requestLogger && typeof requestLogger.enqueueLog === 'function') {
-          const queued = requestLogger.enqueueLog(logEntry)
-          if (queued) {
-            logger.debug(`📝 Error request logged for key: ${req.apiKey.name}`)
-          }
+        // 🔧 使用统一日志服务记录错误请求
+        try {
+          const logService = await getUnifiedLogService()
+          await logService.logRequest(req.apiKey.id, logEntry)
+          logger.debug(`📝 Error request logged successfully for key: ${req.apiKey.name}`)
+        } catch (logError) {
+          logger.warn(
+            `⚠️ UnifiedLogService error logging failed for key: ${req.apiKey.name}:`,
+            logError.message
+          )
         }
       } catch (loggingError) {
         logger.warn('⚠️ Error request logging failed:', loggingError.message)

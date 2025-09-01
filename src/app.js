@@ -32,6 +32,7 @@ const webhookRoutes = require('./routes/webhook')
 const dataManagementRoutes = require('./routes/dataManagement')
 const requestLogsRoutes = require('./routes/requestLogs')
 const configAdminRoutes = require('./routes/configAdmin')
+const performanceRoutes = require('./routes/performance')
 
 // Import middleware
 const {
@@ -87,6 +88,10 @@ class Application {
       logger.info('🕐 Initializing Claude account session windows...')
       const claudeAccountService = require('./services/claudeAccountService')
       await claudeAccountService.initializeSessionWindows()
+
+      // 📊 初始化UnifiedLogService
+      logger.info('📊 Initializing UnifiedLogService...')
+      await this.initializeUnifiedLogService()
 
       // 超早期拦截 /admin-next/ 请求 - 在所有中间件之前
       this.app.use((req, res, next) => {
@@ -260,6 +265,7 @@ class Application {
       this.app.use('/admin/data', dataManagementRoutes)
       this.app.use('/admin/request-logs', requestLogsRoutes)
       this.app.use('/admin/config', configAdminRoutes)
+      this.app.use('/admin/performance', performanceRoutes)
 
       // 🏠 根路径重定向到新版管理界面
       this.app.get('/', (req, res) => {
@@ -413,7 +419,7 @@ class Application {
       const client = database.getClient()
       await client.ping()
       const latency = Date.now() - start
-      
+
       // 🔍 调试：检查Redis中的请求日志键
       let requestLogKeys = []
       try {
@@ -455,7 +461,7 @@ class Application {
       const testKey = 'request_log:bb3dd7bd-10d8-4240-a810-ccdcc59b4c71:1756392164715'
       const keyExists = await client.exists(testKey)
       const keyData = await client.hgetall(testKey)
-      
+
       const logs = await database.searchLogs({}, { limit: 3 })
       return {
         success: true,
@@ -466,7 +472,7 @@ class Application {
           dataKeys: keyData ? Object.keys(keyData) : null,
           hasData: keyData && Object.keys(keyData).length > 0
         },
-        sampleData: logs.slice(0, 2).map(log => ({
+        sampleData: logs.slice(0, 2).map((log) => ({
           id: log.id,
           keyId: log.keyId,
           method: log.method,
@@ -529,6 +535,38 @@ class Application {
     } catch (error) {
       logger.error('💥 Failed to start server:', error)
       process.exit(1)
+    }
+  }
+
+  // 📊 初始化UnifiedLogService
+  async initializeUnifiedLogService() {
+    try {
+      const { unifiedLogServiceFactory } = require('./services/UnifiedLogServiceFactory')
+
+      // 初始化单例实例
+      logger.info('🔄 Creating UnifiedLogService singleton...')
+      await unifiedLogServiceFactory.getSingleton()
+
+      // 进行健康检查
+      logger.info('🔍 Performing UnifiedLogService health check...')
+      const healthCheck = await unifiedLogServiceFactory.healthCheck()
+
+      if (healthCheck.status === 'healthy') {
+        logger.success('✅ UnifiedLogService initialized successfully')
+      } else if (healthCheck.status === 'degraded') {
+        logger.warn('⚠️ UnifiedLogService initialized with degraded status:', healthCheck)
+      } else {
+        logger.error('❌ UnifiedLogService health check failed:', healthCheck)
+        throw new Error('UnifiedLogService health check failed')
+      }
+
+      // 记录工厂统计信息
+      const factoryStats = unifiedLogServiceFactory.getFactoryStats()
+      logger.info('📊 UnifiedLogService factory stats:', factoryStats)
+    } catch (error) {
+      logger.error('💥 Failed to initialize UnifiedLogService:', error)
+      // 不阻止应用启动，但记录错误
+      logger.warn('⚠️ Application will continue without UnifiedLogService')
     }
   }
 

@@ -69,7 +69,7 @@ class DatabaseAdapter {
    * @param {string|null} hashedKey 哈希后的Key值，用于快速查找
    * @returns {Promise<void>}
    */
-  async setApiKey(keyId, keyData, hashedKey = null) {
+  async setApiKey(_keyId, _keyData, _hashedKey = null) {
     throw new Error('setApiKey method must be implemented by subclass')
   }
 
@@ -78,7 +78,7 @@ class DatabaseAdapter {
    * @param {string} keyId API Key ID
    * @returns {Promise<Object>} API Key数据对象
    */
-  async getApiKey(keyId) {
+  async getApiKey(_keyId) {
     throw new Error('getApiKey method must be implemented by subclass')
   }
 
@@ -87,7 +87,7 @@ class DatabaseAdapter {
    * @param {string} keyId API Key ID
    * @returns {Promise<number>} 删除的记录数
    */
-  async deleteApiKey(keyId) {
+  async deleteApiKey(_keyId) {
     throw new Error('deleteApiKey method must be implemented by subclass')
   }
 
@@ -104,7 +104,7 @@ class DatabaseAdapter {
    * @param {string} hashedKey 哈希后的Key值
    * @returns {Promise<Object|null>} API Key数据对象或null
    */
-  async findApiKeyByHash(hashedKey) {
+  async findApiKeyByHash(_hashedKey) {
     throw new Error('findApiKeyByHash method must be implemented by subclass')
   }
 
@@ -124,15 +124,15 @@ class DatabaseAdapter {
    * @returns {Promise<void>}
    */
   async incrementTokenUsage(
-    keyId,
-    tokens,
-    inputTokens = 0,
-    outputTokens = 0,
-    cacheCreateTokens = 0,
-    cacheReadTokens = 0,
-    model = 'unknown',
-    ephemeral5mTokens = 0,
-    ephemeral1hTokens = 0
+    _keyId,
+    _tokens,
+    _inputTokens = 0,
+    _outputTokens = 0,
+    _cacheCreateTokens = 0,
+    _cacheReadTokens = 0,
+    _model = 'unknown',
+    _ephemeral5mTokens = 0,
+    _ephemeral1hTokens = 0
   ) {
     throw new Error('incrementTokenUsage method must be implemented by subclass')
   }
@@ -149,13 +149,13 @@ class DatabaseAdapter {
    * @returns {Promise<void>}
    */
   async incrementAccountUsage(
-    accountId,
-    totalTokens,
-    inputTokens = 0,
-    outputTokens = 0,
-    cacheCreateTokens = 0,
-    cacheReadTokens = 0,
-    model = 'unknown'
+    _accountId,
+    _totalTokens,
+    _inputTokens = 0,
+    _outputTokens = 0,
+    _cacheCreateTokens = 0,
+    _cacheReadTokens = 0,
+    _model = 'unknown'
   ) {
     throw new Error('incrementAccountUsage method must be implemented by subclass')
   }
@@ -165,7 +165,7 @@ class DatabaseAdapter {
    * @param {string} keyId API Key ID
    * @returns {Promise<Object>} 使用统计数据
    */
-  async getUsageStats(keyId) {
+  async getUsageStats(_keyId) {
     throw new Error('getUsageStats method must be implemented by subclass')
   }
 
@@ -174,7 +174,7 @@ class DatabaseAdapter {
    * @param {string} keyId API Key ID
    * @returns {Promise<number>} 当日费用
    */
-  async getDailyCost(keyId) {
+  async getDailyCost(_keyId) {
     throw new Error('getDailyCost method must be implemented by subclass')
   }
 
@@ -184,7 +184,7 @@ class DatabaseAdapter {
    * @param {number} amount 费用金额
    * @returns {Promise<void>}
    */
-  async incrementDailyCost(keyId, amount) {
+  async incrementDailyCost(_keyId, _amount) {
     throw new Error('incrementDailyCost method must be implemented by subclass')
   }
 
@@ -193,7 +193,7 @@ class DatabaseAdapter {
    * @param {string} keyId API Key ID
    * @returns {Promise<Object>} 费用统计数据
    */
-  async getCostStats(keyId) {
+  async getCostStats(_keyId) {
     throw new Error('getCostStats method must be implemented by subclass')
   }
 
@@ -202,7 +202,7 @@ class DatabaseAdapter {
    * @param {string} accountId 账户ID
    * @returns {Promise<Object>} 账户使用统计数据
    */
-  async getAccountUsageStats(accountId) {
+  async getAccountUsageStats(_accountId) {
     throw new Error('getAccountUsageStats method must be implemented by subclass')
   }
 
@@ -230,7 +230,7 @@ class DatabaseAdapter {
    * @param {Object} accountData 账户数据
    * @returns {Promise<void>}
    */
-  async setClaudeAccount(accountId, accountData) {
+  async setClaudeAccount(_accountId, _accountData) {
     throw new Error('setClaudeAccount method must be implemented by subclass')
   }
 
@@ -239,7 +239,7 @@ class DatabaseAdapter {
    * @param {string} accountId 账户ID
    * @returns {Promise<Object>} 账户数据
    */
-  async getClaudeAccount(accountId) {
+  async getClaudeAccount(_accountId) {
     throw new Error('getClaudeAccount method must be implemented by subclass')
   }
 
@@ -256,7 +256,7 @@ class DatabaseAdapter {
    * @param {string} accountId 账户ID
    * @returns {Promise<number>} 删除的记录数
    */
-  async deleteClaudeAccount(accountId) {
+  async deleteClaudeAccount(_accountId) {
     throw new Error('deleteClaudeAccount method must be implemented by subclass')
   }
 
@@ -266,7 +266,7 @@ class DatabaseAdapter {
    * @param {Object} updates 更新的字段
    * @returns {Promise<void>}
    */
-  async updateClaudeAccountSchedulingFields(accountId, updates) {
+  async updateClaudeAccountSchedulingFields(_accountId, _updates) {
     throw new Error('updateClaudeAccountSchedulingFields method must be implemented by subclass')
   }
 
@@ -275,7 +275,7 @@ class DatabaseAdapter {
    * @param {string} accountId 账户ID
    * @returns {Promise<number>} 新的计数值
    */
-  async incrementClaudeAccountUsageCount(accountId) {
+  async incrementClaudeAccountUsageCount(_accountId) {
     throw new Error('incrementClaudeAccountUsageCount method must be implemented by subclass')
   }
 
@@ -285,7 +285,7 @@ class DatabaseAdapter {
    * @param {Object} accountData 账户数据
    * @returns {Promise<void>}
    */
-  async setOpenAiAccount(accountId, accountData) {
+  async setOpenAiAccount(_accountId, _accountData) {
     throw new Error('setOpenAiAccount method must be implemented by subclass')
   }
 
@@ -294,7 +294,7 @@ class DatabaseAdapter {
    * @param {string} accountId 账户ID
    * @returns {Promise<Object>} 账户数据
    */
-  async getOpenAiAccount(accountId) {
+  async getOpenAiAccount(_accountId) {
     throw new Error('getOpenAiAccount method must be implemented by subclass')
   }
 
@@ -303,7 +303,7 @@ class DatabaseAdapter {
    * @param {string} accountId 账户ID
    * @returns {Promise<number>} 删除的记录数
    */
-  async deleteOpenAiAccount(accountId) {
+  async deleteOpenAiAccount(_accountId) {
     throw new Error('deleteOpenAiAccount method must be implemented by subclass')
   }
 
@@ -324,7 +324,7 @@ class DatabaseAdapter {
    * @param {number} ttl 过期时间（秒）
    * @returns {Promise<void>}
    */
-  async setSession(sessionId, sessionData, ttl = 86400) {
+  async setSession(_sessionId, _sessionData, _ttl = 86400) {
     throw new Error('setSession method must be implemented by subclass')
   }
 
@@ -333,7 +333,7 @@ class DatabaseAdapter {
    * @param {string} sessionId 会话ID
    * @returns {Promise<Object>} 会话数据
    */
-  async getSession(sessionId) {
+  async getSession(_sessionId) {
     throw new Error('getSession method must be implemented by subclass')
   }
 
@@ -342,7 +342,7 @@ class DatabaseAdapter {
    * @param {string} sessionId 会话ID
    * @returns {Promise<number>} 删除的记录数
    */
-  async deleteSession(sessionId) {
+  async deleteSession(_sessionId) {
     throw new Error('deleteSession method must be implemented by subclass')
   }
 
@@ -353,7 +353,7 @@ class DatabaseAdapter {
    * @param {number} ttl 过期时间（秒，0表示不过期）
    * @returns {Promise<void>}
    */
-  async setApiKeyHash(hashedKey, keyData, ttl = 0) {
+  async setApiKeyHash(_hashedKey, _keyData, _ttl = 0) {
     throw new Error('setApiKeyHash method must be implemented by subclass')
   }
 
@@ -362,7 +362,7 @@ class DatabaseAdapter {
    * @param {string} hashedKey 哈希后的Key
    * @returns {Promise<Object>} Key数据
    */
-  async getApiKeyHash(hashedKey) {
+  async getApiKeyHash(_hashedKey) {
     throw new Error('getApiKeyHash method must be implemented by subclass')
   }
 
@@ -371,7 +371,7 @@ class DatabaseAdapter {
    * @param {string} hashedKey 哈希后的Key
    * @returns {Promise<number>} 删除的记录数
    */
-  async deleteApiKeyHash(hashedKey) {
+  async deleteApiKeyHash(_hashedKey) {
     throw new Error('deleteApiKeyHash method must be implemented by subclass')
   }
 
@@ -382,7 +382,7 @@ class DatabaseAdapter {
    * @param {number} ttl 过期时间（秒）
    * @returns {Promise<void>}
    */
-  async setOAuthSession(sessionId, sessionData, ttl = 600) {
+  async setOAuthSession(_sessionId, _sessionData, _ttl = 600) {
     throw new Error('setOAuthSession method must be implemented by subclass')
   }
 
@@ -391,7 +391,7 @@ class DatabaseAdapter {
    * @param {string} sessionId 会话ID
    * @returns {Promise<Object>} OAuth会话数据
    */
-  async getOAuthSession(sessionId) {
+  async getOAuthSession(_sessionId) {
     throw new Error('getOAuthSession method must be implemented by subclass')
   }
 
@@ -400,7 +400,7 @@ class DatabaseAdapter {
    * @param {string} sessionId 会话ID
    * @returns {Promise<number>} 删除的记录数
    */
-  async deleteOAuthSession(sessionId) {
+  async deleteOAuthSession(_sessionId) {
     throw new Error('deleteOAuthSession method must be implemented by subclass')
   }
 
@@ -447,7 +447,7 @@ class DatabaseAdapter {
    * @param {number} ttl 过期时间（秒）
    * @returns {Promise<void>}
    */
-  async setSessionAccountMapping(sessionHash, accountId, ttl = 3600) {
+  async setSessionAccountMapping(_sessionHash, _accountId, _ttl = 3600) {
     throw new Error('setSessionAccountMapping method must be implemented by subclass')
   }
 
@@ -456,7 +456,7 @@ class DatabaseAdapter {
    * @param {string} sessionHash 会话哈希
    * @returns {Promise<string|null>} 账户ID或null
    */
-  async getSessionAccountMapping(sessionHash) {
+  async getSessionAccountMapping(_sessionHash) {
     throw new Error('getSessionAccountMapping method must be implemented by subclass')
   }
 
@@ -465,7 +465,7 @@ class DatabaseAdapter {
    * @param {string} sessionHash 会话哈希
    * @returns {Promise<number>} 删除的记录数
    */
-  async deleteSessionAccountMapping(sessionHash) {
+  async deleteSessionAccountMapping(_sessionHash) {
     throw new Error('deleteSessionAccountMapping method must be implemented by subclass')
   }
 
@@ -484,7 +484,7 @@ class DatabaseAdapter {
    * @param {string} apiKeyId API Key ID
    * @returns {Promise<number>} 当前并发数
    */
-  async incrConcurrency(apiKeyId) {
+  async incrConcurrency(_apiKeyId) {
     throw new Error('incrConcurrency method must be implemented by subclass')
   }
 
@@ -493,7 +493,7 @@ class DatabaseAdapter {
    * @param {string} apiKeyId API Key ID
    * @returns {Promise<number>} 当前并发数
    */
-  async decrConcurrency(apiKeyId) {
+  async decrConcurrency(_apiKeyId) {
     throw new Error('decrConcurrency method must be implemented by subclass')
   }
 
@@ -502,7 +502,7 @@ class DatabaseAdapter {
    * @param {string} apiKeyId API Key ID
    * @returns {Promise<number>} 当前并发数
    */
-  async getConcurrency(apiKeyId) {
+  async getConcurrency(_apiKeyId) {
     throw new Error('getConcurrency method must be implemented by subclass')
   }
 
@@ -513,7 +513,7 @@ class DatabaseAdapter {
    * @param {Object} configData 配置数据
    * @returns {Promise<void>}
    */
-  async setSystemSchedulingConfig(configData) {
+  async setSystemSchedulingConfig(_configData) {
     throw new Error('setSystemSchedulingConfig method must be implemented by subclass')
   }
 
@@ -533,17 +533,48 @@ class DatabaseAdapter {
     throw new Error('deleteSystemSchedulingConfig method must be implemented by subclass')
   }
 
-  // ==================== 请求日志管理 (8个方法) ====================
+  // ==================== 请求日志管理 (11个方法) ====================
 
   /**
-   * 记录请求日志
+   * 记录请求日志（增强版本 - 支持智能合并）
    * @param {string} keyId API Key ID
-   * @param {Object} logData 日志数据
-   * @param {number} ttl 过期时间（秒），默认7天
-   * @returns {Promise<string>} 日志ID
+   * @param {Object} logData 日志数据对象
+   * @param {number} ttl 过期时间（秒），默认604800秒（7天）
+   * @param {Object} mergeOptions 日志合并配置选项
+   * @param {boolean} mergeOptions.enabled 是否启用合并功能，默认false
+   * @param {number} mergeOptions.windowMs 合并时间窗口（毫秒），默认15000（15秒）
+   * @param {string} mergeOptions.priority 日志优先级（enhanced|basic|unknown），默认'unknown'
+   * @param {boolean} mergeOptions.forceWrite 是否强制写入（忽略合并），默认false
+   * @param {Function} mergeOptions.onDuplicate 处理重复日志的回调函数
+   * @returns {Promise<string>} 日志唯一ID
    */
-  async logRequest(keyId, logData, ttl = 604800) {
+  async logRequest(_keyId, _logData, _ttl = 604800, _mergeOptions = {}) {
     throw new Error('logRequest method must be implemented by subclass')
+  }
+
+  /**
+   * 检测和查找重复的日志条目
+   * @param {string} keyId API Key ID
+   * @param {Object} logData 待检测的日志数据
+   * @param {number} windowMs 检测时间窗口（毫秒）
+   * @returns {Promise<Array>} 重复日志条目数组，格式：[{logId, timestamp, priority, similarity}]
+   */
+  async detectDuplicateLogs(_keyId, _logData, _windowMs = 15000) {
+    throw new Error('detectDuplicateLogs method must be implemented by subclass')
+  }
+
+  /**
+   * 合并多个日志条目
+   * @param {string} primaryLogId 主要日志ID（保留的日志）
+   * @param {Array} duplicateLogIds 重复日志ID数组（将被合并删除）
+   * @param {Object} mergeStrategy 合并策略配置
+   * @param {string} mergeStrategy.priority 优先级合并方式（higher|lower|newest|oldest）
+   * @param {boolean} mergeStrategy.preserveHeaders 是否保留所有Headers信息
+   * @param {boolean} mergeStrategy.aggregateTokens 是否聚合Token统计信息
+   * @returns {Promise<Object>} 合并结果 {success: boolean, mergedLogId: string, details: Object}
+   */
+  async mergeLogEntries(_primaryLogId, _duplicateLogIds, _mergeStrategy = {}) {
+    throw new Error('mergeLogEntries method must be implemented by subclass')
   }
 
   /**
@@ -552,7 +583,7 @@ class DatabaseAdapter {
    * @param {Object} options 查询选项（分页、排序等）
    * @returns {Promise<Array>} 日志数组
    */
-  async searchLogs(query = {}, options = {}) {
+  async searchLogs(_query = {}, _options = {}) {
     throw new Error('searchLogs method must be implemented by subclass')
   }
 
@@ -561,7 +592,7 @@ class DatabaseAdapter {
    * @param {Object} query 查询条件
    * @returns {Promise<number>} 日志数量
    */
-  async countLogs(query = {}) {
+  async countLogs(_query = {}) {
     throw new Error('countLogs method must be implemented by subclass')
   }
 
@@ -570,7 +601,7 @@ class DatabaseAdapter {
    * @param {Object} query 删除条件
    * @returns {Promise<number>} 删除的日志数量
    */
-  async deleteLogs(query = {}) {
+  async deleteLogs(_query = {}) {
     throw new Error('deleteLogs method must be implemented by subclass')
   }
 
@@ -579,7 +610,7 @@ class DatabaseAdapter {
    * @param {Object} query 统计条件
    * @returns {Promise<Object>} 统计结果
    */
-  async aggregateLogs(query = {}) {
+  async aggregateLogs(_query = {}) {
     throw new Error('aggregateLogs method must be implemented by subclass')
   }
 
@@ -590,7 +621,7 @@ class DatabaseAdapter {
    * @param {string} filename 文件名
    * @returns {Promise<string>} 导出文件路径
    */
-  async exportLogs(query = {}, format = 'json', filename = 'logs') {
+  async exportLogs(_query = {}, _format = 'json', _filename = 'logs') {
     throw new Error('exportLogs method must be implemented by subclass')
   }
 
@@ -599,7 +630,7 @@ class DatabaseAdapter {
    * @param {string} cutoffDate 截止日期（ISO字符串）
    * @returns {Promise<number>} 删除的日志数量
    */
-  async deleteExpiredLogs(cutoffDate) {
+  async deleteExpiredLogs(_cutoffDate) {
     throw new Error('deleteExpiredLogs method must be implemented by subclass')
   }
 
@@ -616,8 +647,46 @@ class DatabaseAdapter {
    * @param {Object} config 配置对象
    * @returns {Promise<void>}
    */
-  async setRequestLogsConfig(config) {
+  async setRequestLogsConfig(_config) {
     throw new Error('setRequestLogsConfig method must be implemented by subclass')
+  }
+
+  // ==================== 日志合并统计和监控 (3个方法) ====================
+
+  /**
+   * 获取日志合并统计信息
+   * @param {Object} filters 过滤条件
+   * @param {string} filters.keyId 特定API Key ID
+   * @param {string} filters.dateRange 日期范围
+   * @param {string} filters.priority 日志优先级
+   * @returns {Promise<Object>} 合并统计信息
+   */
+  async getLogMergeStats(_filters = {}) {
+    throw new Error('getLogMergeStats method must be implemented by subclass')
+  }
+
+  /**
+   * 批量日志操作（高级功能）
+   * @param {Array} operations 批量操作数组
+   * @param {Object} batchOptions 批量处理选项
+   * @param {number} batchOptions.concurrency 并发度，默认5
+   * @param {boolean} batchOptions.atomicTransaction 是否原子事务，默认false
+   * @param {Function} batchOptions.onProgress 进度回调函数
+   * @returns {Promise<Array>} 批量操作结果数组
+   */
+  async batchLogOperations(_operations, _batchOptions = {}) {
+    throw new Error('batchLogOperations method must be implemented by subclass')
+  }
+
+  /**
+   * 日志系统性能监控
+   * @param {Object} monitorOptions 监控选项
+   * @param {Array} monitorOptions.metrics 监控指标名称数组
+   * @param {number} monitorOptions.windowSize 监控时间窗口大小
+   * @returns {Promise<Object>} 性能监控数据
+   */
+  async getLogPerformanceMetrics(_monitorOptions = {}) {
+    throw new Error('getLogPerformanceMetrics method must be implemented by subclass')
   }
 }
 

@@ -8,7 +8,7 @@
  * @version 1.0.0
  */
 
-const DatabaseAdapter = require('./DatabaseAdapter')
+const _DatabaseAdapter = require('./DatabaseAdapter')
 const logger = require('../../utils/logger')
 
 /**
@@ -212,13 +212,14 @@ class DatabaseFactory {
    * @param {Object} options 连接选项
    * @returns {Promise<DatabaseAdapter>} 适配器实例
    */
-  async _createAdapterInstance(type, options) {
+  async _createAdapterInstance(type, _options) {
     switch (type) {
-      case DATABASE_TYPES.REDIS:
+      case DATABASE_TYPES.REDIS: {
         // 动态加载Redis适配器（使用新的RedisAdapter）
         const RedisAdapter = require('./RedisAdapter')
         const instance = new RedisAdapter()
         return instance
+      }
 
       case DATABASE_TYPES.MONGODB:
         // 未来实现：MongoDB适配器
@@ -347,21 +348,23 @@ class DatabaseFactoryStatic {
   static create(config) {
     // 从配置中提取数据库类型
     const dbType = config.database?.type || 'redis'
-    
+
     switch (dbType.toLowerCase()) {
-      case 'redis':
+      case 'redis': {
         const RedisAdapter = require('./RedisAdapter')
         return new RedisAdapter()
+      }
       case 'mongodb':
         throw new Error('MongoDB adapter is not implemented yet')
       case 'mysql':
         throw new Error('MySQL adapter is not implemented yet')
       case 'postgresql':
         throw new Error('PostgreSQL adapter is not implemented yet')
-      default:
+      default: {
         // 默认使用 Redis
         const DefaultRedisAdapter = require('./RedisAdapter')
         return new DefaultRedisAdapter()
+      }
     }
   }
 }

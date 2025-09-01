@@ -6,10 +6,10 @@ const fs = require('fs')
 const os = require('os')
 
 // 安全的 JSON 序列化函数，处理循环引用和特殊字符
-const safeStringify = (obj, maxDepth = 3, fullDepth = false) => {
+const safeStringify = (obj, maxDepth = 8, fullDepth = false) => {
   const seen = new WeakSet()
   // 如果是fullDepth模式，增加深度限制
-  const actualMaxDepth = fullDepth ? 10 : maxDepth
+  const actualMaxDepth = fullDepth ? 15 : maxDepth
 
   const replacer = (key, value, depth = 0) => {
     if (depth > actualMaxDepth) {

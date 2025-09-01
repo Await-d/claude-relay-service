@@ -113,14 +113,27 @@ class ApiClient {
 
   // GET 请求
   async get(url, options = {}) {
-    const fullUrl = createApiUrl(url)
-    const { responseType, ...fetchOptions } = options
+    let fullUrl = createApiUrl(url)
+    const { responseType, params, ...fetchOptions } = options
+    // 处理查询参数
+    if (params && Object.keys(params).length > 0) {
+      const searchParams = new URLSearchParams()
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          searchParams.append(key, value)
+        }
+      })
+      const queryString = searchParams.toString()
+      if (queryString) {
+        fullUrl += (fullUrl.includes('?') ? '&' : '?') + queryString
+      }
+    }
     const config = this.buildConfig({
       ...fetchOptions,
       method: 'GET'
     })
-
     try {
+      console.log('🌐 API GET请求:', { fullUrl, params, config })
       const response = await fetch(fullUrl, config)
       return await this.handleResponse(response, responseType)
     } catch (error) {
@@ -133,11 +146,9 @@ class ApiClient {
   async post(url, data = null, options = {}) {
     const fullUrl = createApiUrl(url)
     const { responseType, ...fetchOptions } = options
-
     // 处理 FormData - 不要 JSON 序列化，也不要设置 Content-Type
     let body = undefined
     let headers = {}
-
     if (data) {
       if (data instanceof FormData) {
         body = data
@@ -148,7 +159,6 @@ class ApiClient {
         headers['Content-Type'] = 'application/json'
       }
     }
-
     const config = this.buildConfig({
       ...fetchOptions,
       method: 'POST',

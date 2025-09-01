@@ -3,7 +3,7 @@ const logger = require('../utils/logger')
 const database = require('../models/database')
 const { RateLimiterRedis } = require('rate-limiter-flexible')
 const config = require('../../config/config')
-const { requestLogger: requestLoggerService } = require('../services/requestLoggerService')
+const { unifiedLogServiceFactory } = require('../services/UnifiedLogServiceFactory')
 const { dynamicConfigManager } = require('../services/dynamicConfigService')
 
 // 🔧 请求日志配置缓存和动态检查机制
@@ -706,62 +706,53 @@ const requestLogger = (req, res, next) => {
           }
 
           // 🎯 关键修复：添加采样器决策检查
-          logger.info(
-            `🔍 REQUEST LOGGING STATUS CHECK - Service Available: ${!!requestLoggerService}, shouldLog Function: ${!!(requestLoggerService && typeof requestLoggerService.shouldLog === 'function')}, Service Enabled: ${requestLoggerService?.isCurrentlyEnabled ? requestLoggerService.isCurrentlyEnabled() : 'unknown'}`
-          )
+          logger.info(`🔍 REQUEST LOGGING STATUS CHECK - Using UnifiedLogService`)
 
-          const shouldLogResult = await requestLoggerService.shouldLog(req.apiKey.id, requestType, {
-            responseTime: duration,
-            statusCode: res.statusCode
-          })
+          // 🔧 使用统一日志服务记录请求（中间件级别）
+          try {
+            const unifiedLogService = await unifiedLogServiceFactory.getSingleton()
 
-          logger.info(
-            `🎯 Sampling decision for ${req.apiKey.id}: ${shouldLogResult} (type: ${requestType}, duration: ${duration}ms)`
-          )
+            const logData = {
+              // 从现有上下文复用数据
+              requestId: req._logContext.requestId,
+              method: req._logContext.method,
+              path: req._logContext.url,
+              statusCode: res.statusCode,
+              responseTime: duration,
+              userAgent: req._logContext.userAgent,
+              ipAddress: req._logContext.ip,
 
-          if (!shouldLogResult) {
-            logger.info(
-              `📊 Request skipped by sampler: ${req.method} ${req.originalUrl} (${requestType})`
+              // API Key 信息
+              keyId: req.apiKey.id,
+              keyName: req.apiKey.name,
+
+              // 请求类型（用于分析）
+              requestType,
+
+              // 可选的模型和token信息（如果存在）
+              model: req.body?.model || '',
+              tokens: req._tokenUsage?.total || 0,
+              inputTokens: req._tokenUsage?.input || 0,
+              outputTokens: req._tokenUsage?.output || 0,
+
+              // 错误信息
+              error: res.statusCode >= 400 ? `HTTP ${res.statusCode}` : null,
+
+              // 请求和响应数据
+              requestHeaders: req.headers,
+              responseHeaders: res.getHeaders(),
+              requestBody: req.body,
+              timestamp: Date.now()
+            }
+
+            await unifiedLogService.logRequest(req.apiKey.id, logData)
+            logger.debug(
+              `📊 Request logged with UnifiedLogService: ${req.method} ${req.originalUrl} - ${duration}ms`
             )
-            return
-          }
-
-          logger.info(
-            `📊 Request selected for logging: ${req.method} ${req.originalUrl} (${requestType})`
-          )
-
-          // 异步入队日志条目（性能要求：< 0.5ms）
-          const enqueueSuccess = requestLoggerService.enqueueLog({
-            // 从现有上下文复用数据
-            requestId: req._logContext.requestId,
-            method: req._logContext.method,
-            path: req._logContext.url,
-            statusCode: res.statusCode,
-            responseTime: duration,
-            userAgent: req._logContext.userAgent,
-            ipAddress: req._logContext.ip,
-
-            // API Key 信息
-            keyId: req.apiKey.id,
-            keyName: req.apiKey.name,
-
-            // 请求类型（用于采样决策）
-            requestType,
-
-            // 可选的模型和token信息（如果存在）
-            model: req.body?.model || '',
-            tokens: req._tokenUsage?.total || 0,
-            inputTokens: req._tokenUsage?.input || 0,
-            outputTokens: req._tokenUsage?.output || 0,
-
-            // 错误信息（如果存在）
-            error: res.statusCode >= 400 ? `HTTP ${res.statusCode}` : null
-          })
-
-          if (enqueueSuccess) {
-            logger.info(`📝 Log entry queued successfully for ${req.apiKey.id}`)
-          } else {
-            logger.info(`⚠️  Log queue full or disabled for ${req.apiKey.id}`)
+          } catch (unifiedLogError) {
+            logger.warn(
+              `⚠️ UnifiedLogService middleware logging failed: ${unifiedLogError.message}`
+            )
           }
         } catch (logError) {
           // 静默处理日志错误，不影响主请求流程

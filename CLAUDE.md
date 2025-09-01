@@ -206,17 +206,134 @@ npm run setup  # 自动生成密钥并创建管理员账户
 - **代码审查**: 关注安全性（加密存储）、性能（异步处理）、错误处理
 - **部署前检查**: 运行 lint → 测试 CLI 功能 → 检查日志 → Docker 构建
 
+### 增强日志系统
+
+#### 核心功能
+
+- **Headers过滤和记录**: 安全过滤敏感信息，记录重要的请求和响应头信息
+- **Token详细统计**: 记录输入、输出、缓存创建和读��等详细Token使用情况
+- **费用详细信息**: 计算并记录详细的API使用费用信息  
+- **性能监控**: 跟踪处理时间和系统性能指标
+- **数据压缩优化**: 智能压缩大型日志数据以节省存储空间
+
+#### 系统组件
+
+- **HeadersFilterService**: 安全的HTTP Headers过滤服务
+  - 白名单机制保护敏感信息
+  - IP地址自动匿名化处理
+  - 支持多种敏感数据检测模式
+  - 统计和监控功能
+
+- **EnhancedLogService**: 核心增强日志记录服务
+  - 集成Headers过滤和详细信息记录
+  - 数据验证和性能监控
+  - 智能数据压缩和优化
+  - 降级处理保证系统稳定性
+
+- **RequestLoggingIntegration**: 请求日志集成服务
+  - 无侵入式集成到现有API流程
+  - 支持流式和非流式请求记录
+  - 可配置的采样策略
+  - 异步处理不影响主要流程
+
+#### 新增数据字段
+
+增强日志在保持向后兼容的基础上，新增了以下字段：
+
+```javascript
+{
+  // 新增Headers信息
+  "requestHeaders": { /* 过滤后的请求头 */ },
+  "responseHeaders": { /* 过滤后的响应头 */ },
+  
+  // 新增Token详细信息
+  "tokenDetails": {
+    "totalTokens": 150,
+    "cacheHitRatio": 10.0,
+    "tokenEfficiency": 0.25,
+    "ephemeral5mTokens": 8,
+    "ephemeral1hTokens": 2
+  },
+  
+  // 新增费用详细信息
+  "costDetails": {
+    "totalCost": 0.02,
+    "costPerToken": 0.000133,
+    "currency": "USD"
+  },
+  
+  // 元数据
+  "logVersion": "2.1",
+  "dataOptimized": false
+}
+```
+
+#### 部署和维护
+
+```bash
+# 运行迁移脚本（部署前必须）
+node scripts/enhanced-logging-migration.js
+
+# 运行功能测试
+node scripts/enhanced-logging-test.js
+
+# 检查系统状态
+node -e "console.log(require('./src/services/EnhancedLogService').enhancedLogService.getStats())"
+```
+
+#### 配置优化
+
+```javascript
+// 生产环境推荐配置
+const { requestLoggingIntegration } = require('./src/services/RequestLoggingIntegration')
+
+requestLoggingIntegration.updateConfig({
+  enableHeadersCapture: true,
+  enableTokenDetails: true,
+  enableCostDetails: true,
+  asyncLogging: true,
+  maxLogSize: 200000  // 200KB
+})
+
+// 根据负载调整采样率
+requestLoggingIntegration.setSamplingRate(0.5) // 50%采样
+```
+
+#### 安全特性
+
+- **敏感数据过滤**: 自动识别并过滤API keys、tokens等25+种敏感模式
+- **IP地址保护**: 自动屏蔽IP地址最后一段保护用户隐私
+- **数据大小限制**: 防止超大数据导致的存储和性能问题
+- **加密存储**: 敏感日志数据使用AES加密存储
+
+#### 监控和告警
+
+- **成功率监控**: 日志记录成功率应 > 95%
+- **性能监控**: 平均处理时间应 < 50ms
+- **存储监控**: 定期检查Redis存储使用量
+- **错误告警**: 设置错误率阈值告警
+
 ### 常见文件位置
 
 - 核心服务逻辑：`src/services/` 目录
 - 路由处理：`src/routes/` 目录
 - 中间件：`src/middleware/` 目录
 - 配置管理：`config/config.js`
-- Redis 模型：`src/models/redis.js`
 - 工具函数：`src/utils/` 目录
 - 前端主题管理：`web/admin-spa/src/stores/theme.js`
 - 前端组件：`web/admin-spa/src/components/` 目录
 - 前端页面：`web/admin-spa/src/views/` 目录
+
+#### 增强日志系统文件
+
+- **Headers过滤服务**: `src/services/HeadersFilterService.js`
+- **增强日志服务**: `src/services/EnhancedLogService.js`
+- **日志集成服务**: `src/services/RequestLoggingIntegration.js`
+- **增强日志中间件**: `src/middleware/enhancedLogging.js`
+- **数据库适配器**: `src/models/database/RedisAdapter.js` (增强的logRequest方法)
+- **迁移脚本**: `scripts/enhanced-logging-migration.js`
+- **测试脚本**: `scripts/enhanced-logging-test.js`
+- **使用文档**: `ENHANCED_LOGGING_GUIDE.md`
 
 ### 重要架构决策
 

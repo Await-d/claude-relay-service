@@ -2576,18 +2576,38 @@ class RedisAdapter extends DatabaseAdapter {
   }
 
   /**
-   * 记录请求日志到Redis（优化索引版本）
+   * 记录请求日志到Redis（增强版本 - 支持Headers、详细信息和智能合并）
    * @param {string} keyId API Key ID
    * @param {Object} logData 日志数据对象
+   * @param {Object} logData.requestHeaders 过滤后的请求头信息
+   * @param {Object} logData.responseHeaders 响应头信息
+   * @param {Object} logData.tokenDetails 详细的Token统计信息
+   * @param {Object} logData.costDetails 费用详细信息
    * @param {number} ttl 过期时间（秒），默认604800秒（7天）
+   * @param {Object} mergeOptions 日志合并配置选项
+   * @param {boolean} mergeOptions.enabled 是否启用合并功能，默认false
+   * @param {number} mergeOptions.windowMs 合并时间窗口（毫秒），默认15000（15秒）
+   * @param {string} mergeOptions.priority 日志优先级（enhanced|basic|unknown），默认'unknown'
+   * @param {boolean} mergeOptions.forceWrite 是否强制写入（忽略合并），默认false
+   * @param {Function} mergeOptions.onDuplicate 处理重复日志的回调函数
    * @returns {Promise<string>} 日志唯一ID
    */
-  async logRequest(keyId, logData, ttl = 604800) {
+  async logRequest(keyId, logData, ttl = 604800, mergeOptions = {}) {
     try {
       const now = new Date()
       const today = getDateStringInTimezone(now)
       const timestamp = now.getTime()
       const logId = `request_log:${keyId}:${timestamp}`
+
+      // 设置合并选项的默认值
+      const mergeConfig = {
+        enabled: mergeOptions.enabled || false,
+        windowMs: mergeOptions.windowMs || 15000, // 15秒时间窗口
+        priority: mergeOptions.priority || 'unknown',
+        forceWrite: mergeOptions.forceWrite || false,
+        onDuplicate: mergeOptions.onDuplicate || null,
+        ...mergeOptions
+      }
 
       const defaultData = {
         timestamp,
@@ -2598,10 +2618,97 @@ class RedisAdapter extends DatabaseAdapter {
         model: '',
         tokens: 0,
         responseTime: 0,
-        error: null
+        error: null,
+        // 新增字段
+        requestHeaders: null,
+        responseHeaders: null,
+        tokenDetails: null,
+        costDetails: null,
+        // 合并相关字段
+        logVersion: '2.1',
+        priority: mergeConfig.priority,
+        mergeCount: 0,
+        originalTimestamp: timestamp,
+        isDuplicate: false
       }
 
       const finalLogData = { ...defaultData, ...logData }
+
+      // 智能合并逻辑 - 如果启用合并功能且不强制写入
+      if (mergeConfig.enabled && !mergeConfig.forceWrite) {
+        logger.debug(`🔄 检查重复日志，keyId: ${keyId}, 时间窗口: ${mergeConfig.windowMs}ms`)
+
+        try {
+          // 检测重复日志
+          const duplicates = await this.detectDuplicateLogs(
+            keyId,
+            finalLogData,
+            mergeConfig.windowMs
+          )
+
+          if (duplicates.length > 0) {
+            logger.debug(`🔍 发现 ${duplicates.length} 个重复日志候选项`)
+
+            // 找到最佳匹配的重复日志
+            const bestMatch = duplicates.reduce((best, current) =>
+              current.similarity > best.similarity ? current : best
+            )
+
+            // 如果相似度足够高，则执行合并
+            if (bestMatch.similarity > 0.8) {
+              // 80%相似度阈值
+              logger.info(
+                `🚀 合并日志: ${logId} -> ${bestMatch.logId} (相似度: ${(bestMatch.similarity * 100).toFixed(1)}%)`
+              )
+
+              // 执行合并操作
+              const mergeResult = await this.mergeLogEntries(bestMatch.logId, [logId], {
+                priority: mergeConfig.priority === 'enhanced' ? 'higher' : 'lower',
+                preserveHeaders: true,
+                aggregateTokens: true
+              })
+
+              // 调用重复处理回调
+              if (mergeConfig.onDuplicate && typeof mergeConfig.onDuplicate === 'function') {
+                try {
+                  await mergeConfig.onDuplicate({
+                    originalLogId: bestMatch.logId,
+                    duplicateLogId: logId,
+                    similarity: bestMatch.similarity,
+                    mergeResult
+                  })
+                } catch (callbackError) {
+                  logger.warn('⚠️ 重复日志回调函数执行失败:', callbackError.message)
+                }
+              }
+
+              return mergeResult.mergedLogId
+            }
+          }
+        } catch (mergeError) {
+          logger.warn('⚠️ 日志合并检测失败，继续正常写入:', mergeError.message)
+          // 合并失败时继续正常写入，不影响主要功能
+        }
+      }
+
+      // 正常写入逻辑（如果没有合并或合并失败）
+
+      // 处理复杂对象字段 - 序列化为JSON字符串以支持Redis存储
+      if (finalLogData.requestHeaders && typeof finalLogData.requestHeaders === 'object') {
+        finalLogData.requestHeaders = JSON.stringify(finalLogData.requestHeaders)
+      }
+
+      if (finalLogData.responseHeaders && typeof finalLogData.responseHeaders === 'object') {
+        finalLogData.responseHeaders = JSON.stringify(finalLogData.responseHeaders)
+      }
+
+      if (finalLogData.tokenDetails && typeof finalLogData.tokenDetails === 'object') {
+        finalLogData.tokenDetails = JSON.stringify(finalLogData.tokenDetails)
+      }
+
+      if (finalLogData.costDetails && typeof finalLogData.costDetails === 'object') {
+        finalLogData.costDetails = JSON.stringify(finalLogData.costDetails)
+      }
 
       const client = this.getClientSafe()
 
@@ -2656,10 +2763,11 @@ class RedisAdapter extends DatabaseAdapter {
    * 搜索请求日志（优化版本）
    * @param {Object} query 查询条件
    * @param {Object} options 查询选项（分页、排序等）
+   * @param {boolean} options.includeEnhancedStats 是否包含增强的统计信息
    * @returns {Promise<Array>} 日志数组
    */
   async searchLogs(query = {}, options = {}) {
-    const { offset = 0, limit = 20, sortOrder = 'desc' } = options
+    const { offset = 0, limit = 20, sortOrder = 'desc', includeEnhancedStats = false } = options
     const startTime = Date.now()
 
     try {
@@ -2821,20 +2929,124 @@ class RedisAdapter extends DatabaseAdapter {
           if (err || !logData || Object.keys(logData).length === 0) {
             return null
           }
-          return {
-            ...logData,
-            logId: paginatedLogs[index],
-            timestamp: parseInt(logData.timestamp) || 0
+
+          // 反序列化JSON字符串字段
+          const processedLogData = { ...logData }
+
+          // 通用的JSON反序列化函数
+          const safeJSONParse = (fieldName, value) => {
+            if (!value || typeof value !== 'string') {
+              return null
+            }
+
+            try {
+              return JSON.parse(value)
+            } catch (e) {
+              logger.debug(
+                `Failed to parse ${fieldName} for log ${paginatedLogs[index]}:`,
+                e.message
+              )
+              return null
+            }
           }
+
+          // 数据解压缩和反序列化
+          const jsonFields = ['requestHeaders', 'responseHeaders', 'tokenDetails', 'costDetails']
+          jsonFields.forEach((field) => {
+            if (processedLogData[field]) {
+              processedLogData[field] = safeJSONParse(field, processedLogData[field])
+            }
+          })
+
+          // 数值类型转换
+          const numericFields = {
+            timestamp: 'int',
+            duration: 'int',
+            responseTime: 'float',
+            inputTokens: 'int',
+            outputTokens: 'int',
+            totalTokens: 'int',
+            cost: 'float',
+            status: 'int',
+            tokens: 'int'
+          }
+
+          Object.entries(numericFields).forEach(([field, type]) => {
+            if (processedLogData[field] !== undefined && processedLogData[field] !== '') {
+              if (type === 'int') {
+                processedLogData[field] = parseInt(processedLogData[field]) || 0
+              } else if (type === 'float') {
+                processedLogData[field] = parseFloat(processedLogData[field]) || 0
+              }
+            }
+          })
+
+          // 计算增强统计信息
+          const enhancedLog = {
+            ...processedLogData,
+            logId: paginatedLogs[index],
+            timestamp: processedLogData.timestamp
+          }
+
+          // 添加tokenSummary（总是包含）
+          enhancedLog.tokenSummary = {
+            totalTokens: enhancedLog.totalTokens || enhancedLog.tokens || 0,
+            inputTokens: enhancedLog.inputTokens || 0,
+            outputTokens: enhancedLog.outputTokens || 0,
+            cost: enhancedLog.cost || 0
+          }
+
+          // 添加标志信息（总是包含）
+          enhancedLog.hasHeaders = !!(
+            (enhancedLog.requestHeaders &&
+              Object.keys(enhancedLog.requestHeaders || {}).length > 0) ||
+            (enhancedLog.responseHeaders &&
+              Object.keys(enhancedLog.responseHeaders || {}).length > 0)
+          )
+
+          enhancedLog.hasBody = !!(
+            (enhancedLog.requestBody && enhancedLog.requestBody.trim().length > 0) ||
+            (enhancedLog.responseBody && enhancedLog.responseBody.trim().length > 0)
+          )
+
+          enhancedLog.isError = (enhancedLog.status || 0) >= 400
+          enhancedLog.dateTime = enhancedLog.timestamp
+            ? new Date(enhancedLog.timestamp).toISOString()
+            : null
+
+          // 如果启用了增强统计，添加更多详细信息
+          if (includeEnhancedStats) {
+            enhancedLog.metadata = {
+              hasRequestHeaders: !!(
+                enhancedLog.requestHeaders && Object.keys(enhancedLog.requestHeaders).length > 0
+              ),
+              hasResponseHeaders: !!(
+                enhancedLog.responseHeaders && Object.keys(enhancedLog.responseHeaders).length > 0
+              ),
+              hasTokenDetails: !!(
+                enhancedLog.tokenDetails && Object.keys(enhancedLog.tokenDetails || {}).length > 0
+              ),
+              hasCostDetails: !!(
+                enhancedLog.costDetails && Object.keys(enhancedLog.costDetails || {}).length > 0
+              ),
+              processedAt: new Date().toISOString()
+            }
+          }
+
+          return enhancedLog
         })
         .filter(Boolean)
 
       logger.info('🔍 DEBUGGING: Final processed logs:', {
         processedCount: logs.length,
+        includeEnhancedStats,
         sampleLogData: logs.slice(0, 2).map((log) => ({
           logId: log.logId,
           keyId: log.keyId,
           timestamp: log.timestamp,
+          hasHeaders: log.hasHeaders,
+          hasBody: log.hasBody,
+          tokenSummary: log.tokenSummary,
           fieldsCount: Object.keys(log).length
         }))
       })
@@ -3592,6 +3804,316 @@ class RedisAdapter extends DatabaseAdapter {
   }
 
   /**
+   * 获取单个请求日志的详细信息（增强版本）
+   * @param {string} logId 日志ID (完整的Redis key或简化的ID)
+   * @returns {Promise<Object|null>} 日志详细信息对象或null
+   */
+  async getRequestLogDetails(logId) {
+    try {
+      const client = this.getClientSafe()
+      let actualLogKey = logId
+      const startTime = Date.now()
+
+      // 参数验证和清理
+      if (!logId || typeof logId !== 'string') {
+        logger.warn('获取日志详情失败: 无效的日志ID参数', { logId, type: typeof logId })
+        return null
+      }
+
+      // 清理和标准化logId
+      const cleanLogId = logId.trim().replace(/^["']|["']$/g, '') // 移除可能的引号
+      if (!cleanLogId) {
+        logger.warn('获取日志详情失败: 清理后的日志ID为空', { originalLogId: logId })
+        return null
+      }
+
+      // 智能识别和构造完整的Redis key
+      if (!cleanLogId.startsWith('request_log:')) {
+        // 如果是简化的ID格式（如 keyId:timestamp），构造完整key
+        if (cleanLogId.includes(':')) {
+          const parts = cleanLogId.split(':')
+          if (parts.length === 2 && parts[0] && parts[1]) {
+            actualLogKey = `request_log:${parts[0]}:${parts[1]}`
+          } else if (parts.length === 3 && parts[0] === 'request_log') {
+            actualLogKey = cleanLogId // 已经是完整格式
+          } else {
+            logger.warn('获取日志详情失败: 无法解析日志ID格式', {
+              cleanLogId,
+              parts,
+              expectedFormat: 'keyId:timestamp 或 request_log:keyId:timestamp'
+            })
+            return null
+          }
+        } else {
+          // 如果只是timestamp，尝试通过模式匹配查找（性能较低，谨慎使用）
+          logger.debug('尝试通过timestamp查找日志', { timestamp: cleanLogId })
+          const pattern = `request_log:*:${cleanLogId}`
+          const matchingKeys = await client.keys(pattern)
+          if (matchingKeys.length > 0) {
+            actualLogKey = matchingKeys[0] // 取第一个匹配的key
+            logger.debug('通过模式匹配找到日志', { pattern, matchingKey: actualLogKey })
+          } else {
+            logger.warn('获取日志详情失败: 未找到匹配的日志key', { pattern })
+            return null
+          }
+        }
+      } else {
+        actualLogKey = cleanLogId
+      }
+
+      logger.debug(`获取日志详情: ${logId} -> ${actualLogKey}`)
+
+      // 获取完整的hash数据
+      const logData = await client.hgetall(actualLogKey)
+
+      // 检查日志是否存在
+      if (!logData || Object.keys(logData).length === 0) {
+        logger.warn(`日志不存在: ${actualLogKey}`)
+        return null
+      }
+
+      // 处理和反序列化复杂对象字段
+      const processedLogData = { ...logData }
+
+      // 改进的JSON反序列化函数，支持压缩数据
+      const safeJSONParse = (fieldName, value) => {
+        if (!value || typeof value !== 'string') {
+          return null
+        }
+
+        try {
+          // 尝试直接JSON解析
+          return JSON.parse(value)
+        } catch (e) {
+          // 如果直接解析失败，检查是否是其他格式
+          logger.debug(`解析${fieldName}失败 for log ${actualLogKey}:`, e.message)
+
+          // 检查是否是被转义的JSON字符串
+          if (value.startsWith('\\"') || value.includes('\\"')) {
+            try {
+              const unescaped = value.replace(/\\"/g, '"')
+              return JSON.parse(unescaped)
+            } catch (unescapeError) {
+              logger.debug(`反转义后解析${fieldName}仍然失败:`, unescapeError.message)
+            }
+          }
+
+          return null
+        }
+      }
+
+      // 扩展的数据解压缩和反序列化字段
+      const jsonFields = [
+        'requestHeaders',
+        'responseHeaders',
+        'tokenDetails',
+        'costDetails',
+        'metadata'
+      ]
+      jsonFields.forEach((field) => {
+        if (processedLogData[field]) {
+          processedLogData[field] = safeJSONParse(field, processedLogData[field])
+        }
+      })
+
+      // 扩展的数值类型字段转换（支持更多缓存token类型）
+      const numericFields = {
+        timestamp: 'int',
+        duration: 'int',
+        responseTime: 'float',
+        inputTokens: 'int',
+        outputTokens: 'int',
+        totalTokens: 'int',
+        cacheCreateTokens: 'int', // 新增缓存token
+        cacheReadTokens: 'int', // 新增缓存token
+        cost: 'float',
+        status: 'int',
+        tokens: 'int'
+      }
+
+      Object.entries(numericFields).forEach(([field, type]) => {
+        if (processedLogData[field] !== undefined && processedLogData[field] !== '') {
+          if (type === 'int') {
+            processedLogData[field] = parseInt(processedLogData[field]) || 0
+          } else if (type === 'float') {
+            processedLogData[field] = parseFloat(processedLogData[field]) || 0
+          }
+        }
+      })
+
+      // 添加日志ID信息
+      processedLogData.logId = actualLogKey
+      processedLogData.shortLogId = cleanLogId
+      processedLogData.originalLogId = logId
+
+      // 增强的计算字段和元数据
+      processedLogData.hasHeaders = !!(
+        (processedLogData.requestHeaders &&
+          Object.keys(processedLogData.requestHeaders).length > 0) ||
+        (processedLogData.responseHeaders &&
+          Object.keys(processedLogData.responseHeaders).length > 0)
+      )
+
+      processedLogData.hasBody = !!(
+        (processedLogData.requestBody && processedLogData.requestBody.trim().length > 0) ||
+        (processedLogData.responseBody && processedLogData.responseBody.trim().length > 0)
+      )
+
+      processedLogData.isError = (processedLogData.status || 0) >= 400
+      processedLogData.dateTime = processedLogData.timestamp
+        ? new Date(processedLogData.timestamp).toISOString()
+        : null
+
+      // 详细的状态分类
+      const statusCode = processedLogData.status || 0
+      processedLogData.statusCategory =
+        statusCode >= 500
+          ? 'server_error'
+          : statusCode >= 400
+            ? 'client_error'
+            : statusCode >= 300
+              ? 'redirect'
+              : statusCode >= 200
+                ? 'success'
+                : 'unknown'
+
+      // 增强的Token汇总信息（支持缓存token）
+      processedLogData.tokenSummary = {
+        totalTokens: processedLogData.totalTokens || processedLogData.tokens || 0,
+        inputTokens: processedLogData.inputTokens || 0,
+        outputTokens: processedLogData.outputTokens || 0,
+        cacheCreateTokens: processedLogData.cacheCreateTokens || 0, // 新增
+        cacheReadTokens: processedLogData.cacheReadTokens || 0, // 新增
+        cost: processedLogData.cost || 0,
+        costBreakdown: processedLogData.costDetails || null,
+        efficiency: 0
+      }
+
+      // 计算token使用效率
+      if (processedLogData.tokenSummary.totalTokens > 0) {
+        processedLogData.tokenSummary.efficiency = parseFloat(
+          (
+            (processedLogData.tokenSummary.outputTokens /
+              processedLogData.tokenSummary.totalTokens) *
+            100
+          ).toFixed(2)
+        )
+      }
+
+      // 性能分析
+      const responseTime = processedLogData.duration || processedLogData.responseTime || 0
+      processedLogData.performanceAnalysis = {
+        responseTimeMs: responseTime,
+        isSlowRequest: responseTime > 5000, // 超过5秒
+        performanceLevel:
+          responseTime > 10000
+            ? 'very_slow'
+            : responseTime > 5000
+              ? 'slow'
+              : responseTime > 1000
+                ? 'normal'
+                : 'fast',
+        tokenEfficiency: processedLogData.tokenSummary.efficiency,
+        errorCategory: processedLogData.statusCategory
+      }
+
+      // 增强的详细元数据标志
+      processedLogData.metadata = {
+        // 基本检索信息
+        retrievedAt: new Date().toISOString(),
+        processingTimeMs: Date.now() - startTime,
+
+        // 数据可用性标志
+        hasRequestHeaders: !!(
+          processedLogData.requestHeaders && Object.keys(processedLogData.requestHeaders).length > 0
+        ),
+        hasResponseHeaders: !!(
+          processedLogData.responseHeaders &&
+          Object.keys(processedLogData.responseHeaders).length > 0
+        ),
+        hasRequestBody: !!(
+          processedLogData.requestBody && processedLogData.requestBody.trim().length > 0
+        ),
+        hasResponseBody: !!(
+          processedLogData.responseBody && processedLogData.responseBody.trim().length > 0
+        ),
+        hasTokenDetails: !!(
+          processedLogData.tokenDetails &&
+          Object.keys(processedLogData.tokenDetails || {}).length > 0
+        ),
+        hasCostDetails: !!(
+          processedLogData.costDetails && Object.keys(processedLogData.costDetails || {}).length > 0
+        ),
+
+        // 数据完整性标志
+        isComplete: !!(
+          processedLogData.requestHeaders &&
+          processedLogData.responseHeaders &&
+          processedLogData.tokenSummary
+        ),
+        hasError: processedLogData.isError,
+
+        // 数据大小信息
+        dataSize: {
+          requestBodySize: processedLogData.requestBody ? processedLogData.requestBody.length : 0,
+          responseBodySize: processedLogData.responseBody
+            ? processedLogData.responseBody.length
+            : 0,
+          requestHeadersSize: processedLogData.requestHeaders
+            ? JSON.stringify(processedLogData.requestHeaders).length
+            : 0,
+          responseHeadersSize: processedLogData.responseHeaders
+            ? JSON.stringify(processedLogData.responseHeaders).length
+            : 0,
+          totalSize: 0
+        },
+
+        // Header分析
+        headerAnalysis: {
+          requestCount: processedLogData.requestHeaders
+            ? Object.keys(processedLogData.requestHeaders).length
+            : 0,
+          responseCount: processedLogData.responseHeaders
+            ? Object.keys(processedLogData.responseHeaders).length
+            : 0,
+          hasUserAgent: !!(
+            processedLogData.requestHeaders?.['user-agent'] ||
+            processedLogData.requestHeaders?.['User-Agent']
+          ),
+          hasContentType: !!(
+            processedLogData.requestHeaders?.['content-type'] ||
+            processedLogData.requestHeaders?.['Content-Type'] ||
+            processedLogData.responseHeaders?.['content-type'] ||
+            processedLogData.responseHeaders?.['Content-Type']
+          )
+        }
+      }
+
+      // 计算总数据大小
+      processedLogData.metadata.dataSize.totalSize =
+        processedLogData.metadata.dataSize.requestBodySize +
+        processedLogData.metadata.dataSize.responseBodySize +
+        processedLogData.metadata.dataSize.requestHeadersSize +
+        processedLogData.metadata.dataSize.responseHeadersSize
+
+      const endTime = Date.now()
+      logger.debug(
+        `成功获取日志详情: ${actualLogKey}, 耗时: ${endTime - startTime}ms, 字段数: ${Object.keys(processedLogData).length}, hasHeaders: ${processedLogData.hasHeaders}, hasBody: ${processedLogData.hasBody}, tokens: ${processedLogData.tokenSummary.totalTokens}`
+      )
+
+      return processedLogData
+    } catch (error) {
+      logger.error(`获取日志详情失败 ${logId}:`, {
+        error: error.message,
+        stack: error.stack,
+        logId,
+        timestamp: new Date().toISOString()
+      })
+      return null
+    }
+  }
+
+  /**
    * ==========================================
    * 抽象日志存储接口 (Abstract Log Storage Interface)
    * ==========================================
@@ -3715,6 +4237,294 @@ class RedisAdapter extends DatabaseAdapter {
     // 使用时区转换的日期
     const date = getDateStringInTimezone(new Date(logEntry.timestamp))
     return `request_log_index:${logEntry.keyId}:${date}`
+  }
+
+  // ==================== 智能日志合并功能 ====================
+
+  /**
+   * 检测和查找重复的日志条目
+   * @param {string} keyId API Key ID
+   * @param {Object} logData 待检测的日志数据
+   * @param {number} windowMs 检测时间窗口（毫秒）
+   * @returns {Promise<Array>} 重复日志条目数组
+   */
+  async detectDuplicateLogs(keyId, logData, windowMs = 15000) {
+    try {
+      const client = this.getClientSafe()
+      const currentTime = logData.timestamp || Date.now()
+      const startTime = currentTime - windowMs
+      const endTime = currentTime + windowMs
+
+      // 搜索时间窗口内的相关日志
+      const pattern = `request_log:${keyId}:*`
+      const logKeys = await client.keys(pattern)
+
+      const duplicates = []
+
+      // 批量获取日志详情
+      if (logKeys.length > 0) {
+        const pipeline = client.pipeline()
+        logKeys.forEach((key) => pipeline.hgetall(key))
+        const results = await pipeline.exec()
+
+        results.forEach(([err, logEntry], index) => {
+          if (err || !logEntry) {
+            return
+          }
+
+          const logTimestamp = parseInt(logEntry.timestamp)
+          if (logTimestamp < startTime || logTimestamp > endTime) {
+            return
+          }
+
+          // 计算相似度
+          const similarity = this._calculateLogSimilarity(logData, logEntry)
+          if (similarity > 0.8) {
+            // 80%相似度阈值
+            duplicates.push({
+              logId: logKeys[index],
+              timestamp: logTimestamp,
+              priority: this._determinePriority(logEntry),
+              similarity: Math.round(similarity * 100) / 100,
+              data: logEntry
+            })
+          }
+        })
+      }
+
+      // 按优先级和时间排序
+      duplicates.sort((a, b) => {
+        const priorityOrder = { enhanced: 3, basic: 2, unknown: 1 }
+        const priorityDiff = (priorityOrder[b.priority] || 1) - (priorityOrder[a.priority] || 1)
+        return priorityDiff !== 0 ? priorityDiff : b.timestamp - a.timestamp
+      })
+
+      return duplicates
+    } catch (error) {
+      logger.error('❌ Failed to detect duplicate logs:', error)
+      return []
+    }
+  }
+
+  /**
+   * 合并多个日志条目
+   * @param {string} primaryLogId 主要日志ID
+   * @param {Array} duplicateLogIds 重复日志ID数组
+   * @param {Object} mergeStrategy 合并策略配置
+   * @returns {Promise<Object>} 合并结果
+   */
+  async mergeLogEntries(primaryLogId, duplicateLogIds, mergeStrategy = {}) {
+    try {
+      const client = this.getClientSafe()
+
+      // 默认合并策略
+      const strategy = {
+        priority: mergeStrategy.priority || 'higher',
+        preserveHeaders: mergeStrategy.preserveHeaders !== false,
+        aggregateTokens: mergeStrategy.aggregateTokens !== false,
+        ...mergeStrategy
+      }
+
+      // 获取所有要合并的日志数据
+      const allLogIds = [primaryLogId, ...duplicateLogIds]
+      const pipeline = client.pipeline()
+      allLogIds.forEach((logId) => pipeline.hgetall(logId))
+      const results = await pipeline.exec()
+
+      const logEntries = results
+        .filter(([err, data]) => !err && data && Object.keys(data).length > 0)
+        .map(([, data]) => data)
+
+      if (logEntries.length < 2) {
+        return { success: false, error: 'Insufficient logs to merge' }
+      }
+
+      // 执行合并
+      const mergedData = this._performLogMerge(logEntries, strategy)
+
+      // 更新主日志
+      await client.hmset(primaryLogId, mergedData)
+
+      // 删除重复日志
+      if (duplicateLogIds.length > 0) {
+        await client.del(...duplicateLogIds)
+
+        // 清理相关索引
+        await this._cleanupLogIndexes(client, duplicateLogIds)
+      }
+
+      logger.info(`🔄 Merged ${duplicateLogIds.length} duplicate logs into ${primaryLogId}`)
+
+      return {
+        success: true,
+        mergedLogId: primaryLogId,
+        details: {
+          mergedCount: duplicateLogIds.length,
+          strategy: strategy.priority,
+          preservedHeaders: strategy.preserveHeaders,
+          aggregatedTokens: strategy.aggregateTokens
+        }
+      }
+    } catch (error) {
+      logger.error('❌ Failed to merge log entries:', error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  /**
+   * 计算日志相似度
+   * @private
+   * @param {Object} logA 日志A
+   * @param {Object} logB 日志B
+   * @returns {number} 相似度 (0-1)
+   */
+  _calculateLogSimilarity(logA, logB) {
+    let score = 0
+    let factors = 0
+
+    // 路径相似度 (权重: 0.3)
+    if (logA.path && logB.path) {
+      score += logA.path === logB.path ? 0.3 : 0
+      factors += 0.3
+    }
+
+    // 方法相似度 (权重: 0.2)
+    if (logA.method && logB.method) {
+      score += logA.method === logB.method ? 0.2 : 0
+      factors += 0.2
+    }
+
+    // 模型相似度 (权重: 0.2)
+    if (logA.model && logB.model) {
+      score += logA.model === logB.model ? 0.2 : 0
+      factors += 0.2
+    }
+
+    // 状态码相似度 (权重: 0.15)
+    if (logA.status && logB.status) {
+      score += logA.status === logB.status ? 0.15 : 0
+      factors += 0.15
+    }
+
+    // Token数量相似度 (权重: 0.15)
+    const tokensA = parseInt(logA.tokens || logA.totalTokens || 0)
+    const tokensB = parseInt(logB.tokens || logB.totalTokens || 0)
+    if (tokensA > 0 && tokensB > 0) {
+      const tokenRatio = Math.min(tokensA, tokensB) / Math.max(tokensA, tokensB)
+      score += tokenRatio > 0.8 ? 0.15 : 0
+      factors += 0.15
+    }
+
+    return factors > 0 ? score / factors : 0
+  }
+
+  /**
+   * 确定日志优先级
+   * @private
+   * @param {Object} logEntry 日志条目
+   * @returns {string} 优先级
+   */
+  _determinePriority(logEntry) {
+    if (logEntry.source === 'unified_service' || logEntry.logVersion?.startsWith('2.')) {
+      return 'enhanced'
+    }
+
+    if (logEntry.requestHeaders || logEntry.responseHeaders || logEntry.tokenDetails) {
+      return 'enhanced'
+    }
+
+    if (logEntry.logVersion || logEntry.source) {
+      return 'basic'
+    }
+
+    return 'unknown'
+  }
+
+  /**
+   * 执行日志数据合并
+   * @private
+   * @param {Array} logEntries 日志条目数组
+   * @param {Object} strategy 合并策略
+   * @returns {Object} 合并后的数据
+   */
+  _performLogMerge(logEntries, strategy) {
+    // 按优先级排序，选择最佳数据源
+    const sortedEntries = logEntries.sort((a, b) => {
+      const priorityOrder = { enhanced: 3, basic: 2, unknown: 1 }
+      const aPriority = this._determinePriority(a)
+      const bPriority = this._determinePriority(b)
+      return (priorityOrder[bPriority] || 1) - (priorityOrder[aPriority] || 1)
+    })
+
+    const primary = sortedEntries[0]
+    const merged = { ...primary }
+
+    // 聚合Token统计
+    if (strategy.aggregateTokens) {
+      let totalTokens = 0
+      let totalInputTokens = 0
+      let totalOutputTokens = 0
+      let totalCacheCreateTokens = 0
+      let totalCacheReadTokens = 0
+      let totalRequests = 0
+
+      logEntries.forEach((entry) => {
+        totalTokens += parseInt(entry.tokens || entry.totalTokens || 0)
+        totalInputTokens += parseInt(entry.inputTokens || 0)
+        totalOutputTokens += parseInt(entry.outputTokens || 0)
+        totalCacheCreateTokens += parseInt(entry.cacheCreateTokens || 0)
+        totalCacheReadTokens += parseInt(entry.cacheReadTokens || 0)
+        totalRequests += 1
+      })
+
+      merged.tokens = totalTokens
+      merged.totalTokens = totalTokens
+      merged.inputTokens = totalInputTokens
+      merged.outputTokens = totalOutputTokens
+      merged.cacheCreateTokens = totalCacheCreateTokens
+      merged.cacheReadTokens = totalCacheReadTokens
+      merged.mergedRequestCount = totalRequests
+    }
+
+    // 合并Headers信息
+    if (strategy.preserveHeaders) {
+      const allRequestHeaders = {}
+      const allResponseHeaders = {}
+
+      logEntries.forEach((entry) => {
+        if (entry.requestHeaders) {
+          const headers =
+            typeof entry.requestHeaders === 'string'
+              ? JSON.parse(entry.requestHeaders)
+              : entry.requestHeaders
+          Object.assign(allRequestHeaders, headers)
+        }
+
+        if (entry.responseHeaders) {
+          const headers =
+            typeof entry.responseHeaders === 'string'
+              ? JSON.parse(entry.responseHeaders)
+              : entry.responseHeaders
+          Object.assign(allResponseHeaders, headers)
+        }
+      })
+
+      if (Object.keys(allRequestHeaders).length > 0) {
+        merged.requestHeaders = JSON.stringify(allRequestHeaders)
+      }
+
+      if (Object.keys(allResponseHeaders).length > 0) {
+        merged.responseHeaders = JSON.stringify(allResponseHeaders)
+      }
+    }
+
+    // 添加合并元数据
+    merged.logVersion = '2.0.0-merged'
+    merged.source = 'unified_service'
+    merged.mergedAt = new Date().toISOString()
+    merged.originalLogCount = logEntries.length
+
+    return merged
   }
 }
 

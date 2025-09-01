@@ -65,21 +65,154 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
   const configLoading = ref(false)
   const configSaving = ref(false)
 
+  // 日志去重和合并工具函数
+  const mergeLogsByRequest = (logsList) => {
+    if (!Array.isArray(logsList) || logsList.length === 0) {
+      return []
+    }
+
+    // 使用Map进行去重，基于多个字段组合生成唯一key
+    const logMap = new Map()
+    const TIME_WINDOW = 30 * 1000 // 30秒时间窗口
+
+    logsList.forEach((log) => {
+      // 生成去重键：优先使用requestId，否则使用keyId+路径+时间窗口
+      let dedupeKey
+      if (log.requestId) {
+        dedupeKey = `req_${log.requestId}`
+      } else {
+        // 将时间戳舍入到30秒窗口
+        const timestamp = new Date(log.timestamp || Date.now()).getTime()
+        const timeWindow = Math.floor(timestamp / TIME_WINDOW) * TIME_WINDOW
+        dedupeKey = `${log.keyId || 'unknown'}_${log.path || '/'}_${log.method || 'GET'}_${timeWindow}`
+      }
+
+      if (logMap.has(dedupeKey)) {
+        // 合并现有记录
+        const existingLog = logMap.get(dedupeKey)
+        const mergedLog = mergeLogEntries(existingLog, log)
+        logMap.set(dedupeKey, mergedLog)
+      } else {
+        // 新记录，确保有必要的默认值
+        logMap.set(dedupeKey, {
+          ...log,
+          _mergedCount: 1,
+          _originalIds: [log.id || log.logId || log.timestamp]
+        })
+      }
+    })
+
+    return Array.from(logMap.values()).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+  }
+
+  // 合并两个日志条目
+  const mergeLogEntries = (existing, newLog) => {
+    const merged = { ...existing }
+
+    // 使用最新的时间戳和状态
+    if (new Date(newLog.timestamp) > new Date(existing.timestamp)) {
+      merged.timestamp = newLog.timestamp
+      merged.statusCode = newLog.statusCode || existing.statusCode
+      merged.responseTime = newLog.responseTime || existing.responseTime
+    }
+
+    // 聚合token信息
+    merged.tokens = (merged.tokens || 0) + (newLog.tokens || 0)
+    merged.inputTokens = (merged.inputTokens || 0) + (newLog.inputTokens || 0)
+    merged.outputTokens = (merged.outputTokens || 0) + (newLog.outputTokens || 0)
+    merged.cacheCreateTokens = (merged.cacheCreateTokens || 0) + (newLog.cacheCreateTokens || 0)
+    merged.cacheReadTokens = (merged.cacheReadTokens || 0) + (newLog.cacheReadTokens || 0)
+
+    // 聚合费用信息
+    merged.cost = (merged.cost || 0) + (newLog.cost || 0)
+
+    // 聚合tokenDetails和costDetails
+    if (newLog.tokenDetails || newLog.costDetails) {
+      merged.tokenDetails = {
+        totalTokens:
+          (merged.tokenDetails?.totalTokens || 0) + (newLog.tokenDetails?.totalTokens || 0),
+        inputTokens:
+          (merged.tokenDetails?.inputTokens || 0) + (newLog.tokenDetails?.inputTokens || 0),
+        outputTokens:
+          (merged.tokenDetails?.outputTokens || 0) + (newLog.tokenDetails?.outputTokens || 0),
+        cacheCreateTokens:
+          (merged.tokenDetails?.cacheCreateTokens || 0) +
+          (newLog.tokenDetails?.cacheCreateTokens || 0),
+        cacheReadTokens:
+          (merged.tokenDetails?.cacheReadTokens || 0) + (newLog.tokenDetails?.cacheReadTokens || 0),
+        cacheHitRatio: Math.max(
+          merged.tokenDetails?.cacheHitRatio || 0,
+          newLog.tokenDetails?.cacheHitRatio || 0
+        ),
+        tokenEfficiency: Math.max(
+          merged.tokenDetails?.tokenEfficiency || 0,
+          newLog.tokenDetails?.tokenEfficiency || 0
+        ),
+        ephemeral5mTokens:
+          (merged.tokenDetails?.ephemeral5mTokens || 0) +
+          (newLog.tokenDetails?.ephemeral5mTokens || 0),
+        ephemeral1hTokens:
+          (merged.tokenDetails?.ephemeral1hTokens || 0) +
+          (newLog.tokenDetails?.ephemeral1hTokens || 0)
+      }
+
+      merged.costDetails = {
+        totalCost: (merged.costDetails?.totalCost || 0) + (newLog.costDetails?.totalCost || 0),
+        costPerToken: newLog.costDetails?.costPerToken || merged.costDetails?.costPerToken || 0,
+        currency: newLog.costDetails?.currency || merged.costDetails?.currency || 'USD'
+      }
+    }
+
+    // 合并usage字段
+    if (newLog.usage) {
+      merged.usage = {
+        input_tokens: (merged.usage?.input_tokens || 0) + (newLog.usage?.input_tokens || 0),
+        output_tokens: (merged.usage?.output_tokens || 0) + (newLog.usage?.output_tokens || 0),
+        cache_creation_input_tokens:
+          (merged.usage?.cache_creation_input_tokens || 0) +
+          (newLog.usage?.cache_creation_input_tokens || 0),
+        cache_read_input_tokens:
+          (merged.usage?.cache_read_input_tokens || 0) +
+          (newLog.usage?.cache_read_input_tokens || 0)
+      }
+    }
+
+    // 保持最完整的headers信息
+    if (newLog.requestHeaders && Object.keys(newLog.requestHeaders).length > 0) {
+      merged.requestHeaders = { ...merged.requestHeaders, ...newLog.requestHeaders }
+    }
+    if (newLog.responseHeaders && Object.keys(newLog.responseHeaders).length > 0) {
+      merged.responseHeaders = { ...merged.responseHeaders, ...newLog.responseHeaders }
+    }
+
+    // 保持最完整的请求和响应体
+    if (newLog.requestBody && !merged.requestBody) {
+      merged.requestBody = newLog.requestBody
+    }
+    if (newLog.responseBody && !merged.responseBody) {
+      merged.responseBody = newLog.responseBody
+    }
+
+    // 更新合并计数和ID列表
+    merged._mergedCount = (merged._mergedCount || 1) + 1
+    merged._originalIds = [
+      ...(merged._originalIds || []),
+      newLog.id || newLog.logId || newLog.timestamp
+    ]
+
+    return merged
+  }
+
   // Computed
   const filteredLogs = computed(() => {
     // 确保 logs.value 是一个数组
     const logsList = Array.isArray(logs.value) ? logs.value : []
 
-    if (!filters.value.search) return logsList
+    // 先进行去重合并
+    const mergedLogs = mergeLogsByRequest(logsList)
 
-    const searchTerm = filters.value.search.toLowerCase()
-    return logsList.filter(
-      (log) =>
-        log.keyName?.toLowerCase().includes(searchTerm) ||
-        log.userAgent?.toLowerCase().includes(searchTerm) ||
-        log.ipAddress?.includes(searchTerm) ||
-        log.path?.toLowerCase().includes(searchTerm)
-    )
+    // 完全依赖后端过滤，移除前端搜索逻辑避免双重过滤
+    return mergedLogs
   })
 
   const hasFilters = computed(() => {
@@ -297,6 +430,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
 
   // Actions - 日志查询
   const fetchLogs = async (params = {}) => {
+    console.log('🚀 fetchLogs方法被调用!', { params, filtersValue: filters.value })
     loading.value = true
     try {
       // 转换参数映射：前端 -> 后端
@@ -306,8 +440,16 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
         // 参数名映射
         keyId: queryParams.apiKeyId, // apiKeyId -> keyId
         status: queryParams.statusCode, // statusCode -> status
-        // 移除前端专用参数和已映射的参数
-        search: undefined, // 暂时移除搜索，改为前端过滤
+        // 保留其他筛选参数
+        startDate: queryParams.startDate,
+        endDate: queryParams.endDate,
+        method: queryParams.method,
+        search: queryParams.search, // 保留搜索功能
+        page: queryParams.page,
+        limit: queryParams.limit,
+        sortBy: queryParams.sortBy,
+        sortOrder: queryParams.sortOrder,
+        // 移除已映射的参数
         apiKeyId: undefined,
         statusCode: undefined
       }
@@ -318,6 +460,10 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
           delete backendParams[key]
         }
       })
+
+      // 调试：打印发送的参数
+      console.log('🔍 fetchLogs发送的参数:', backendParams)
+      console.log('🔍 原始filters状态:', filters.value)
 
       const result = await apiClient.get('/admin/request-logs', { params: backendParams })
 
@@ -363,6 +509,38 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       throw error
     } finally {
       loading.value = false
+    }
+  }
+
+  // 获取单个日志的详细信息
+  const fetchLogDetails = async (logId) => {
+    if (!logId) {
+      console.warn('fetchLogDetails: logId为空')
+      return null
+    }
+
+    try {
+      console.log(`[fetchLogDetails] 获取日志详情: ${logId}`)
+      const result = await apiClient.get(`/admin/request-logs/${logId}/details`)
+
+      if (result && result.success && result.data) {
+        console.log(`[fetchLogDetails] 成功获取日志详情:`, result.data)
+        return result.data
+      } else {
+        console.warn(`[fetchLogDetails] API返回失败:`, result)
+        return null
+      }
+    } catch (error) {
+      console.error('Failed to fetch log details:', error)
+      // 根据错误类型提供友好的错误信息
+      if (error.response?.status === 404) {
+        showToast('日志记录不存在或已被删除', 'error')
+      } else if (error.response?.status === 403) {
+        showToast('无权限查看此日志详情', 'error')
+      } else {
+        showToast('获取日志详情失败，请稍后重试', 'error')
+      }
+      throw error
     }
   }
 
@@ -731,6 +909,7 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
     // Actions - 日志管理
     fetchLogs,
     fetchLogsByApiKey,
+    fetchLogDetails,
     fetchStats,
     deleteLogsByApiKey,
     exportLogs,

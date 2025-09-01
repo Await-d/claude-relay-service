@@ -878,6 +878,35 @@ module.exports.getDatabase = async function () {
   return await databaseManager.getInstance()
 }
 
+// 请求日志相关方法 - IDE识别 + 实际转发到Proxy
+module.exports.searchLogs = async function (...args) {
+  return await databaseProxy.searchLogs(...args)
+}
+module.exports.countLogs = async function (...args) {
+  return await databaseProxy.countLogs(...args)
+}
+module.exports.aggregateLogs = async function (...args) {
+  return await databaseProxy.aggregateLogs(...args)
+}
+module.exports.exportLogs = async function (...args) {
+  return await databaseProxy.exportLogs(...args)
+}
+module.exports.deleteLogs = async function (...args) {
+  return await databaseProxy.deleteLogs(...args)
+}
+module.exports.deleteExpiredLogs = async function (...args) {
+  return await databaseProxy.deleteExpiredLogs(...args)
+}
+module.exports.getRequestLogsConfig = async function (...args) {
+  return await databaseProxy.getRequestLogsConfig(...args)
+}
+module.exports.setRequestLogsConfig = async function (...args) {
+  return await databaseProxy.setRequestLogsConfig(...args)
+}
+module.exports.getRequestLogDetails = async function (...args) {
+  return await databaseProxy.getRequestLogDetails(...args)
+}
+
 // 管理器实例（供高级用户使用）
 module.exports._manager = databaseManager
 module.exports._factory = databaseFactory

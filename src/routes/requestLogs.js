@@ -472,7 +472,7 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
   }
 })
 
-// 查询请求日志
+// 查询请求日志（增强版本）
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
     const {
@@ -486,7 +486,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       model,
       search,
       sortBy = 'timestamp',
-      sortOrder = 'desc'
+      sortOrder = 'desc',
+      enhancedStats = 'true' // 新增参数
     } = req.query
 
     const offset = (page - 1) * limit
@@ -502,7 +503,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       model,
       search,
       sortBy,
-      sortOrder
+      sortOrder,
+      enhancedStats
     })
 
     // 🔍 调试：检查Redis中存在的键
@@ -556,19 +558,144 @@ router.get('/', authenticateAdmin, async (req, res) => {
       offset: parseInt(offset),
       limit: parseInt(limit),
       sortBy,
-      sortOrder
+      sortOrder,
+      includeEnhancedStats: enhancedStats === 'true' // 启用增强统计
     })
 
     const totalLogs = await database.countLogs(query)
 
+    // 为每个日志添加增强的简化统计信息和标志（主日志列表）
+    const enhancedLogs = logs.map((log) => {
+      // 增强的tokenSummary（支持缓存token）
+      if (!log.tokenSummary) {
+        log.tokenSummary = {
+          totalTokens: log.totalTokens || log.tokens || 0,
+          inputTokens: log.inputTokens || 0,
+          outputTokens: log.outputTokens || 0,
+          cacheCreateTokens: log.cacheCreateTokens || 0, // 新增
+          cacheReadTokens: log.cacheReadTokens || 0, // 新增
+          cost: log.cost || 0,
+          efficiency: 0 // 计算token效率
+        }
+
+        // 计算token使用效率
+        if (log.tokenSummary.totalTokens > 0) {
+          log.tokenSummary.efficiency = parseFloat(
+            ((log.tokenSummary.outputTokens / log.tokenSummary.totalTokens) * 100).toFixed(2)
+          )
+        }
+      }
+
+      // 增强的headers检查
+      if (log.hasHeaders === undefined) {
+        const hasRequestHeaders = !!(
+          log.requestHeaders &&
+          typeof log.requestHeaders === 'object' &&
+          Object.keys(log.requestHeaders).length > 0
+        )
+        const hasResponseHeaders = !!(
+          log.responseHeaders &&
+          typeof log.responseHeaders === 'object' &&
+          Object.keys(log.responseHeaders).length > 0
+        )
+        log.hasHeaders = hasRequestHeaders || hasResponseHeaders
+
+        // 添加详细的header统计
+        log.headerStats = {
+          requestCount: hasRequestHeaders ? Object.keys(log.requestHeaders).length : 0,
+          responseCount: hasResponseHeaders ? Object.keys(log.responseHeaders).length : 0,
+          totalCount:
+            (hasRequestHeaders ? Object.keys(log.requestHeaders).length : 0) +
+            (hasResponseHeaders ? Object.keys(log.responseHeaders).length : 0)
+        }
+      }
+
+      // 增强的body检查
+      if (log.hasBody === undefined) {
+        const hasRequestBody = !!(log.requestBody && log.requestBody.trim().length > 0)
+        const hasResponseBody = !!(log.responseBody && log.responseBody.trim().length > 0)
+        log.hasBody = hasRequestBody || hasResponseBody
+
+        // 添加body大小统计（仅在有body时计算）
+        if (hasRequestBody || hasResponseBody) {
+          log.bodyStats = {
+            requestSize: hasRequestBody ? log.requestBody.length : 0,
+            responseSize: hasResponseBody ? log.responseBody.length : 0,
+            totalSize:
+              (hasRequestBody ? log.requestBody.length : 0) +
+              (hasResponseBody ? log.responseBody.length : 0)
+          }
+        }
+      }
+
+      // 增强的错误分类
+      if (log.isError === undefined) {
+        const statusCode = log.status || 0
+        log.isError = statusCode >= 400
+
+        // 详细的状态分类
+        log.statusCategory =
+          statusCode >= 500
+            ? 'server_error'
+            : statusCode >= 400
+              ? 'client_error'
+              : statusCode >= 300
+                ? 'redirect'
+                : statusCode >= 200
+                  ? 'success'
+                  : 'unknown'
+      }
+
+      // 增强的时间信息
+      if (log.dateTime === undefined) {
+        log.dateTime = log.timestamp ? new Date(parseInt(log.timestamp)).toISOString() : null
+      }
+
+      // 性能分析
+      const responseTime = log.duration || log.responseTime || 0
+      log.performanceLevel =
+        responseTime > 10000
+          ? 'very_slow'
+          : responseTime > 5000
+            ? 'slow'
+            : responseTime > 1000
+              ? 'normal'
+              : 'fast'
+
+      // 标准化必要字段
+      log.duration = responseTime
+      log.model = log.model || 'unknown'
+      log.method = log.method || 'POST'
+      log.path = log.path || '/unknown'
+
+      // 添加数据完整性标志
+      log.dataCompleteness = {
+        hasAllBasicFields: !!(log.keyId && log.timestamp && log.status && log.model),
+        hasPerformanceData: !!(responseTime && responseTime > 0),
+        hasTokenData: !!(log.tokenSummary.totalTokens > 0),
+        hasCostData: !!(log.cost && log.cost > 0),
+        completenessScore: 0
+      }
+
+      // 计算完整性评分
+      const completenessChecks = Object.values(log.dataCompleteness).slice(0, 4)
+      log.dataCompleteness.completenessScore = (
+        (completenessChecks.filter(Boolean).length / completenessChecks.length) *
+        100
+      ).toFixed(0)
+
+      return log
+    })
+
     res.json({
       success: true,
       data: {
-        logs,
+        logs: enhancedLogs,
         page: Number(page),
         limit: Number(limit),
         total: totalLogs,
-        totalPages: Math.ceil(totalLogs / limit)
+        totalPages: Math.ceil(totalLogs / limit),
+        enhancedStats: enhancedStats === 'true' // 返回是否启用了增强统计
       }
     })
   } catch (error) {
@@ -582,7 +709,183 @@ router.get('/', authenticateAdmin, async (req, res) => {
   }
 })
 
-// 获取特定API Key的日志
+// 获取单个日志的详细信息（增强版本）
+router.get('/:logId/details', authenticateAdmin, async (req, res) => {
+  try {
+    const { logId } = req.params
+
+    // 参数验证和格式化
+    if (!logId || logId.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: '无效的日志ID',
+        code: 'INVALID_LOG_ID',
+        message: '日志ID不能为空或包含无效字符',
+        timestamp: new Date().toISOString()
+      })
+    }
+
+    // 支持多种logId格式的识别和转换
+    const normalizedLogId = logId.trim()
+    winston.debug('获取日志详情请求', {
+      originalLogId: logId,
+      normalizedLogId,
+      requestIP: req.ip || req.connection.remoteAddress
+    })
+
+    // 从数据库获取日志详情（使用增强的方法）
+    const logDetails = await database.getRequestLogDetails(normalizedLogId)
+
+    if (!logDetails) {
+      return res.status(404).json({
+        success: false,
+        error: '日志不存在',
+        code: 'LOG_NOT_FOUND',
+        message: `未找到ID为 ${normalizedLogId} 的日志记录，请检查日志ID是否正确`,
+        searchTips: [
+          '确保日志ID格式正确（如: request_log:keyId:timestamp 或 keyId:timestamp）',
+          '检查日志是否已过期或被清理',
+          '验证您有权限查看此日志记录'
+        ],
+        timestamp: new Date().toISOString()
+      })
+    }
+
+    // 增强的token统计信息
+    const tokenSummary = {
+      totalTokens: logDetails.totalTokens || logDetails.tokens || 0,
+      inputTokens: logDetails.inputTokens || 0,
+      outputTokens: logDetails.outputTokens || 0,
+      cacheCreateTokens: logDetails.cacheCreateTokens || 0, // 新增缓存Token
+      cacheReadTokens: logDetails.cacheReadTokens || 0, // 新增缓存Token
+      cost: logDetails.cost || 0,
+      costBreakdown: logDetails.costDetails || null // 详细费用分解
+    }
+
+    // 增强的header分析
+    const headerAnalysis = {
+      requestHeaders: {
+        count: logDetails.requestHeaders ? Object.keys(logDetails.requestHeaders).length : 0,
+        hasUserAgent: !!(
+          logDetails.requestHeaders?.['user-agent'] || logDetails.requestHeaders?.['User-Agent']
+        ),
+        hasContentType: !!(
+          logDetails.requestHeaders?.['content-type'] || logDetails.requestHeaders?.['Content-Type']
+        ),
+        hasAuthorization: !!(
+          logDetails.requestHeaders?.['authorization'] ||
+          logDetails.requestHeaders?.['Authorization']
+        ),
+        size: logDetails.requestHeaders ? JSON.stringify(logDetails.requestHeaders).length : 0
+      },
+      responseHeaders: {
+        count: logDetails.responseHeaders ? Object.keys(logDetails.responseHeaders).length : 0,
+        hasContentType: !!(
+          logDetails.responseHeaders?.['content-type'] ||
+          logDetails.responseHeaders?.['Content-Type']
+        ),
+        hasServer: !!(
+          logDetails.responseHeaders?.['server'] || logDetails.responseHeaders?.['Server']
+        ),
+        size: logDetails.responseHeaders ? JSON.stringify(logDetails.responseHeaders).length : 0
+      }
+    }
+
+    // 性能和错误分析
+    const performanceAnalysis = {
+      responseTimeMs: logDetails.responseTime || logDetails.duration || 0,
+      isSlowRequest: (logDetails.responseTime || logDetails.duration || 0) > 5000, // 超过5秒
+      tokenEfficiency:
+        tokenSummary.totalTokens > 0
+          ? ((tokenSummary.outputTokens / tokenSummary.totalTokens) * 100).toFixed(2)
+          : '0.00',
+      errorCategory:
+        logDetails.status >= 500
+          ? 'server_error'
+          : logDetails.status >= 400
+            ? 'client_error'
+            : 'success'
+    }
+
+    // 构建增强的响应数据
+    const responseData = {
+      ...logDetails,
+      logId: logDetails.logId || normalizedLogId,
+
+      // 核心统计信息
+      tokenSummary,
+
+      // 详细分析信息
+      headerAnalysis,
+      performanceAnalysis,
+
+      // 元数据标志
+      metadata: {
+        retrievedAt: new Date().toISOString(),
+
+        // 数据可用性标志
+        hasRequestHeaders: headerAnalysis.requestHeaders.count > 0,
+        hasResponseHeaders: headerAnalysis.responseHeaders.count > 0,
+        hasRequestBody: !!(logDetails.requestBody && logDetails.requestBody.trim().length > 0),
+        hasResponseBody: !!(logDetails.responseBody && logDetails.responseBody.trim().length > 0),
+        hasTokenDetails: !!(
+          logDetails.tokenDetails && Object.keys(logDetails.tokenDetails || {}).length > 0
+        ),
+        hasCostDetails: !!(
+          logDetails.costDetails && Object.keys(logDetails.costDetails || {}).length > 0
+        ),
+
+        // 数据完整性标志
+        isComplete: !!(
+          logDetails.requestHeaders &&
+          logDetails.responseHeaders &&
+          logDetails.tokenSummary
+        ),
+        hasError: logDetails.status >= 400,
+
+        // 数据大小信息
+        dataSize: {
+          requestBodySize: logDetails.requestBody ? logDetails.requestBody.length : 0,
+          responseBodySize: logDetails.responseBody ? logDetails.responseBody.length : 0,
+          headersSize: headerAnalysis.requestHeaders.size + headerAnalysis.responseHeaders.size
+        }
+      }
+    }
+
+    winston.info('成功返回日志详情', {
+      logId: normalizedLogId,
+      hasHeaders:
+        responseData.metadata.hasRequestHeaders || responseData.metadata.hasResponseHeaders,
+      hasBody: responseData.metadata.hasRequestBody || responseData.metadata.hasResponseBody,
+      tokenCount: tokenSummary.totalTokens,
+      performanceMs: performanceAnalysis.responseTimeMs,
+      errorCategory: performanceAnalysis.errorCategory
+    })
+
+    res.json({
+      success: true,
+      data: responseData,
+      message: '日志详情获取成功',
+      timestamp: new Date().toISOString()
+    })
+  } catch (error) {
+    winston.error('获取日志详情错误', {
+      logId: req.params.logId,
+      error: error.message,
+      stack: error.stack
+    })
+
+    res.status(500).json({
+      success: false,
+      error: '获取日志详情失败',
+      code: 'LOG_DETAILS_RETRIEVAL_ERROR',
+      message: error.message || '内部服务器错误，请稍后重试',
+      timestamp: new Date().toISOString()
+    })
+  }
+})
+
+// 获取特定API Key的日志（增强版本）
 router.get('/:keyId', authenticateAdmin, async (req, res) => {
   try {
     const { keyId } = req.params
@@ -593,7 +896,8 @@ router.get('/:keyId', authenticateAdmin, async (req, res) => {
       endDate,
       search,
       sortBy = 'timestamp',
-      sortOrder = 'desc'
+      sortOrder = 'desc',
+      enhancedStats = 'true' // 新增参数
     } = req.query
 
     const offset = (page - 1) * limit
@@ -616,23 +920,149 @@ router.get('/:keyId', authenticateAdmin, async (req, res) => {
       offset: parseInt(offset),
       limit: parseInt(limit),
       sortBy,
-      sortOrder
+      sortOrder,
+      includeEnhancedStats: enhancedStats === 'true' // 启用增强统计
     })
 
     const totalLogs = await database.countLogs(query)
 
+    // 为每个日志添加增强的简化统计信息和标志（API Key专用日志）
+    const enhancedLogs = logs.map((log) => {
+      // 增强的tokenSummary（支持缓存token）
+      if (!log.tokenSummary) {
+        log.tokenSummary = {
+          totalTokens: log.totalTokens || log.tokens || 0,
+          inputTokens: log.inputTokens || 0,
+          outputTokens: log.outputTokens || 0,
+          cacheCreateTokens: log.cacheCreateTokens || 0, // 新增
+          cacheReadTokens: log.cacheReadTokens || 0, // 新增
+          cost: log.cost || 0,
+          efficiency: 0 // 计算token效率
+        }
+
+        // 计算token使用效率
+        if (log.tokenSummary.totalTokens > 0) {
+          log.tokenSummary.efficiency = parseFloat(
+            ((log.tokenSummary.outputTokens / log.tokenSummary.totalTokens) * 100).toFixed(2)
+          )
+        }
+      }
+
+      // 增强的headers检查
+      if (log.hasHeaders === undefined) {
+        const hasRequestHeaders = !!(
+          log.requestHeaders &&
+          typeof log.requestHeaders === 'object' &&
+          Object.keys(log.requestHeaders).length > 0
+        )
+        const hasResponseHeaders = !!(
+          log.responseHeaders &&
+          typeof log.responseHeaders === 'object' &&
+          Object.keys(log.responseHeaders).length > 0
+        )
+        log.hasHeaders = hasRequestHeaders || hasResponseHeaders
+
+        // 添加详细的header统计
+        log.headerStats = {
+          requestCount: hasRequestHeaders ? Object.keys(log.requestHeaders).length : 0,
+          responseCount: hasResponseHeaders ? Object.keys(log.responseHeaders).length : 0,
+          totalCount:
+            (hasRequestHeaders ? Object.keys(log.requestHeaders).length : 0) +
+            (hasResponseHeaders ? Object.keys(log.responseHeaders).length : 0)
+        }
+      }
+
+      // 增强的body检查
+      if (log.hasBody === undefined) {
+        const hasRequestBody = !!(log.requestBody && log.requestBody.trim().length > 0)
+        const hasResponseBody = !!(log.responseBody && log.responseBody.trim().length > 0)
+        log.hasBody = hasRequestBody || hasResponseBody
+
+        // 添加body大小统计（仅在有body时计算）
+        if (hasRequestBody || hasResponseBody) {
+          log.bodyStats = {
+            requestSize: hasRequestBody ? log.requestBody.length : 0,
+            responseSize: hasResponseBody ? log.responseBody.length : 0,
+            totalSize:
+              (hasRequestBody ? log.requestBody.length : 0) +
+              (hasResponseBody ? log.responseBody.length : 0)
+          }
+        }
+      }
+
+      // 增强的错误分类
+      if (log.isError === undefined) {
+        const statusCode = log.status || 0
+        log.isError = statusCode >= 400
+
+        // 详细的状态分类
+        log.statusCategory =
+          statusCode >= 500
+            ? 'server_error'
+            : statusCode >= 400
+              ? 'client_error'
+              : statusCode >= 300
+                ? 'redirect'
+                : statusCode >= 200
+                  ? 'success'
+                  : 'unknown'
+      }
+
+      // 增强的时间信息
+      if (log.dateTime === undefined) {
+        log.dateTime = log.timestamp ? new Date(parseInt(log.timestamp)).toISOString() : null
+      }
+
+      // 性能分析
+      const responseTime = log.duration || log.responseTime || 0
+      log.performanceLevel =
+        responseTime > 10000
+          ? 'very_slow'
+          : responseTime > 5000
+            ? 'slow'
+            : responseTime > 1000
+              ? 'normal'
+              : 'fast'
+
+      // 标准化必要字段
+      log.duration = responseTime
+      log.model = log.model || 'unknown'
+      log.method = log.method || 'POST'
+      log.path = log.path || '/unknown'
+
+      // 添加数据完整性标志
+      log.dataCompleteness = {
+        hasAllBasicFields: !!(log.keyId && log.timestamp && log.status && log.model),
+        hasPerformanceData: !!(responseTime && responseTime > 0),
+        hasTokenData: !!(log.tokenSummary.totalTokens > 0),
+        hasCostData: !!(log.cost && log.cost > 0),
+        completenessScore: 0
+      }
+
+      // 计算完整性评分
+      const completenessChecks = Object.values(log.dataCompleteness).slice(0, 4)
+      log.dataCompleteness.completenessScore = (
+        (completenessChecks.filter(Boolean).length / completenessChecks.length) *
+        100
+      ).toFixed(0)
+
+      return log
+    })
+
     res.json({
       success: true,
       data: {
-        logs,
+        logs: enhancedLogs,
         page: Number(page),
         limit: Number(limit),
         total: totalLogs,
-        totalPages: Math.ceil(totalLogs / limit)
+        totalPages: Math.ceil(totalLogs / limit),
+        keyId, // 返回查询的API Key ID
+        enhancedStats: enhancedStats === 'true' // 返回是否启用了增强统计
       }
     })
   } catch (error) {
-    winston.error('获取API Key日志错误', { error })
+    winston.error('获取API Key日志错误', { keyId: req.params.keyId, error })
     res.status(500).json({
       success: false,
       error: '获取日志失败',
