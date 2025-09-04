@@ -612,7 +612,7 @@ class CostLimitService {
       const claudeAccountService = require('./claudeAccountService')
       const accountResult = await claudeAccountService.getAccount(accountId)
 
-      if (!accountResult.success) {
+      if (!accountResult) {
         logger.warn(`💰 Account not found for cost limit check: ${accountId}`)
         // 账户不存在时允许通过，避免阻塞正常请求
         return {
@@ -626,7 +626,7 @@ class CostLimitService {
         }
       }
 
-      const accountData = accountResult.data
+      const accountData = accountResult
 
       // 提取账户级别的费用限制配置
       const limits = {
@@ -769,10 +769,10 @@ class CostLimitService {
       }
 
       // 获取API Key信息（包含费用限制配置）
-      const apiKeyService = require('./apiKeyService')
-      const keyResult = await apiKeyService.getApiKey(apiKeyId)
+      const database = require('../models/database')
+      const keyResult = await database.getApiKey(apiKeyId)
 
-      if (!keyResult.success) {
+      if (!keyResult || Object.keys(keyResult).length === 0) {
         logger.warn(`💰 API Key not found for cost limit check: ${apiKeyId}`)
         // API Key不存在时允许通过，避免阻塞正常请求
         return {
@@ -786,7 +786,7 @@ class CostLimitService {
         }
       }
 
-      const keyData = keyResult.data
+      const keyData = keyResult
 
       // 使用现有的checkCostLimits方法（支持预估费用）
       const result = await this.checkCostLimitsWithEstimate(apiKeyId, keyData, estimatedCost)

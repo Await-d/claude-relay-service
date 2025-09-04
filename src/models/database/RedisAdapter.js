@@ -952,7 +952,7 @@ class RedisAdapter extends DatabaseAdapter {
 
   /**
    * 获取指定时间段的模型小时使用统计
-   * @param {string} keyId API Key ID  
+   * @param {string} keyId API Key ID
    * @param {Date} startDate 开始时间
    * @param {number} hours 小时数(默认24，最大168)
    * @returns {Promise<Array>} 小时统计数据数组
@@ -962,17 +962,17 @@ class RedisAdapter extends DatabaseAdapter {
     if (!keyId || typeof keyId !== 'string') {
       throw new Error('Invalid keyId parameter')
     }
-    
+
     if (!(startDate instanceof Date)) {
       throw new Error('startDate must be a Date object')
     }
-    
+
     if (typeof hours !== 'number' || hours < 1 || hours > 168) {
       throw new Error('Hours parameter must be between 1 and 168')
     }
 
     const hourlyStats = []
-    
+
     try {
       // 生成所有需要查询的小时键
       const hourKeys = []
@@ -997,12 +997,12 @@ class RedisAdapter extends DatabaseAdapter {
       }
 
       const patternResults = await pipeline.exec()
-      
+
       // 处理每个小时的数据
       for (let i = 0; i < hourKeys.length; i++) {
         const { hourKey, timestamp } = hourKeys[i]
         const modelKeys = patternResults[i][1] || []
-        
+
         const hourStat = {
           hour: hourKey,
           timestamp: timestamp,
@@ -1018,28 +1018,29 @@ class RedisAdapter extends DatabaseAdapter {
           for (const modelKey of modelKeys) {
             dataPipeline.hgetall(modelKey)
           }
-          
+
           const modelResults = await dataPipeline.exec()
-          
+
           // 处理每个模型的数据
           for (let j = 0; j < modelKeys.length; j++) {
             const modelKey = modelKeys[j]
             const modelData = modelResults[j][1] || {}
-            
+
             // 从键名提取模型名: usage:{keyId}:model:hourly:{model}:{hour}
             const modelMatch = modelKey.match(/usage:.+:model:hourly:(.+):\d{4}-\d{2}-\d{2}:\d{2}$/)
             if (!modelMatch || !modelData || Object.keys(modelData).length === 0) {
               continue
             }
-            
+
             const modelName = modelMatch[1]
             const inputTokens = parseInt(modelData.inputTokens) || 0
             const outputTokens = parseInt(modelData.outputTokens) || 0
             const cacheCreateTokens = parseInt(modelData.cacheCreateTokens) || 0
             const cacheReadTokens = parseInt(modelData.cacheReadTokens) || 0
             const requests = parseInt(modelData.requests) || 0
-            const totalModelTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-            
+            const totalModelTokens =
+              inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+
             // 计算模型费用
             const usage = {
               input_tokens: inputTokens,
@@ -1047,7 +1048,7 @@ class RedisAdapter extends DatabaseAdapter {
               cache_creation_input_tokens: cacheCreateTokens,
               cache_read_input_tokens: cacheReadTokens
             }
-            
+
             let modelCost = 0
             try {
               const costResult = CostCalculator.calculateCost(usage, modelName)
@@ -1056,7 +1057,7 @@ class RedisAdapter extends DatabaseAdapter {
               logger.warn(`Failed to calculate cost for model ${modelName}:`, error)
               modelCost = 0
             }
-            
+
             // 添加到模型统计
             hourStat.models[modelName] = {
               tokens: totalModelTokens,
@@ -1067,20 +1068,21 @@ class RedisAdapter extends DatabaseAdapter {
               requests,
               cost: modelCost
             }
-            
+
             // 累计到小时总计
             hourStat.totalTokens += totalModelTokens
             hourStat.totalRequests += requests
             hourStat.totalCost += modelCost
           }
         }
-        
+
         hourlyStats.push(hourStat)
       }
-      
-      logger.debug(`📊 Retrieved hourly model stats for keyId: ${keyId}, hours: ${hours}, results: ${hourlyStats.length}`)
+
+      logger.debug(
+        `📊 Retrieved hourly model stats for keyId: ${keyId}, hours: ${hours}, results: ${hourlyStats.length}`
+      )
       return hourlyStats
-      
     } catch (error) {
       logger.error(`❌ Failed to get hourly model usage for keyId ${keyId}:`, error)
       throw error
@@ -4973,6 +4975,7 @@ class RedisAdapter extends DatabaseAdapter {
       logger.debug(
         `成功获取日志详情: ${actualLogKey}, 耗时: ${endTime - startTime}ms, 字段数: ${Object.keys(processedLogData).length}, hasHeaders: ${processedLogData.hasHeaders}, hasBody: ${processedLogData.hasBody}, tokens: ${processedLogData.tokenSummary.totalTokens}`
       )
+
 
       return processedLogData
     } catch (error) {
