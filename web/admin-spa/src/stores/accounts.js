@@ -650,6 +650,23 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
+  // 获取Claude账户费用统计
+  const getAccountCostStats = async (accountId, period = 'all') => {
+    try {
+      const response = await apiClient.get(`/admin/claude-accounts/${accountId}/cost-stats`, {
+        params: { period }
+      })
+      if (response.success) {
+        return response.data
+      } else {
+        throw new Error(response.message || '获取账户费用统计失败')
+      }
+    } catch (err) {
+      console.error('获取账户费用统计失败:', err)
+      throw err
+    }
+  }
+
   // 重置store
   const reset = () => {
     claudeAccounts.value = []
@@ -708,6 +725,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     exchangeGeminiCode,
     generateOpenAIAuthUrl,
     exchangeOpenAICode,
+    getAccountCostStats,
     sortAccounts,
     reset
   }

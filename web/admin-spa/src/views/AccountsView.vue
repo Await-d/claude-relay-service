@@ -830,12 +830,23 @@
                   <span class="text-xs text-yellow-600 dark:text-yellow-400">tokens</span>
                 </div>
 
-                <!-- 平均每请求Token数 -->
+                <!-- 总使用费用 -->
                 <div
                   class="flex items-center gap-2 rounded-lg bg-green-50 px-2 py-1.5 dark:bg-green-900/20"
                 >
-                  <i class="fas fa-chart-bar text-xs text-green-600 dark:text-green-400" />
-                  <span class="text-xs font-medium text-green-600 dark:text-green-400">
+                  <i class="fas fa-dollar-sign text-xs text-green-600 dark:text-green-400" />
+                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    ${{ formatCost(account.costStats?.totalCost || 0) }}
+                  </span>
+                  <span class="text-xs text-green-600 dark:text-green-400">总费用</span>
+                </div>
+
+                <!-- 平均每请求Token数 -->
+                <div
+                  class="flex items-center gap-2 rounded-lg bg-purple-50 px-2 py-1.5 dark:bg-purple-900/20"
+                >
+                  <i class="fas fa-chart-bar text-xs text-purple-600 dark:text-purple-400" />
+                  <span class="text-xs font-medium text-purple-600 dark:text-purple-400">
                     平均
                     {{
                       formatAverageTokensPerRequest(
@@ -1078,6 +1089,7 @@ import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import { useConfirm } from '@/composables/useConfirm'
 import { formatNumber, getAverageTokensPerRequest } from '@/utils/format'
+import { useAccountsStore } from '@/stores/accounts'
 import AccountForm from '@/components/accounts/AccountForm.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
@@ -1086,6 +1098,10 @@ import ClaudeResetCountdown from '@/components/common/ClaudeResetCountdown.vue'
 
 // 使用确认弹窗
 const { showConfirmModal, confirmOptions, showConfirm, handleConfirm, handleCancel } = useConfirm()
+
+// 使用accounts store
+const accountsStore = useAccountsStore()
+const { getAccountCostStats } = accountsStore
 
 // 数据状态
 const accounts = ref([])
@@ -1195,6 +1211,36 @@ const sortedAccounts = computed(() => {
 
   return sorted
 })
+
+// 为账户加载费用统计信息
+const loadCostStatsForAccounts = async (accounts) => {
+  try {
+    // 只为Claude平台的账户加载费用统计
+    const claudeAccounts = accounts.filter(
+      (account) => account.platform === 'claude' || account.platform === 'claude-console'
+    )
+
+    if (claudeAccounts.length === 0) return
+
+    // 并行获取所有Claude账户的费用统计
+    const costStatsPromises = claudeAccounts.map(async (account) => {
+      try {
+        const costStats = await getAccountCostStats(account.id, 'all')
+        account.costStats = costStats
+        return costStats
+      } catch (error) {
+        console.warn(`获取账户 ${account.name || account.id} 的费用统计失败:`, error)
+        account.costStats = { totalCost: 0, formatted: { totalCost: '$0.00' } }
+        return null
+      }
+    })
+
+    await Promise.all(costStatsPromises)
+  } catch (error) {
+    console.error('加载账户费用统计失败:', error)
+    // 不要因为费用统计失败而影响账户列表的加载，所以只记录错误不抛出
+  }
+}
 
 // 加载账户列表
 const loadAccounts = async (forceReload = false) => {
@@ -1336,6 +1382,9 @@ const loadAccounts = async (forceReload = false) => {
       allAccounts.push(...azureOpenaiAccounts)
     }
 
+    // 为Claude账户加载费用统计信息
+    await loadCostStatsForAccounts(allAccounts)
+
     accounts.value = allAccounts
   } catch (error) {
     showToast('加载账户失败', 'error')
@@ -1363,6 +1412,15 @@ const formatAverageTokensPerRequest = (totalTokens, totalRequests) => {
     requests: totalRequests || 0
   }
   return getAverageTokensPerRequest(usage)
+}
+
+// 格式化费用显示
+const formatCost = (cost) => {
+  if (cost == null || cost === undefined || isNaN(cost)) return '0.00'
+  const numCost = parseFloat(cost)
+  if (numCost === 0) return '0.00'
+  if (numCost < 0.01) return '<0.01'
+  return numCost.toFixed(2)
 }
 
 // 格式化最后使用时间

@@ -1854,6 +1854,47 @@ router.put(
   }
 )
 
+// 获取Claude账户费用统计
+router.get('/claude-accounts/:accountId/cost-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { period } = req.query // 可选参数：daily, weekly, monthly, all
+
+    logger.debug(`📊 获取Claude账户费用统计: ${accountId}, period: ${period || 'all'}`)
+
+    // 验证账户是否存在
+    const account = await claudeAccountService.getAccount(accountId)
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found',
+        message: '指定的账户不存在'
+      })
+    }
+
+    // 获取费用统计
+    const costStats = await claudeAccountService.getAccountCostStats(accountId, {
+      period: period || 'all'
+    })
+
+    logger.success(
+      `📊 成功获取账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
+    )
+
+    return res.json({
+      success: true,
+      data: costStats
+    })
+  } catch (error) {
+    logger.error(`❌ 获取账户费用统计失败 (${req.params.accountId}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get account cost stats',
+      message: error.message
+    })
+  }
+})
+
 // 🎮 Claude Console 账户管理
 
 // 获取所有Claude Console账户
