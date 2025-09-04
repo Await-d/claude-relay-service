@@ -1684,7 +1684,6 @@ const getBaseUrlPrefix = () => {
       origin = currentUrl.substring(0, pathStart)
     } else {
       // 最后的降级方案，使用相对路径
-      console.warn('无法获取完整的 origin，将使用相对路径')
       return ''
     }
   }

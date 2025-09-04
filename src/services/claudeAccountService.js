@@ -15,6 +15,7 @@ const {
 } = require('../utils/tokenRefreshLogger')
 const tokenRefreshService = require('./tokenRefreshService')
 const LRUCache = require('../utils/lruCache')
+const CostCalculator = require('../utils/costCalculator')
 
 class ClaudeAccountService {
   constructor() {
@@ -726,7 +727,9 @@ class ClaudeAccountService {
       const totalCost = costResult.costs.total
 
       if (totalCost <= 0) {
-        logger.debug(`💰 Skipping cost recording for account ${accountId}: zero cost (${totalCost})`)
+        logger.debug(
+          `💰 Skipping cost recording for account ${accountId}: zero cost (${totalCost})`
+        )
         return { success: true, cost: 0, skipped: true }
       }
 
@@ -745,7 +748,7 @@ class ClaudeAccountService {
       }
     } catch (error) {
       logger.error(`❌ Failed to record cost for account ${accountId}:`, error)
-      
+
       // 优雅降级：记录错误但不影响主要请求流程
       try {
         // 记录费用记录失败的统计
@@ -764,7 +767,7 @@ class ClaudeAccountService {
   // 📊 获取账户费用统计
   /**
    * 获取账户费用统计
-   * @param {string} accountId - Claude账户ID  
+   * @param {string} accountId - Claude账户ID
    * @param {Object} options - 选项
    * @param {string} options.period - 时间范围 ('today', 'week', 'month', 'all')
    * @returns {Promise<Object>} 费用统计数据
@@ -793,18 +796,20 @@ class ClaudeAccountService {
         // 添加格式化的费用显示
         formatted: {
           totalCost: CostCalculator.formatCost(costStats.totalCost || 0),
-          dailyCosts: costStats.dailyCosts ? 
-            costStats.dailyCosts.map(item => ({
-              ...item,
-              formattedCost: CostCalculator.formatCost(item.cost)
-            })) : [],
-          modelCosts: costStats.modelCosts ?
-            Object.fromEntries(
-              Object.entries(costStats.modelCosts).map(([model, cost]) => [
-                model,
-                CostCalculator.formatCost(cost)
-              ])
-            ) : {}
+          dailyCosts: costStats.dailyCosts
+            ? costStats.dailyCosts.map((item) => ({
+                ...item,
+                formattedCost: CostCalculator.formatCost(item.cost)
+              }))
+            : [],
+          modelCosts: costStats.modelCosts
+            ? Object.fromEntries(
+                Object.entries(costStats.modelCosts).map(([model, cost]) => [
+                  model,
+                  CostCalculator.formatCost(cost)
+                ])
+              )
+            : {}
         },
         retrievedAt: new Date().toISOString()
       }

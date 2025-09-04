@@ -1,11 +1,9 @@
 const logger = require('../utils/logger')
 const database = require('../models/database')
 const {
-  getTimezoneStartOfDay,
   getTimezoneStartOfWeek,
   getTimezoneStartOfMonth,
-  getNextResetTime,
-  getDaysBetween
+  getNextResetTime
 } = require('../utils/dateHelper')
 
 /**
@@ -334,7 +332,9 @@ class CostLimitService {
       const warnings = []
 
       for (const [period, limit] of Object.entries(limits)) {
-        if (limit <= 0) continue // 跳过未配置的限制
+        if (limit <= 0) {
+          continue
+        } // 跳过未配置的限制
 
         const currentCost = currentCosts[period] || 0
         const projectedCost = currentCost + estimatedCost
@@ -658,7 +658,9 @@ class CostLimitService {
       const warnings = []
 
       for (const [period, limit] of Object.entries(limits)) {
-        if (limit <= 0) continue // 跳过未配置的限制
+        if (limit <= 0) {
+          continue
+        } // 跳过未配置的限制
 
         const currentCost = currentCosts[period] || 0
         const projectedCost = currentCost + estimatedCost

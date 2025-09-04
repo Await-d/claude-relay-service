@@ -1,5 +1,7 @@
 <template>
-  <div class="rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 p-4 dark:from-gray-800 dark:to-gray-700 md:p-6">
+  <div
+    class="rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 p-4 dark:from-gray-800 dark:to-gray-700 md:p-6"
+  >
     <div class="mb-4 flex items-center gap-2 md:gap-3">
       <i class="fas fa-clock text-base text-blue-500 md:text-lg" />
       <h4 class="text-base font-semibold text-gray-900 dark:text-gray-100 md:text-lg">
@@ -18,8 +20,8 @@
           <div class="relative flex-1">
             <input
               v-model="selectedDate"
-              type="date"
               class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm transition-all duration-200 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:border-blue-400"
+              type="date"
               @change="updateDate"
             />
           </div>
@@ -59,15 +61,24 @@
       <!-- 加载状态和操作按钮 -->
       <div class="flex flex-col items-start justify-between gap-3 pt-2 md:flex-row md:items-center">
         <div class="flex items-center gap-2">
-          <div v-if="hourlyLoading" class="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+          <div
+            v-if="hourlyLoading"
+            class="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400"
+          >
             <i class="fas fa-spinner loading-spinner" />
             <span>加载数据中...</span>
           </div>
-          <div v-else-if="hourlyError" class="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+          <div
+            v-else-if="hourlyError"
+            class="flex items-center gap-2 text-sm text-red-600 dark:text-red-400"
+          >
             <i class="fas fa-exclamation-triangle" />
             <span>{{ hourlyError }}</span>
           </div>
-          <div v-else-if="hourlyStats.length > 0" class="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+          <div
+            v-else-if="hourlyStats.length > 0"
+            class="flex items-center gap-2 text-sm text-green-600 dark:text-green-400"
+          >
             <i class="fas fa-check-circle" />
             <span>已加载 {{ hourlyStats.length }} 条数据</span>
           </div>
@@ -89,19 +100,13 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useApiStatsStore } from '@/stores/apistats'
 
 const apiStatsStore = useApiStatsStore()
 
-const {
-  apiKey,
-  hourlyLoading,
-  hourlyError,
-  hourlyStats,
-  hourlyConfig
-} = storeToRefs(apiStatsStore)
+const { apiKey, hourlyLoading, hourlyError, hourlyStats, hourlyConfig } = storeToRefs(apiStatsStore)
 
 const { updateHourlyConfig, loadHourlyStats } = apiStatsStore
 

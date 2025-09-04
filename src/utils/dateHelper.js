@@ -2,10 +2,10 @@ const config = require('../../config/config')
 
 /**
  * 统一时区处理工具
- * 
+ *
  * 提供全项目的时区转换、格式化和边界计算功能
  * 确保所有时区相关操作的一致性和准确性
- * 
+ *
  * 核心设计原则：
  * 1. 基于 config.system.timezoneOffset 配置进行时区转换
  * 2. 提供 UTC 和目标时区的双向转换
@@ -26,13 +26,13 @@ function getTimezoneOffset() {
  * 将 UTC 时间转换为配置时区的时间
  * 注意：这个函数的目的是获取某个时间点在目标时区的"本地"表示
  * 例如：UTC时间 2025-07-30 01:00:00 在 UTC+8 时区表示为 2025-07-30 09:00:00
- * 
+ *
  * @param {Date} date - 要转换的日期对象，默认为当前时间
  * @returns {Date} 调整后的日期对象，使用 getUTCXXX 方法可得到目标时区的值
  */
 function getDateInTimezone(date = new Date()) {
   const offset = getTimezoneOffset()
-  
+
   // 方法：创建一个偏移后的Date对象，使其getUTCXXX方法返回目标时区的值
   // 这样可以避免本地时区对计算的干扰
   const offsetMs = offset * 60 * 60 * 1000
@@ -74,11 +74,13 @@ function formatDateWithTimezone(date = new Date(), format = 'datetime') {
   const hour = String(tzDate.getUTCHours()).padStart(2, '0')
   const minute = String(tzDate.getUTCMinutes()).padStart(2, '0')
   const second = String(tzDate.getUTCSeconds()).padStart(2, '0')
-  
+
   const offset = getTimezoneOffset()
-  const offsetString = offset >= 0 ? `+${String(Math.floor(offset)).padStart(2, '0')}:${String((offset % 1) * 60).padStart(2, '0')}` : 
-                      `-${String(Math.floor(Math.abs(offset))).padStart(2, '0')}:${String((Math.abs(offset) % 1) * 60).padStart(2, '0')}`
-  
+  const offsetString =
+    offset >= 0
+      ? `+${String(Math.floor(offset)).padStart(2, '0')}:${String((offset % 1) * 60).padStart(2, '0')}`
+      : `-${String(Math.floor(Math.abs(offset))).padStart(2, '0')}:${String((Math.abs(offset) % 1) * 60).padStart(2, '0')}`
+
   switch (format) {
     case 'date':
       return `${year}-${month}-${day}`
@@ -120,13 +122,10 @@ function getTimezoneDate(date = new Date()) {
  */
 function getTimezoneStartOfDay(date = new Date()) {
   const tzDate = getDateInTimezone(date)
-  const startOfDay = new Date(Date.UTC(
-    tzDate.getUTCFullYear(),
-    tzDate.getUTCMonth(),
-    tzDate.getUTCDate(),
-    0, 0, 0, 0
-  ))
-  
+  const startOfDay = new Date(
+    Date.UTC(tzDate.getUTCFullYear(), tzDate.getUTCMonth(), tzDate.getUTCDate(), 0, 0, 0, 0)
+  )
+
   // 转换回UTC时间
   const offset = getTimezoneOffset()
   const offsetMs = offset * 60 * 60 * 1000
@@ -140,13 +139,10 @@ function getTimezoneStartOfDay(date = new Date()) {
  */
 function getTimezoneEndOfDay(date = new Date()) {
   const tzDate = getDateInTimezone(date)
-  const endOfDay = new Date(Date.UTC(
-    tzDate.getUTCFullYear(),
-    tzDate.getUTCMonth(),
-    tzDate.getUTCDate(),
-    23, 59, 59, 999
-  ))
-  
+  const endOfDay = new Date(
+    Date.UTC(tzDate.getUTCFullYear(), tzDate.getUTCMonth(), tzDate.getUTCDate(), 23, 59, 59, 999)
+  )
+
   // 转换回UTC时间
   const offset = getTimezoneOffset()
   const offsetMs = offset * 60 * 60 * 1000
@@ -161,17 +157,22 @@ function getTimezoneEndOfDay(date = new Date()) {
 function getTimezoneStartOfWeek(date = new Date()) {
   const tzDate = getDateInTimezone(date)
   const dayOfWeek = tzDate.getUTCDay()
-  
+
   // 计算到周一的天数差（周日=0，周一=1）
   const daysToMonday = dayOfWeek === 0 ? -6 : -(dayOfWeek - 1)
-  
-  const startOfWeek = new Date(Date.UTC(
-    tzDate.getUTCFullYear(),
-    tzDate.getUTCMonth(),
-    tzDate.getUTCDate() + daysToMonday,
-    0, 0, 0, 0
-  ))
-  
+
+  const startOfWeek = new Date(
+    Date.UTC(
+      tzDate.getUTCFullYear(),
+      tzDate.getUTCMonth(),
+      tzDate.getUTCDate() + daysToMonday,
+      0,
+      0,
+      0,
+      0
+    )
+  )
+
   // 转换回UTC时间
   const offset = getTimezoneOffset()
   const offsetMs = offset * 60 * 60 * 1000
@@ -186,17 +187,22 @@ function getTimezoneStartOfWeek(date = new Date()) {
 function getTimezoneEndOfWeek(date = new Date()) {
   const tzDate = getDateInTimezone(date)
   const dayOfWeek = tzDate.getUTCDay()
-  
+
   // 计算到周日的天数差
   const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek
-  
-  const endOfWeek = new Date(Date.UTC(
-    tzDate.getUTCFullYear(),
-    tzDate.getUTCMonth(),
-    tzDate.getUTCDate() + daysToSunday,
-    23, 59, 59, 999
-  ))
-  
+
+  const endOfWeek = new Date(
+    Date.UTC(
+      tzDate.getUTCFullYear(),
+      tzDate.getUTCMonth(),
+      tzDate.getUTCDate() + daysToSunday,
+      23,
+      59,
+      59,
+      999
+    )
+  )
+
   // 转换回UTC时间
   const offset = getTimezoneOffset()
   const offsetMs = offset * 60 * 60 * 1000
@@ -210,13 +216,10 @@ function getTimezoneEndOfWeek(date = new Date()) {
  */
 function getTimezoneStartOfMonth(date = new Date()) {
   const tzDate = getDateInTimezone(date)
-  const startOfMonth = new Date(Date.UTC(
-    tzDate.getUTCFullYear(),
-    tzDate.getUTCMonth(),
-    1,
-    0, 0, 0, 0
-  ))
-  
+  const startOfMonth = new Date(
+    Date.UTC(tzDate.getUTCFullYear(), tzDate.getUTCMonth(), 1, 0, 0, 0, 0)
+  )
+
   // 转换回UTC时间
   const offset = getTimezoneOffset()
   const offsetMs = offset * 60 * 60 * 1000
@@ -230,13 +233,18 @@ function getTimezoneStartOfMonth(date = new Date()) {
  */
 function getTimezoneEndOfMonth(date = new Date()) {
   const tzDate = getDateInTimezone(date)
-  const endOfMonth = new Date(Date.UTC(
-    tzDate.getUTCFullYear(),
-    tzDate.getUTCMonth() + 1,
-    0, // 下个月的第0天，即当月最后一天
-    23, 59, 59, 999
-  ))
-  
+  const endOfMonth = new Date(
+    Date.UTC(
+      tzDate.getUTCFullYear(),
+      tzDate.getUTCMonth() + 1,
+      0, // 下个月的第0天，即当月最后一天
+      23,
+      59,
+      59,
+      999
+    )
+  )
+
   // 转换回UTC时间
   const offset = getTimezoneOffset()
   const offsetMs = offset * 60 * 60 * 1000
@@ -251,15 +259,16 @@ function getTimezoneEndOfMonth(date = new Date()) {
  */
 function getNextResetTime(period, date = new Date()) {
   const tzDate = getDateInTimezone(date)
-  
+
   switch (period) {
     case 'daily':
       // 明天的0点
       return getTimezoneStartOfDay(new Date(tzDate.getTime() + 24 * 60 * 60 * 1000))
-    case 'weekly':
+    case 'weekly': {
       // 下周一的0点
       const currentWeekEnd = getTimezoneEndOfWeek(date)
       return getTimezoneStartOfDay(new Date(currentWeekEnd.getTime() + 1000)) // 加1秒到下一天
+    }
     case 'monthly':
       // 下个月1号的0点
       return getTimezoneStartOfMonth(new Date(tzDate.getUTCFullYear(), tzDate.getUTCMonth() + 1, 1))
@@ -287,14 +296,15 @@ function getDaysBetween(startDate, endDate) {
  */
 function validateTimezoneConfig() {
   const offset = getTimezoneOffset()
-  
+
   return {
     valid: typeof offset === 'number' && offset >= -12 && offset <= 14,
     offset,
     timezone: config.system.timezone || 'Unknown',
-    message: typeof offset === 'number' && offset >= -12 && offset <= 14 
-      ? `时区配置有效：UTC${offset >= 0 ? '+' : ''}${offset}`
-      : `时区配置无效：${offset}，应为-12到+14之间的数字`
+    message:
+      typeof offset === 'number' && offset >= -12 && offset <= 14
+        ? `时区配置有效：UTC${offset >= 0 ? '+' : ''}${offset}`
+        : `时区配置无效：${offset}，应为-12到+14之间的数字`
   }
 }
 
@@ -305,8 +315,7 @@ function validateTimezoneConfig() {
 function getTimezoneInfo() {
   const offset = getTimezoneOffset()
   const now = new Date()
-  const tzNow = getDateInTimezone(now)
-  
+
   return {
     offset,
     timezone: config.system.timezone || 'Custom',
@@ -325,11 +334,11 @@ module.exports = {
   getDateStringInTimezone,
   getHourInTimezone,
   getTimezoneDate,
-  
+
   // 格式化函数
   formatDateWithTimezone,
   getISOStringWithTimezone,
-  
+
   // 边界时间函数
   getTimezoneStartOfDay,
   getTimezoneEndOfDay,
@@ -337,7 +346,7 @@ module.exports = {
   getTimezoneEndOfWeek,
   getTimezoneStartOfMonth,
   getTimezoneEndOfMonth,
-  
+
   // 实用工具函数
   getNextResetTime,
   getDaysBetween,
