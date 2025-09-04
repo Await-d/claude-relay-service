@@ -30,7 +30,10 @@
             <h4 class="break-all text-base font-bold text-gray-900 dark:text-gray-100 md:text-lg">
               {{ model.model }}
               <!-- 小时统计显示时间信息 -->
-              <span v-if="statsPeriod === 'hourly' && model.hour" class="ml-2 text-sm font-normal text-blue-600 dark:text-blue-400">
+              <span
+                v-if="statsPeriod === 'hourly' && model.hour"
+                class="ml-2 text-sm font-normal text-blue-600 dark:text-blue-400"
+              >
                 {{ formatHourTime(model.hour) }}
               </span>
             </h4>
@@ -81,9 +84,7 @@
     <!-- 无模型数据 -->
     <div v-else class="py-6 text-center text-gray-500 dark:text-gray-400 md:py-8">
       <i class="fas fa-chart-pie mb-3 text-2xl md:text-3xl" />
-      <p class="text-sm md:text-base">
-        暂无{{ periodDisplayName }}模型使用数据
-      </p>
+      <p class="text-sm md:text-base">暂无{{ periodDisplayName }}模型使用数据</p>
     </div>
   </div>
 </template>
@@ -94,14 +95,8 @@ import { storeToRefs } from 'pinia'
 import { useApiStatsStore } from '@/stores/apistats'
 
 const apiStatsStore = useApiStatsStore()
-const { 
-  statsPeriod, 
-  modelStats, 
-  modelStatsLoading, 
-  hourlyStats, 
-  hourlyLoading, 
-  hourlyConfig 
-} = storeToRefs(apiStatsStore)
+const { statsPeriod, modelStats, modelStatsLoading, hourlyStats, hourlyLoading, hourlyConfig } =
+  storeToRefs(apiStatsStore)
 
 // 时间段显示名称
 const periodDisplayName = computed(() => {
@@ -167,13 +162,13 @@ const formatHourTime = (hour) => {
 // 格式化日期
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
-  
+
   try {
     const date = new Date(dateStr)
     const today = new Date()
     const yesterday = new Date(today)
     yesterday.setDate(today.getDate() - 1)
-    
+
     if (date.toDateString() === today.toDateString()) {
       return '今天'
     } else if (date.toDateString() === yesterday.toDateString()) {

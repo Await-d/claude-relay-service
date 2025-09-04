@@ -166,7 +166,7 @@ async function handleMessagesRequest(req, res) {
         return res.status(429).json({
           ...violationResponse,
           type: 'api_key_cost_limit',
-          estimatedCost: estimatedCost,
+          estimatedCost,
           estimation: {
             breakdown: costEstimation.breakdown,
             confidence: costEstimation.confidence
@@ -242,8 +242,8 @@ async function handleMessagesRequest(req, res) {
             return res.status(429).json({
               ...violationResponse,
               type: 'account_cost_limit',
-              accountId: accountId,
-              estimatedCost: estimatedCost,
+              accountId,
+              estimatedCost,
               estimation: {
                 breakdown: costEstimation?.breakdown,
                 confidence: costEstimation?.confidence
@@ -567,8 +567,8 @@ async function handleMessagesRequest(req, res) {
             return res.status(429).json({
               ...violationResponse,
               type: 'account_cost_limit',
-              accountId: accountId,
-              estimatedCost: estimatedCost,
+              accountId,
+              estimatedCost,
               estimation: {
                 breakdown: costEstimation?.breakdown,
                 confidence: costEstimation?.confidence

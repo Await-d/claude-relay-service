@@ -809,7 +809,9 @@
                     class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
                     type="checkbox"
                   />
-                  <span class="text-sm text-gray-700 dark:text-gray-300">遇到警告时自动停止调度</span>
+                  <span class="text-sm text-gray-700 dark:text-gray-300"
+                    >遇到警告时自动停止调度</span
+                  >
                 </label>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   启用后，当账户返回警告信息时将自动暂停调度，避免潜在的账户风险
@@ -2056,7 +2058,9 @@ const form = ref({
   defaultModel: props.account?.defaultModel || '',
   smallFastModel: props.account?.smallFastModel || '',
   // 警告控制字段
-  autoStopOnWarning: props.account ? (props.account.autoStopOnWarning === 'true' || props.account.autoStopOnWarning === true) : false
+  autoStopOnWarning: props.account
+    ? props.account.autoStopOnWarning === 'true' || props.account.autoStopOnWarning === true
+    : false
 })
 
 // 模型映射表数据
@@ -3132,7 +3136,8 @@ watch(
         defaultModel: newAccount.defaultModel || '',
         smallFastModel: newAccount.smallFastModel || '',
         // 警告控制字段
-        autoStopOnWarning: newAccount.autoStopOnWarning === 'true' || newAccount.autoStopOnWarning === true || false
+        autoStopOnWarning:
+          newAccount.autoStopOnWarning === 'true' || newAccount.autoStopOnWarning === true || false
       }
 
       // 如果是分组类型，加载分组ID

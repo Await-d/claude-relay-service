@@ -1,7 +1,9 @@
 <template>
   <div class="card p-4 md:p-6">
     <div class="mb-4 md:mb-6">
-      <h3 class="flex flex-col text-lg font-bold text-gray-900 dark:text-gray-100 sm:flex-row sm:items-center md:text-xl">
+      <h3
+        class="flex flex-col text-lg font-bold text-gray-900 dark:text-gray-100 sm:flex-row sm:items-center md:text-xl"
+      >
         <span class="flex items-center">
           <i class="fas fa-chart-line mr-2 text-sm text-blue-500 md:mr-3 md:text-base" />
           小时使用趋势图
@@ -14,7 +16,9 @@
 
     <!-- 图表加载状态 -->
     <div v-if="hourlyLoading" class="py-8 text-center md:py-12">
-      <i class="fas fa-spinner loading-spinner mb-2 text-xl text-gray-600 dark:text-gray-400 md:text-2xl" />
+      <i
+        class="fas fa-spinner loading-spinner mb-2 text-xl text-gray-600 dark:text-gray-400 md:text-2xl"
+      />
       <p class="text-sm text-gray-600 dark:text-gray-400 md:text-base">加载图表数据中...</p>
     </div>
 
@@ -36,10 +40,10 @@
           <span>使用量分布</span>
           <span>{{ chartData.length }} 个时段</span>
         </div>
-        
+
         <div class="grid gap-1" :class="gridCols">
-          <div 
-            v-for="(item, index) in chartData" 
+          <div
+            v-for="(item, index) in chartData"
             :key="index"
             class="chart-bar group relative"
             :style="{ height: `${getBarHeight(item)}px` }"
@@ -47,13 +51,15 @@
             @mouseleave="hideTooltip"
           >
             <!-- 柱状条 -->
-            <div 
+            <div
               class="h-full w-full rounded-t transition-all duration-200"
               :class="getBarColor(item)"
             />
-            
+
             <!-- 时间标签 -->
-            <div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 dark:text-gray-400">
+            <div
+              class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs text-gray-500 dark:text-gray-400"
+            >
               {{ formatTimeLabel(item.time) }}
             </div>
           </div>
@@ -89,8 +95,8 @@
     </div>
 
     <!-- 工具提示 -->
-    <div 
-      v-if="tooltip.show" 
+    <div
+      v-if="tooltip.show"
       class="tooltip"
       :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
     >
@@ -128,8 +134,8 @@ const chartData = computed(() => {
 
   // 按小时汇总数据
   const hourMap = new Map()
-  
-  hourlyStats.value.forEach(item => {
+
+  hourlyStats.value.forEach((item) => {
     const timeKey = item.hour || item.time || '00:00'
     const existing = hourMap.get(timeKey) || {
       time: timeKey,
@@ -137,19 +143,19 @@ const chartData = computed(() => {
       cost: 0,
       models: new Set()
     }
-    
+
     existing.requests += item.requests || 0
     existing.cost += item.costs?.total || 0
     if (item.model) {
       existing.models.add(item.model)
     }
-    
+
     hourMap.set(timeKey, existing)
   })
 
   return Array.from(hourMap.values())
     .sort((a, b) => a.time.localeCompare(b.time))
-    .map(item => ({
+    .map((item) => ({
       ...item,
       cost: formatCost(item.cost),
       models: Array.from(item.models)
@@ -168,11 +174,11 @@ const gridCols = computed(() => {
 // 峰值时段
 const peakHour = computed(() => {
   if (chartData.value.length === 0) return null
-  
-  const peak = chartData.value.reduce((max, current) => 
+
+  const peak = chartData.value.reduce((max, current) =>
     current.requests > max.requests ? current : max
   )
-  
+
   return {
     time: peak.time,
     requests: peak.requests,
@@ -192,9 +198,12 @@ const summary = computed(() => {
   }
 
   const totalRequests = chartData.value.reduce((sum, item) => sum + item.requests, 0)
-  const totalCost = chartData.value.reduce((sum, item) => sum + (parseFloat(item.cost.replace('$', '')) || 0), 0)
-  const activeHours = chartData.value.filter(item => item.requests > 0).length
-  
+  const totalCost = chartData.value.reduce(
+    (sum, item) => sum + (parseFloat(item.cost.replace('$', '')) || 0),
+    0
+  )
+  const activeHours = chartData.value.filter((item) => item.requests > 0).length
+
   return {
     totalRequests: totalRequests.toLocaleString(),
     totalCost: formatCost(totalCost),
@@ -206,14 +215,14 @@ const summary = computed(() => {
 // 计算柱状图高度
 const getBarHeight = (item) => {
   if (chartData.value.length === 0) return 0
-  
-  const maxRequests = Math.max(...chartData.value.map(d => d.requests))
+
+  const maxRequests = Math.max(...chartData.value.map((d) => d.requests))
   if (maxRequests === 0) return 2
-  
+
   const minHeight = 2
   const maxHeight = 60
   const ratio = item.requests / maxRequests
-  
+
   return Math.max(minHeight, ratio * maxHeight)
 }
 
@@ -229,12 +238,12 @@ const getBarColor = (item) => {
 // 格式化时间标签
 const formatTimeLabel = (time) => {
   if (!time) return ''
-  
+
   // 只显示小时，去掉分钟
   if (time.includes(':')) {
     return time.split(':')[0] + 'h'
   }
-  
+
   return time
 }
 
@@ -346,8 +355,12 @@ const hideTooltip = () => {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 响应式优化 */
@@ -355,7 +368,7 @@ const hideTooltip = () => {
   .chart-bar {
     min-width: 8px;
   }
-  
+
   .stat-card {
     padding: 8px;
   }

@@ -25,7 +25,7 @@ const dateHelper = require('../utils/dateHelper')
 /**
  * 时区辅助函数（向下兼容包装器）
  * 注意：这些函数现在由 dateHelper.js 提供实现，此处仅为向下兼容
- * 
+ *
  * @param {Date} date 要转换的日期对象，默认为当前时间
  * @returns {Date} 调整后的日期对象
  */
@@ -35,7 +35,7 @@ function getDateInTimezone(date = new Date()) {
 
 /**
  * 获取配置时区的日期字符串 (YYYY-MM-DD)
- * 
+ *
  * @param {Date} date 要转换的日期对象，默认为当前时间
  * @returns {string} 格式化的日期字符串
  */
@@ -45,7 +45,7 @@ function getDateStringInTimezone(date = new Date()) {
 
 /**
  * 获取配置时区的小时 (0-23)
- * 
+ *
  * @param {Date} date 要转换的日期对象，默认为当前时间
  * @returns {number} 小时值 (0-23)
  */

@@ -196,7 +196,11 @@ class RequestLoggingIntegration {
     const tokenDetails = this._buildTokenDetailsFromUsage(params.usageData, params.requestBody)
 
     // 3. 计算费用详细信息
-    const costDetails = this._buildCostDetailsFromUsage(params.usageData, tokenDetails, params.accountId)
+    const costDetails = this._buildCostDetailsFromUsage(
+      params.usageData,
+      tokenDetails,
+      params.accountId
+    )
 
     // 4. 处理头部信息（如果启用）
     const requestHeaders = this.config.enableHeadersCapture ? params.requestHeaders : {}
@@ -421,31 +425,31 @@ class RequestLoggingIntegration {
         cacheCost: cacheWriteCost + cacheReadCost,
         cacheWriteCost,
         cacheReadCost,
-        
+
         // 定价信息
         inputTokenPrice: costResult.pricing?.input || 0,
         outputTokenPrice: costResult.pricing?.output || 0,
         cacheWriteTokenPrice: costResult.pricing?.cacheWrite || 0,
         cacheReadTokenPrice: costResult.pricing?.cacheRead || 0,
-        
+
         // 元信息
         currency: 'USD',
         exchangeRate: 1.0,
         billingPeriod: 'per-request',
         costPerToken: tokenDetails.totalTokens > 0 ? totalCost / tokenDetails.totalTokens : 0,
         usingDynamicPricing: costResult.usingDynamicPricing || false,
-        
+
         // 新增：账户相关费用信息
         accountId: accountId || null,
         accountCost: totalCost, // 当前请求产生的账户费用
-        
+
         recordedAt: new Date().toISOString()
       }
     } catch (error) {
       logger.warn('⚠️ Cost calculation failed:', error.message)
-      return { 
-        totalCost: 0, 
-        currency: 'USD', 
+      return {
+        totalCost: 0,
+        currency: 'USD',
         calculationError: error.message,
         accountId: accountId || null,
         accountCost: 0

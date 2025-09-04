@@ -150,11 +150,13 @@ class CostEstimator {
       let totalText = ''
 
       for (const message of messages) {
-        if (!message || typeof message !== 'object') continue
+        if (!message || typeof message !== 'object') {
+          continue
+        }
 
         // 处理简单文本内容
         if (typeof message.content === 'string') {
-          totalText += message.content + '\n'
+          totalText += `${message.content}\n`
           continue
         }
 
@@ -164,7 +166,7 @@ class CostEstimator {
             if (contentItem && typeof contentItem === 'object') {
               // 提取文本类型的内容
               if (contentItem.type === 'text' && typeof contentItem.text === 'string') {
-                totalText += contentItem.text + '\n'
+                totalText += `${contentItem.text}\n`
               }
               // 其他类型（图像、文档等）暂时不计算，但可能影响费用
             }
@@ -173,7 +175,7 @@ class CostEstimator {
 
         // 处理system prompt等
         if (message.role === 'system' && typeof message.content === 'string') {
-          totalText += message.content + '\n'
+          totalText += `${message.content}\n`
         }
       }
 
@@ -190,7 +192,9 @@ class CostEstimator {
    * @returns {number} 预估的token数量
    */
   _estimateTokenCount(text) {
-    if (!text || typeof text !== 'string') return 0
+    if (!text || typeof text !== 'string') {
+      return 0
+    }
 
     // 简单启发式算法：
     // 1. 检测中英文比例
@@ -222,9 +226,15 @@ class CostEstimator {
     const textLength = textContent.length
     const hasModelConfig = !!this.estimationConfig.modelOutputRatios[model]
 
-    if (textLength < 50) return 'low' // 文本太短
-    if (textLength > 10000) return 'medium' // 文本很长，预估可能不准确
-    if (hasModelConfig && textLength > 100 && textLength < 5000) return 'high'
+    if (textLength < 50) {
+      return 'low'
+    } // 文本太短
+    if (textLength > 10000) {
+      return 'medium'
+    } // 文本很长，预估可能不准确
+    if (hasModelConfig && textLength > 100 && textLength < 5000) {
+      return 'high'
+    }
 
     return 'medium'
   }
@@ -237,11 +247,15 @@ class CostEstimator {
    */
   quickEstimate(requestBody, model = 'unknown') {
     try {
-      if (!requestBody || !requestBody.messages) return 0
+      if (!requestBody || !requestBody.messages) {
+        return 0
+      }
 
       // 快速估算：仅基于字符数和模型基础价格
       const textContent = this._extractTextFromMessages(requestBody.messages)
-      if (!textContent) return 0
+      if (!textContent) {
+        return 0
+      }
 
       const estimatedInputTokens = this._estimateTokenCount(textContent)
       const outputRatio =

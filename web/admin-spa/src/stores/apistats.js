@@ -15,7 +15,7 @@ export const useApiStatsStore = defineStore('apistats', () => {
   const modelStats = ref([])
   const dailyStats = ref(null)
   const monthlyStats = ref(null)
-  
+
   // 小时统计相关状态
   const hourlyStats = ref([])
   const hourlyLoading = ref(false)
@@ -24,7 +24,7 @@ export const useApiStatsStore = defineStore('apistats', () => {
     selectedHours: 24,
     selectedDate: new Date().toISOString().split('T')[0]
   })
-  
+
   const oemSettings = ref({
     siteName: '',
     siteIcon: '',

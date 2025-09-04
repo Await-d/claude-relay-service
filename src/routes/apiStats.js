@@ -424,7 +424,7 @@ router.post('/api/user-stats', async (req, res) => {
 router.post('/api/user-model-stats', async (req, res) => {
   try {
     const { apiKey, apiId, period = 'monthly', date, hours = 24 } = req.body
-    
+
     // 参数验证
     if (period && !['daily', 'monthly', 'hourly'].includes(period)) {
       return res.status(400).json({
@@ -432,7 +432,7 @@ router.post('/api/user-model-stats', async (req, res) => {
         message: 'Period must be one of: daily, monthly, hourly'
       })
     }
-    
+
     // 小时统计的额外参数验证
     if (period === 'hourly') {
       if (!date) {
@@ -441,14 +441,14 @@ router.post('/api/user-model-stats', async (req, res) => {
           message: 'Date parameter is required for hourly period (format: YYYY-MM-DD)'
         })
       }
-      
+
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({
           error: 'Invalid date format',
           message: 'Date must be in YYYY-MM-DD format'
         })
       }
-      
+
       if (typeof hours !== 'number' || hours < 1 || hours > 168) {
         return res.status(400).json({
           error: 'Invalid hours parameter',
@@ -529,8 +529,8 @@ router.post('/api/user-model-stats', async (req, res) => {
       `📊 User model stats query from key: ${keyData.name} (${keyId}) for period: ${period}${period === 'hourly' ? `, date: ${date}, hours: ${hours}` : ''}`
     )
 
-    let modelStats = []
-    
+    const modelStats = []
+
     if (period === 'hourly') {
       // 使用新的小时统计方法
       try {
@@ -541,9 +541,9 @@ router.post('/api/user-model-stats', async (req, res) => {
             message: 'Unable to parse the provided date'
           })
         }
-        
+
         const hourlyStats = await database.getModelUsageHourly(keyId, startDate, hours)
-        
+
         // 聚合所有小时的模型数据
         const modelAggregation = new Map()
         let totalHourlyTokens = 0
@@ -551,18 +551,18 @@ router.post('/api/user-model-stats', async (req, res) => {
         let totalHourlyCost = 0
         let peakHour = null
         let peakHourTokens = 0
-        
+
         for (const hourStat of hourlyStats) {
           // 计算峰值小时
           if (hourStat.totalTokens > peakHourTokens) {
             peakHourTokens = hourStat.totalTokens
             peakHour = hourStat.hour
           }
-          
+
           totalHourlyTokens += hourStat.totalTokens
           totalHourlyRequests += hourStat.totalRequests
           totalHourlyCost += hourStat.totalCost
-          
+
           // 聚合各模型数据
           for (const [modelName, modelData] of Object.entries(hourStat.models)) {
             if (!modelAggregation.has(modelName)) {
@@ -577,7 +577,7 @@ router.post('/api/user-model-stats', async (req, res) => {
                 totalCost: 0
               })
             }
-            
+
             const aggregated = modelAggregation.get(modelName)
             aggregated.requests += modelData.requests
             aggregated.inputTokens += modelData.inputTokens
@@ -588,7 +588,7 @@ router.post('/api/user-model-stats', async (req, res) => {
             aggregated.totalCost += modelData.cost
           }
         }
-        
+
         // 转换为标准格式
         for (const [modelName, aggregated] of modelAggregation) {
           const usage = {
@@ -597,9 +597,9 @@ router.post('/api/user-model-stats', async (req, res) => {
             cache_creation_input_tokens: aggregated.cacheCreateTokens,
             cache_read_input_tokens: aggregated.cacheReadTokens
           }
-          
+
           const costData = CostCalculator.calculateCost(usage, modelName)
-          
+
           modelStats.push({
             model: modelName,
             requests: aggregated.requests,
@@ -614,33 +614,32 @@ router.post('/api/user-model-stats', async (req, res) => {
             // 小时统计特有字段
             hourlyDetails: {
               totalCost: aggregated.totalCost,
-              peakHour: peakHour,
-              hoursWithActivity: hourlyStats.filter(h => h.totalTokens > 0).length
+              peakHour,
+              hoursWithActivity: hourlyStats.filter((h) => h.totalTokens > 0).length
             }
           })
         }
-        
+
         // 为响应添加汇总信息
         const hourlySummary = {
           totalTokens: totalHourlyTokens,
           totalRequests: totalHourlyRequests,
           totalCost: totalHourlyCost,
           activeModels: modelAggregation.size,
-          peakHour: peakHour,
+          peakHour,
           hourlyData: hourlyStats // 包含完整的小时数据
         }
-        
+
         // 按总token数降序排列
         modelStats.sort((a, b) => b.allTokens - a.allTokens)
-        
+
         return res.json({
           success: true,
           data: modelStats,
-          period: period,
+          period,
           range: period,
           summary: hourlySummary
         })
-        
       } catch (error) {
         logger.error(`❌ Failed to get hourly model stats for ${keyId}:`, error)
         return res.status(500).json({
@@ -738,14 +737,14 @@ router.post('/api/user-model-stats/hourly', async (req, res) => {
         message: 'Date parameter is required (format: YYYY-MM-DD)'
       })
     }
-    
+
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({
         error: 'Invalid date format',
         message: 'Date must be in YYYY-MM-DD format'
       })
     }
-    
+
     if (typeof hours !== 'number' || hours < 1 || hours > 168) {
       return res.status(400).json({
         error: 'Invalid hours parameter',
@@ -807,9 +806,7 @@ router.post('/api/user-model-stats/hourly', async (req, res) => {
       keyData = validatedKeyData
       keyId = keyData.id
     } else {
-      logger.security(
-        `🔒 Missing API key or ID in hourly stats query from ${req.ip || 'unknown'}`
-      )
+      logger.security(`🔒 Missing API key or ID in hourly stats query from ${req.ip || 'unknown'}`)
       return res.status(400).json({
         error: 'API Key or ID is required',
         message: 'Please provide your API Key or API ID'
@@ -864,25 +861,24 @@ router.post('/api/user-model-stats/hourly', async (req, res) => {
       activeModels: Array.from(activeModels),
       peakHour,
       hoursQueried: hours,
-      hoursWithActivity: hourlyStats.filter(h => h.totalTokens > 0).length
+      hoursWithActivity: hourlyStats.filter((h) => h.totalTokens > 0).length
     }
 
     const response = {
       success: true,
       data: {
         range: 'hourly',
-        period: { 
-          start: startDate.toISOString(), 
-          hours: hours,
+        period: {
+          start: startDate.toISOString(),
+          hours,
           end: new Date(startDate.getTime() + hours * 60 * 60 * 1000).toISOString()
         },
-        hourlyStats: hourlyStats,
-        summary: summary
+        hourlyStats,
+        summary
       }
     }
 
     return res.json(response)
-
   } catch (error) {
     logger.error('❌ Failed to process hourly model stats query:', error)
     return res.status(500).json({
