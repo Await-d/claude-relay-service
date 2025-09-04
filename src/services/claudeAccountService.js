@@ -61,7 +61,9 @@ class ClaudeAccountService {
       // 新增调度策略字段
       schedulingStrategy = 'least_recent', // 调度策略
       schedulingWeight = 1, // 调度权重 (1-10)
-      sequentialOrder = 1 // 顺序调度的顺序号
+      sequentialOrder = 1, // 顺序调度的顺序号
+      // 新增警告控制字段
+      autoStopOnWarning = false // 是否在警告时自动停止调度
     } = options
 
     const accountId = uuidv4()
@@ -104,7 +106,9 @@ class ClaudeAccountService {
         sequentialOrder: sequentialOrder.toString(),
         roundRobinIndex: '0', // 轮询索引，初始为0
         usageCount: '0', // 使用计数，初始为0
-        lastScheduledAt: '' // 最后调度时间，初始为空
+        lastScheduledAt: '', // 最后调度时间，初始为空
+        // 新增警告控制字段
+        autoStopOnWarning: autoStopOnWarning.toString() // 是否在警告时自动停止调度
       }
     } else {
       // 兼容旧格式
@@ -137,7 +141,9 @@ class ClaudeAccountService {
         sequentialOrder: sequentialOrder.toString(),
         roundRobinIndex: '0', // 轮询索引，初始为0
         usageCount: '0', // 使用计数，初始为0
-        lastScheduledAt: '' // 最后调度时间，初始为空
+        lastScheduledAt: '', // 最后调度时间，初始为空
+        // 新增警告控制字段
+        autoStopOnWarning: autoStopOnWarning.toString() // 是否在警告时自动停止调度
       }
     }
 
@@ -183,7 +189,9 @@ class ClaudeAccountService {
       sequentialOrder,
       roundRobinIndex: 0,
       usageCount: 0,
-      lastScheduledAt: ''
+      lastScheduledAt: '',
+      // 返回警告控制字段
+      autoStopOnWarning
     }
   }
 
@@ -541,7 +549,9 @@ class ClaudeAccountService {
         // 新增调度策略字段
         'schedulingStrategy',
         'schedulingWeight',
-        'sequentialOrder'
+        'sequentialOrder',
+        // 新增警告控制字段
+        'autoStopOnWarning'
       ]
       const updatedData = { ...accountData }
 
@@ -573,6 +583,9 @@ class ClaudeAccountService {
             }
           } else if (['schedulingWeight', 'sequentialOrder'].includes(field)) {
             // 数字类型的调度策略字段转为字符串存储
+            updatedData[field] = value.toString()
+          } else if (field === 'autoStopOnWarning') {
+            // 布尔类型的警告控制字段转为字符串存储
             updatedData[field] = value.toString()
           } else {
             updatedData[field] = value.toString()
@@ -679,6 +692,130 @@ class ClaudeAccountService {
       return { success: true, usageCount }
     } catch (error) {
       logger.error(`❌ Failed to record usage for account ${accountId}:`, error)
+      throw error
+    }
+  }
+
+  // 💰 记录账户费用
+  /**
+   * 记录账户费用
+   * @param {string} accountId - Claude账户ID
+   * @param {Object} usage - 使用量数据
+   * @param {number} usage.input_tokens - 输入token数量
+   * @param {number} usage.output_tokens - 输出token数量
+   * @param {number} usage.cache_creation_input_tokens - 缓存创建token数量
+   * @param {number} usage.cache_read_input_tokens - 缓存读取token数量
+   * @param {string} model - 模型名称
+   * @returns {Promise<Object>} 记录结果
+   */
+  async recordAccountCost(accountId, usage, model) {
+    try {
+      // 参数验证
+      if (!accountId) {
+        throw new Error('Account ID is required')
+      }
+      if (!usage || typeof usage !== 'object') {
+        throw new Error('Usage data is required')
+      }
+      if (!model) {
+        throw new Error('Model name is required')
+      }
+
+      // 使用CostCalculator计算费用
+      const costResult = CostCalculator.calculateCost(usage, model)
+      const totalCost = costResult.costs.total
+
+      if (totalCost <= 0) {
+        logger.debug(`💰 Skipping cost recording for account ${accountId}: zero cost (${totalCost})`)
+        return { success: true, cost: 0, skipped: true }
+      }
+
+      // 记录费用到数据库
+      await database.incrementAccountCost(accountId, totalCost, model)
+
+      logger.debug(
+        `💰 Recorded cost for account ${accountId}: $${totalCost.toFixed(6)} (${model}, ${costResult.usage.totalTokens} tokens)`
+      )
+
+      return {
+        success: true,
+        cost: totalCost,
+        costDetails: costResult,
+        skipped: false
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to record cost for account ${accountId}:`, error)
+      
+      // 优雅降级：记录错误但不影响主要请求流程
+      try {
+        // 记录费用记录失败的统计
+        const errorKey = `cost_recording_errors:${accountId}:${new Date().toISOString().split('T')[0]}`
+        await database.client.incr(errorKey)
+        await database.client.expire(errorKey, 86400) // 1天过期
+      } catch (statsError) {
+        // 忽略统计记录错误
+        logger.debug('Failed to record cost error stats:', statsError)
+      }
+
+      return { success: false, error: error.message, cost: 0 }
+    }
+  }
+
+  // 📊 获取账户费用统计
+  /**
+   * 获取账户费用统计
+   * @param {string} accountId - Claude账户ID  
+   * @param {Object} options - 选项
+   * @param {string} options.period - 时间范围 ('today', 'week', 'month', 'all')
+   * @returns {Promise<Object>} 费用统计数据
+   */
+  async getAccountCostStats(accountId, options = {}) {
+    try {
+      if (!accountId) {
+        throw new Error('Account ID is required')
+      }
+
+      // 获取账户基本信息
+      const accountData = await this.getAccount(accountId)
+      if (!accountData) {
+        throw new Error('Account not found')
+      }
+
+      // 从数据库获取费用统计
+      const costStats = await database.getAccountCostStats(accountId, options.period)
+
+      // 格式化结果
+      const result = {
+        accountId,
+        accountName: accountData.name,
+        period: options.period || 'all',
+        ...costStats,
+        // 添加格式化的费用显示
+        formatted: {
+          totalCost: CostCalculator.formatCost(costStats.totalCost || 0),
+          dailyCosts: costStats.dailyCosts ? 
+            costStats.dailyCosts.map(item => ({
+              ...item,
+              formattedCost: CostCalculator.formatCost(item.cost)
+            })) : [],
+          modelCosts: costStats.modelCosts ?
+            Object.fromEntries(
+              Object.entries(costStats.modelCosts).map(([model, cost]) => [
+                model,
+                CostCalculator.formatCost(cost)
+              ])
+            ) : {}
+        },
+        retrievedAt: new Date().toISOString()
+      }
+
+      logger.debug(
+        `📊 Retrieved cost stats for account ${accountId}: $${(costStats.totalCost || 0).toFixed(6)} (${options.period || 'all'})`
+      )
+
+      return result
+    } catch (error) {
+      logger.error(`❌ Failed to get cost stats for account ${accountId}:`, error)
       throw error
     }
   }

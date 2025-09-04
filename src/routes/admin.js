@@ -1552,7 +1552,9 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
       // 新增调度策略字段
       schedulingStrategy,
       schedulingWeight,
-      sequentialOrder
+      sequentialOrder,
+      // 新增警告控制字段
+      autoStopOnWarning
     } = req.body
 
     if (!name) {
@@ -1608,7 +1610,9 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
       platform,
       priority: priority || 50, // 默认优先级为50
       // 使用验证后的调度策略字段
-      ...schedulingValidation.fields
+      ...schedulingValidation.fields,
+      // 新增警告控制字段
+      autoStopOnWarning: autoStopOnWarning || false
     })
 
     // 如果是分组类型，将账户添加到分组

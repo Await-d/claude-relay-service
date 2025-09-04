@@ -32,6 +32,14 @@ const MODEL_PRICING = {
     cacheRead: 1.5
   },
 
+  // Claude Opus 4.1 (新模型)
+  'claude-opus-4-1-20250805': {
+    input: 15.0,
+    output: 75.0,
+    cacheWrite: 18.75,
+    cacheRead: 1.5
+  },
+
   // Claude 3 Sonnet
   'claude-3-sonnet-20240229': {
     input: 3.0,
@@ -69,16 +77,22 @@ class CostCalculator {
    * @returns {Object} 费用详情
    */
   static calculateCost(usage, model = 'unknown') {
+    // 输入参数验证
+    if (!usage || typeof usage !== 'object') {
+      usage = {}
+    }
+
     // 如果 usage 包含详细的 cache_creation 对象，使用 pricingService 来处理
     if (usage.cache_creation && typeof usage.cache_creation === 'object') {
       return pricingService.calculateCost(usage, model)
     }
 
     // 否则使用旧的逻辑（向后兼容）
-    const inputTokens = usage.input_tokens || 0
-    const outputTokens = usage.output_tokens || 0
-    const cacheCreateTokens = usage.cache_creation_input_tokens || 0
-    const cacheReadTokens = usage.cache_read_input_tokens || 0
+    // 处理负数输入，将其设为0
+    const inputTokens = Math.max(0, usage.input_tokens || 0)
+    const outputTokens = Math.max(0, usage.output_tokens || 0)
+    const cacheCreateTokens = Math.max(0, usage.cache_creation_input_tokens || 0)
+    const cacheReadTokens = Math.max(0, usage.cache_read_input_tokens || 0)
 
     // 优先使用动态价格服务
     const pricingData = pricingService.getModelPricing(model)

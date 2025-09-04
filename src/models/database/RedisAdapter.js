@@ -12,19 +12,17 @@ const Redis = require('ioredis')
 const config = require('../../../config/config')
 const logger = require('../../utils/logger')
 const DatabaseAdapter = require('./DatabaseAdapter')
+const Decimal = require('decimal.js')
+const CostCalculator = require('../../utils/costCalculator')
 
-// 时区辅助函数
+// 导入统一时区处理工具
+const dateHelper = require('../../utils/dateHelper')
+
+// 时区辅助函数（现在由 dateHelper 提供）
 // 注意：这个函数的目的是获取某个时间点在目标时区的"本地"表示
 // 例如：UTC时间 2025-07-30 01:00:00 在 UTC+8 时区表示为 2025-07-30 09:00:00
 function getDateInTimezone(date = new Date()) {
-  const offset = config.system.timezoneOffset || 8 // 默认UTC+8
-
-  // 方法：创建一个偏移后的Date对象，使其getUTCXXX方法返回目标时区的值
-  // 这样我们可以用getUTCFullYear()等方法获取目标时区的年月日时分秒
-  const offsetMs = offset * 3600000 // 时区偏移的毫秒数
-  const adjustedTime = new Date(date.getTime() + offsetMs)
-
-  return adjustedTime
+  return dateHelper.getDateInTimezone(date)
 }
 
 // 获取配置时区的日期字符串 (YYYY-MM-DD)
@@ -953,6 +951,143 @@ class RedisAdapter extends DatabaseAdapter {
   }
 
   /**
+   * 获取指定时间段的模型小时使用统计
+   * @param {string} keyId API Key ID  
+   * @param {Date} startDate 开始时间
+   * @param {number} hours 小时数(默认24，最大168)
+   * @returns {Promise<Array>} 小时统计数据数组
+   */
+  async getModelUsageHourly(keyId, startDate, hours = 24) {
+    // 参数验证
+    if (!keyId || typeof keyId !== 'string') {
+      throw new Error('Invalid keyId parameter')
+    }
+    
+    if (!(startDate instanceof Date)) {
+      throw new Error('startDate must be a Date object')
+    }
+    
+    if (typeof hours !== 'number' || hours < 1 || hours > 168) {
+      throw new Error('Hours parameter must be between 1 and 168')
+    }
+
+    const hourlyStats = []
+    
+    try {
+      // 生成所有需要查询的小时键
+      const hourKeys = []
+      for (let i = 0; i < hours; i++) {
+        const currentDate = new Date(startDate.getTime() + i * 60 * 60 * 1000)
+        const tzDate = getDateInTimezone(currentDate)
+        const dateStr = getDateStringInTimezone(currentDate)
+        const hourStr = String(tzDate.getUTCHours()).padStart(2, '0')
+        const hourKey = `${dateStr}:${hourStr}`
+        hourKeys.push({ hourKey, timestamp: currentDate.toISOString() })
+      }
+
+      // 使用Pipeline批量查询以提高性能
+      const pipeline = this.client.pipeline()
+      const queryMap = new Map()
+
+      for (const { hourKey } of hourKeys) {
+        // 查询该小时的所有模型数据
+        const pattern = `usage:${keyId}:model:hourly:*:${hourKey}`
+        pipeline.keys(pattern)
+        queryMap.set(hourKey, pattern)
+      }
+
+      const patternResults = await pipeline.exec()
+      
+      // 处理每个小时的数据
+      for (let i = 0; i < hourKeys.length; i++) {
+        const { hourKey, timestamp } = hourKeys[i]
+        const modelKeys = patternResults[i][1] || []
+        
+        const hourStat = {
+          hour: hourKey,
+          timestamp: timestamp,
+          models: {},
+          totalTokens: 0,
+          totalRequests: 0,
+          totalCost: 0
+        }
+
+        if (modelKeys.length > 0) {
+          // 批量获取该小时所有模型的详细数据
+          const dataPipeline = this.client.pipeline()
+          for (const modelKey of modelKeys) {
+            dataPipeline.hgetall(modelKey)
+          }
+          
+          const modelResults = await dataPipeline.exec()
+          
+          // 处理每个模型的数据
+          for (let j = 0; j < modelKeys.length; j++) {
+            const modelKey = modelKeys[j]
+            const modelData = modelResults[j][1] || {}
+            
+            // 从键名提取模型名: usage:{keyId}:model:hourly:{model}:{hour}
+            const modelMatch = modelKey.match(/usage:.+:model:hourly:(.+):\d{4}-\d{2}-\d{2}:\d{2}$/)
+            if (!modelMatch || !modelData || Object.keys(modelData).length === 0) {
+              continue
+            }
+            
+            const modelName = modelMatch[1]
+            const inputTokens = parseInt(modelData.inputTokens) || 0
+            const outputTokens = parseInt(modelData.outputTokens) || 0
+            const cacheCreateTokens = parseInt(modelData.cacheCreateTokens) || 0
+            const cacheReadTokens = parseInt(modelData.cacheReadTokens) || 0
+            const requests = parseInt(modelData.requests) || 0
+            const totalModelTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+            
+            // 计算模型费用
+            const usage = {
+              input_tokens: inputTokens,
+              output_tokens: outputTokens,
+              cache_creation_input_tokens: cacheCreateTokens,
+              cache_read_input_tokens: cacheReadTokens
+            }
+            
+            let modelCost = 0
+            try {
+              const costResult = CostCalculator.calculateCost(usage, modelName)
+              modelCost = costResult.costs.total || 0
+            } catch (error) {
+              logger.warn(`Failed to calculate cost for model ${modelName}:`, error)
+              modelCost = 0
+            }
+            
+            // 添加到模型统计
+            hourStat.models[modelName] = {
+              tokens: totalModelTokens,
+              inputTokens,
+              outputTokens,
+              cacheCreateTokens,
+              cacheReadTokens,
+              requests,
+              cost: modelCost
+            }
+            
+            // 累计到小时总计
+            hourStat.totalTokens += totalModelTokens
+            hourStat.totalRequests += requests
+            hourStat.totalCost += modelCost
+          }
+        }
+        
+        hourlyStats.push(hourStat)
+      }
+      
+      logger.debug(`📊 Retrieved hourly model stats for keyId: ${keyId}, hours: ${hours}, results: ${hourlyStats.length}`)
+      return hourlyStats
+      
+    } catch (error) {
+      logger.error(`❌ Failed to get hourly model usage for keyId ${keyId}:`, error)
+      throw error
+    }
+  }
+
+  /**
    * 增加当日费用
    * @param {string} keyId API Key ID
    * @param {number} amount 费用金额
@@ -1014,6 +1149,270 @@ class RedisAdapter extends DatabaseAdapter {
   }
 
   /**
+   * 获取总费用
+   * @param {string} keyId API Key ID
+   * @returns {Promise<number>} 总费用
+   */
+  async getTotalCost(keyId) {
+    const totalKey = `usage:cost:total:${keyId}`
+    const cost = await this.client.get(totalKey)
+    const result = parseFloat(cost || 0)
+    logger.debug(
+      `💰 Getting total cost for ${keyId}, key: ${totalKey}, value: ${cost}, result: ${result}`
+    )
+    return result
+  }
+
+  /**
+   * 根据日期范围获取费用（用于周费用和月费用计算）
+   * @param {string} keyId API Key ID
+   * @param {Date} startDate 开始日期
+   * @param {Date} endDate 结束日期
+   * @returns {Promise<number>} 指定日期范围内的费用
+   */
+  async getCostByDateRange(keyId, startDate, endDate) {
+    try {
+      const dates = []
+      const current = new Date(startDate)
+
+      // 生成日期范围内的所有日期
+      while (current <= endDate) {
+        const dateString = current.toISOString().split('T')[0] // YYYY-MM-DD 格式
+        dates.push(dateString)
+        current.setDate(current.getDate() + 1)
+      }
+
+      // 如果日期范围超过30天，为了性能考虑，使用月度统计
+      if (dates.length > 30) {
+        logger.debug(`💰 Using monthly aggregation for large date range: ${dates.length} days`)
+
+        const monthKeys = new Set()
+        dates.forEach((date) => {
+          const [year, month] = date.split('-')
+          monthKeys.add(`usage:cost:monthly:${keyId}:${year}-${month}`)
+        })
+
+        const monthlyResults = await Promise.all(
+          Array.from(monthKeys).map((key) => this.client.get(key))
+        )
+
+        const totalCost = monthlyResults.reduce((sum, cost) => sum + parseFloat(cost || 0), 0)
+        logger.debug(
+          `💰 Cost by date range (monthly): ${keyId}, ${startDate.toISOString()} to ${endDate.toISOString()}, result: $${totalCost}`
+        )
+        return totalCost
+      }
+
+      // 对于较小的日期范围，使用日度统计
+      const dailyKeys = dates.map((date) => `usage:cost:daily:${keyId}:${date}`)
+      const dailyResults = await Promise.all(dailyKeys.map((key) => this.client.get(key)))
+
+      const totalCost = dailyResults.reduce((sum, cost) => sum + parseFloat(cost || 0), 0)
+      logger.debug(
+        `💰 Cost by date range (daily): ${keyId}, ${startDate.toISOString()} to ${endDate.toISOString()}, result: $${totalCost}`
+      )
+      return totalCost
+    } catch (error) {
+      logger.warn(`⚠️ Failed to get cost by date range for ${keyId}:`, error.message)
+      return 0
+    }
+  }
+
+  /**
+   * 获取指定Claude账户的每日费用
+   * @param {string} accountId - Claude账户ID
+   * @param {Date} date - 日期（可选，默认今天）
+   * @returns {Promise<number>} 账户每日费用
+   */
+  async getAccountDailyCost(accountId, date = new Date()) {
+    try {
+      // 参数验证
+      if (!accountId || typeof accountId !== 'string') {
+        throw new Error('Invalid accountId: must be a non-empty string')
+      }
+      if (!(date instanceof Date) && date !== null && date !== undefined) {
+        throw new Error('Invalid date: must be a Date object or null/undefined')
+      }
+
+      // 确保date是有效的Date对象
+      const targetDate = date || new Date()
+
+      // 使用时区转换函数获取日期字符串
+      const dateString = getDateStringInTimezone(targetDate)
+      const costKey = `usage:cost:daily:account:${accountId}:${dateString}`
+
+      const cost = await this.client.get(costKey)
+
+      // 使用Decimal.js确保精度
+      const result = new Decimal(cost || 0).toNumber()
+
+      logger.debug(
+        `💰 Getting account daily cost for ${accountId}, date: ${dateString}, key: ${costKey}, result: $${result.toFixed(6)}`
+      )
+
+      return result
+    } catch (error) {
+      logger.error(`❌ Failed to get account daily cost for ${accountId}:`, error)
+      // 降级处理 - 返回0而不是抛出错误
+      return 0
+    }
+  }
+
+  /**
+   * 根据日期范围获取账户费用
+   * @param {string} accountId 账户ID
+   * @param {Date} startDate 开始日期
+   * @param {Date} endDate 结束日期
+   * @returns {Promise<number>} 指定日期范围内的账户费用
+   */
+  async getAccountCostByDateRange(accountId, startDate, endDate) {
+    try {
+      const dates = []
+      const current = new Date(startDate)
+
+      // 生成日期范围内的所有日期，使用时区转换
+      while (current <= endDate) {
+        const dateString = getDateStringInTimezone(current)
+        dates.push(dateString)
+        current.setDate(current.getDate() + 1)
+      }
+
+      // 如果日期范围超过30天，为了性能考虑，使用月度统计
+      if (dates.length > 30) {
+        logger.debug(
+          `💰 Using monthly aggregation for account ${accountId} large date range: ${dates.length} days`
+        )
+
+        const monthKeys = new Set()
+        dates.forEach((date) => {
+          const [year, month] = date.split('-')
+          monthKeys.add(`usage:cost:monthly:account:${accountId}:${year}-${month}`)
+        })
+
+        // 并行获取月度数据
+        const monthCosts = await Promise.all(
+          Array.from(monthKeys).map(async (key) => {
+            const cost = await this.client.get(key)
+            return parseFloat(cost || 0)
+          })
+        )
+
+        const totalCost = monthCosts.reduce((sum, cost) => sum + cost, 0)
+        logger.debug(
+          `💰 Account ${accountId} cost by date range (monthly): $${totalCost.toFixed(6)}`
+        )
+        return totalCost
+      }
+
+      // 对于较小的日期范围，使用每日统计
+      const dailyKeys = dates.map((date) => `usage:cost:daily:account:${accountId}:${date}`)
+
+      // 并行获取每日费用数据
+      const dailyCosts = await Promise.all(
+        dailyKeys.map(async (key) => {
+          const cost = await this.client.get(key)
+          return parseFloat(cost || 0)
+        })
+      )
+
+      const totalCost = dailyCosts.reduce((sum, cost) => sum + cost, 0)
+      logger.debug(
+        `💰 Account ${accountId} cost by date range (${dates.length} days): $${totalCost.toFixed(6)}`
+      )
+      return totalCost
+    } catch (error) {
+      logger.warn(`⚠️ Failed to get account cost by date range for ${accountId}:`, error.message)
+      return 0
+    }
+  }
+
+  /**
+   * 增量更新账户费用
+   * @param {string} accountId - Claude账户ID
+   * @param {number} amount - 费用增量
+   * @param {string} model - 模型名称
+   * @returns {Promise<number>} 更新后的费用
+   */
+  async incrementAccountCost(accountId, amount, model) {
+    try {
+      // 参数验证
+      if (!accountId || typeof accountId !== 'string') {
+        throw new Error('Invalid accountId: must be a non-empty string')
+      }
+      if (typeof amount !== 'number' || amount < 0) {
+        throw new Error('Invalid amount: must be a non-negative number')
+      }
+      if (!model || typeof model !== 'string') {
+        throw new Error('Invalid model: must be a non-empty string')
+      }
+
+      // 使用Decimal.js确保精度
+      const preciseAmount = new Decimal(amount)
+
+      const now = new Date()
+      const tzDate = getDateInTimezone(now)
+      const dateString = getDateStringInTimezone(now)
+      const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
+      const currentHour = `${dateString}:${String(tzDate.getUTCHours()).padStart(2, '0')}`
+
+      // Redis键结构
+      const dailyKey = `usage:cost:daily:account:${accountId}:${dateString}`
+      const monthlyKey = `usage:cost:monthly:account:${accountId}:${currentMonth}`
+      const hourlyKey = `usage:cost:hourly:account:${accountId}:${currentHour}`
+      const totalKey = `usage:cost:total:account:${accountId}`
+
+      // 模型级别的费用统计
+      const modelDailyKey = `usage:cost:daily:account:${accountId}:${model}:${dateString}`
+      const modelMonthlyKey = `usage:cost:monthly:account:${accountId}:${model}:${currentMonth}`
+
+      logger.debug(
+        `💰 Incrementing account cost for ${accountId}, amount: $${preciseAmount.toString()}, model: ${model}, date: ${dateString}`
+      )
+
+      // 使用Pipeline批量操作确保原子性
+      const pipeline = this.client.pipeline()
+
+      // 基础费用统计
+      pipeline.incrbyfloat(dailyKey, preciseAmount.toNumber())
+      pipeline.incrbyfloat(monthlyKey, preciseAmount.toNumber())
+      pipeline.incrbyfloat(hourlyKey, preciseAmount.toNumber())
+      pipeline.incrbyfloat(totalKey, preciseAmount.toNumber())
+
+      // 模型级别费用统计
+      pipeline.incrbyfloat(modelDailyKey, preciseAmount.toNumber())
+      pipeline.incrbyfloat(modelMonthlyKey, preciseAmount.toNumber())
+
+      // 设置过期时间
+      pipeline.expire(dailyKey, 86400 * 32) // 32天
+      pipeline.expire(monthlyKey, 86400 * 365) // 1年
+      pipeline.expire(hourlyKey, 86400 * 7) // 7天
+      pipeline.expire(modelDailyKey, 86400 * 32) // 32天
+      pipeline.expire(modelMonthlyKey, 86400 * 365) // 1年
+
+      const results = await pipeline.exec()
+
+      // 检查执行结果
+      const dailyResult = results[0]
+      if (dailyResult[0]) {
+        logger.error(`❌ Failed to increment daily cost for ${accountId}:`, dailyResult[0])
+        throw dailyResult[0]
+      }
+
+      const newDailyTotal = parseFloat(dailyResult[1]) || 0
+
+      logger.debug(
+        `💰 Account cost incremented successfully for ${accountId}, model: ${model}, new daily total: $${newDailyTotal.toFixed(6)}`
+      )
+
+      return newDailyTotal
+    } catch (error) {
+      logger.error(`❌ Failed to increment account cost for ${accountId}:`, error)
+      // 降级处理 - 返回0而不是抛出错误
+      return 0
+    }
+  }
+
+  /**
    * 获取账户使用统计
    * @param {string} accountId 账户ID
    * @returns {Promise<Object>} 账户使用统计对象
@@ -1032,9 +1431,37 @@ class RedisAdapter extends DatabaseAdapter {
       this.client.hgetall(accountMonthlyKey)
     ])
 
-    // 获取账户创建时间来计算平均值（修复键名不一致问题）
-    const accountData = await this.client.hgetall(`claude:account:${accountId}`)
-    const createdAt = accountData.createdAt ? new Date(accountData.createdAt) : new Date()
+    // 获取账户创建时间来计算平均值（支持多种账户类型）
+    const accountPrefixes = [
+      `claude:account:${accountId}`,
+      `claude_console_account:${accountId}`,
+      `gemini:account:${accountId}`,
+      `openai:account:${accountId}`,
+      `bedrock:account:${accountId}`,
+      `azure_openai:account:${accountId}`
+    ]
+
+    let createdAt = new Date()
+    let accountData = null
+
+    // 依次尝试不同的账户类型前缀
+    for (const prefix of accountPrefixes) {
+      try {
+        accountData = await this.client.hgetall(prefix)
+        if (accountData && accountData.createdAt) {
+          createdAt = new Date(accountData.createdAt)
+          logger.debug(`✅ Found account data for ${accountId} with prefix: ${prefix}`)
+          break
+        }
+      } catch (error) {
+        logger.debug(`⚠️ Failed to get account data with prefix ${prefix}:`, error.message)
+      }
+    }
+
+    if (!accountData || !accountData.createdAt) {
+      logger.debug(`ℹ️ No creation time found for account ${accountId}, using current time`)
+    }
+
     const now = new Date()
     const daysSinceCreated = Math.max(1, Math.ceil((now - createdAt) / (1000 * 60 * 60 * 24)))
 
@@ -1096,53 +1523,101 @@ class RedisAdapter extends DatabaseAdapter {
    */
   async getAllAccountsUsageStats() {
     try {
-      const accountStats = []
+      logger.debug('🔍 Starting to get all accounts usage stats with batch optimization...')
 
-      // 获取所有Claude账户（修复键名不一致问题）
-      const claudeAccountKeys = await this.client.keys('claude:account:*')
+      // 批量获取所有账户类型的键名
+      const [claudeKeys, consoleKeys, geminiKeys, openaiKeys, bedrockKeys, azureKeys] =
+        await Promise.all([
+          this.client.keys('claude:account:*'),
+          this.client.keys('claude_console_account:*'),
+          this.client.keys('gemini:account:*'),
+          this.client.keys('openai:account:*'),
+          this.client.keys('bedrock:account:*'),
+          this.client.keys('azure_openai:account:*')
+        ])
 
-      for (const accountKey of claudeAccountKeys) {
-        const accountId = accountKey.replace('claude:account:', '')
-        const accountData = await this.client.hgetall(accountKey)
+      logger.debug(
+        `📊 Found accounts: Claude=${claudeKeys.length}, Console=${consoleKeys.length}, Gemini=${geminiKeys.length}, OpenAI=${openaiKeys.length}, Bedrock=${bedrockKeys.length}, Azure=${azureKeys.length}`
+      )
 
-        if (accountData.name) {
-          const stats = await this.getAccountUsageStats(accountId)
-          accountStats.push({
-            id: accountId,
-            name: accountData.name,
-            email: accountData.email || '',
-            status: accountData.status || 'unknown',
-            isActive: accountData.isActive === 'true',
-            accountType: 'claude',
-            ...stats
-          })
-        }
+      // 合并所有键，并标记类型
+      const allAccountKeys = [
+        ...claudeKeys.map((key) => ({ key, type: 'claude', prefix: 'claude:account:' })),
+        ...consoleKeys.map((key) => ({
+          key,
+          type: 'claude_console',
+          prefix: 'claude_console_account:'
+        })),
+        ...geminiKeys.map((key) => ({ key, type: 'gemini', prefix: 'gemini:account:' })),
+        ...openaiKeys.map((key) => ({ key, type: 'openai', prefix: 'openai:account:' })),
+        ...bedrockKeys.map((key) => ({ key, type: 'bedrock', prefix: 'bedrock:account:' })),
+        ...azureKeys.map((key) => ({ key, type: 'azure_openai', prefix: 'azure_openai:account:' }))
+      ]
+
+      if (allAccountKeys.length === 0) {
+        logger.debug('ℹ️ No accounts found')
+        return []
       }
 
-      // 获取所有Claude Console账户
-      const claudeConsoleAccountKeys = await this.client.keys('claude_console_account:*')
+      // 批量获取所有账户数据
+      logger.debug(`📦 Batch fetching data for ${allAccountKeys.length} accounts...`)
+      const pipeline = this.client.pipeline()
+      allAccountKeys.forEach(({ key }) => pipeline.hgetall(key))
+      const accountDataResults = await pipeline.exec()
 
-      for (const accountKey of claudeConsoleAccountKeys) {
-        const accountId = accountKey.replace('claude_console_account:', '')
-        const accountData = await this.client.hgetall(accountKey)
+      // 过滤有效账户并准备批量获取使用统计
+      const validAccounts = []
+      accountDataResults.forEach(([err, data], index) => {
+        if (!err && data && (data.name || data.email)) {
+          const { key, type, prefix } = allAccountKeys[index]
+          const accountId = key.replace(prefix, '')
 
-        if (accountData.name || accountData.email) {
-          const stats = await this.getAccountUsageStats(accountId)
-          accountStats.push({
+          validAccounts.push({
             id: accountId,
-            name: accountData.name || accountData.email || accountId,
-            email: accountData.email || '',
-            status: accountData.status || 'unknown',
-            isActive: accountData.isActive === 'true',
-            accountType: 'claude_console',
-            ...stats
+            data,
+            type,
+            name: data.name || data.email || accountId,
+            email: data.email || '',
+            status: data.status || 'unknown',
+            isActive: data.isActive === 'true'
           })
         }
-      }
+      })
+
+      logger.debug(`✅ Found ${validAccounts.length} valid accounts, getting usage stats...`)
+
+      // 并行获取所有账户的使用统计
+      const statsPromises = validAccounts.map((account) =>
+        this.getAccountUsageStats(account.id).catch((error) => {
+          logger.warn(`⚠️ Failed to get stats for account ${account.id}:`, error.message)
+          return {
+            total: { allTokens: 0, requests: 0 },
+            daily: { allTokens: 0, requests: 0 },
+            monthly: { allTokens: 0, requests: 0 },
+            averages: { rpm: 0, tpm: 0 }
+          }
+        })
+      )
+
+      const statsResults = await Promise.all(statsPromises)
+
+      // 组合结果
+      const accountStats = validAccounts.map((account, index) => ({
+        id: account.id,
+        name: account.name,
+        email: account.email,
+        status: account.status,
+        isActive: account.isActive,
+        accountType: account.type,
+        ...statsResults[index]
+      }))
 
       // 按当日token使用量排序
-      accountStats.sort((a, b) => (b.daily.allTokens || 0) - (a.daily.allTokens || 0))
+      accountStats.sort((a, b) => (b.daily?.allTokens || 0) - (a.daily?.allTokens || 0))
 
+      logger.debug(
+        `🎉 Successfully processed ${accountStats.length} accounts with batch optimization`
+      )
       return accountStats
     } catch (error) {
       logger.error('❌ Failed to get all accounts usage stats:', error)
@@ -1501,6 +1976,396 @@ class RedisAdapter extends DatabaseAdapter {
     }
   }
 
+  /**
+   * 获取账户会话窗口使用统计
+   * @param {string} accountId 账户ID
+   * @param {string} windowStart 窗口开始时间（ISO字符串）
+   * @param {string} windowEnd 窗口结束时间（ISO字符串）
+   * @returns {Promise<Object>} 会话窗口使用统计
+   */
+  async getSessionWindowUsage(accountId, windowStart, windowEnd) {
+    let retries = 0
+    const maxRetries = 3
+
+    while (retries < maxRetries) {
+      try {
+        // 参数验证和清理（这些错误不应该重试）
+        if (!accountId || typeof accountId !== 'string') {
+          throw new Error('Invalid accountId parameter')
+        }
+        if (!windowStart || !windowEnd) {
+          throw new Error('Invalid time window parameters')
+        }
+
+        const startDate = new Date(windowStart)
+        const endDate = new Date(windowEnd)
+
+        // 验证时间窗口的有效性（这些错误不应该重试）
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          throw new Error('Invalid date format in time window')
+        }
+        if (startDate >= endDate) {
+          throw new Error('Start date must be before end date')
+        }
+
+        // 限制时间窗口大小以防止过大查询
+        const windowSizeHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60)
+        if (windowSizeHours > 24 * 7) {
+          // 限制为一周
+          logger.warn(
+            `⚠️ Large time window detected: ${windowSizeHours} hours for account ${accountId}`
+          )
+        }
+
+        // 添加日志以调试时间窗口
+        logger.debug(
+          `📊 Getting session window usage for account ${accountId} (attempt ${retries + 1}/${maxRetries})`
+        )
+        logger.debug(`   Window: ${windowStart} to ${windowEnd}`)
+        logger.debug(`   Start UTC: ${startDate.toISOString()}, End UTC: ${endDate.toISOString()}`)
+
+        // 获取窗口内所有可能的小时键
+        // 重要：需要使用配置的时区来构建键名，因为数据存储时使用的是配置时区
+        const hourlyKeys = []
+        const currentHour = new Date(startDate)
+        currentHour.setMinutes(0)
+        currentHour.setSeconds(0)
+        currentHour.setMilliseconds(0)
+
+        while (currentHour <= endDate) {
+          try {
+            // 使用时区转换函数来获取正确的日期和小时
+            const tzDateStr = getDateStringInTimezone(currentHour)
+            const tzHour = String(getHourInTimezone(currentHour)).padStart(2, '0')
+            const key = `account_usage:hourly:${accountId}:${tzDateStr}:${tzHour}`
+
+            logger.debug(`   Adding hourly key: ${key}`)
+            hourlyKeys.push(key)
+            currentHour.setHours(currentHour.getHours() + 1)
+          } catch (timeZoneError) {
+            logger.warn(
+              `⚠️ Failed to process hour ${currentHour.toISOString()}:`,
+              timeZoneError.message
+            )
+            currentHour.setHours(currentHour.getHours() + 1)
+            continue
+          }
+        }
+
+        if (hourlyKeys.length === 0) {
+          logger.debug('   No hourly keys to check, returning empty usage')
+          return this._getEmptySessionUsage()
+        }
+
+        logger.debug(`   Total hourly keys to check: ${hourlyKeys.length}`)
+
+        // 使用连接重试机制获取Redis客户端
+        const client = await this.getClientWithReconnect()
+
+        let results = []
+        try {
+          // 批量获取所有小时数据，添加超时保护
+          const pipeline = client.pipeline()
+          hourlyKeys.forEach((key) => {
+            pipeline.hgetall(key)
+          })
+
+          // 添加管道执行超时
+          const pipelinePromise = pipeline.exec()
+          const timeoutPromise = new Promise(
+            (_, reject) => setTimeout(() => reject(new Error('Pipeline execution timeout')), 30000) // 30秒超时
+          )
+
+          results = await Promise.race([pipelinePromise, timeoutPromise])
+          logger.debug(`   Successfully retrieved ${results.length} hourly results`)
+        } catch (pipelineError) {
+          logger.error(
+            `❌ Pipeline execution failed (attempt ${retries + 1}):`,
+            pipelineError.message
+          )
+          throw pipelineError
+        }
+
+        // 聚合数据（增强错误处理）
+        let totalInputTokens = 0
+        let totalOutputTokens = 0
+        let totalCacheCreateTokens = 0
+        let totalCacheReadTokens = 0
+        let totalAllTokens = 0
+        let totalRequests = 0
+        const modelUsage = {}
+
+        logger.debug(`   Processing ${results.length} hourly results`)
+
+        try {
+          for (const [error, data] of results) {
+            if (error) {
+              logger.debug(`   Skipping result due to error: ${error.message}`)
+              continue
+            }
+
+            if (!data || Object.keys(data).length === 0) {
+              continue
+            }
+
+            try {
+              // 处理总计数据（修复字段名不一致问题），增强数据验证
+              const hourInputTokens = Math.max(0, parseInt(data.inputTokens || 0))
+              const hourOutputTokens = Math.max(0, parseInt(data.outputTokens || 0))
+              const hourCacheCreateTokens = Math.max(0, parseInt(data.cacheCreateTokens || 0))
+              const hourCacheReadTokens = Math.max(0, parseInt(data.cacheReadTokens || 0))
+              const hourAllTokens = Math.max(0, parseInt(data.allTokens || 0))
+              const hourRequests = Math.max(0, parseInt(data.requests || 0))
+
+              totalInputTokens += hourInputTokens
+              totalOutputTokens += hourOutputTokens
+              totalCacheCreateTokens += hourCacheCreateTokens
+              totalCacheReadTokens += hourCacheReadTokens
+              totalAllTokens += hourAllTokens
+              totalRequests += hourRequests
+
+              if (hourAllTokens > 0) {
+                logger.debug(`   Hour data: allTokens=${hourAllTokens}, requests=${hourRequests}`)
+              }
+            } catch (dataProcessError) {
+              logger.warn(`⚠️ Failed to process hour data:`, dataProcessError.message)
+              // 继续处理其他小时的数据，不中断整个流程
+            }
+          }
+        } catch (aggregationError) {
+          logger.error(`❌ Data aggregation failed:`, aggregationError.message)
+          throw aggregationError
+        }
+
+        // 获取窗口内的模型使用数据（从独立的模型键中）
+        logger.debug(`🔍 Getting model-specific usage data for window...`)
+        const modelKeys = []
+        const modelHour = new Date(startDate)
+        modelHour.setMinutes(0, 0, 0)
+
+        try {
+          while (modelHour <= endDate) {
+            try {
+              const tzDateStr = getDateStringInTimezone(modelHour)
+              const tzHour = String(getHourInTimezone(modelHour)).padStart(2, '0')
+              const hourStr = `${tzDateStr}:${tzHour}`
+
+              // 获取所有可能的模型键，添加超时保护
+              const modelPattern = `account_usage:model:hourly:${accountId}:*:${hourStr}`
+
+              try {
+                const keysPromise = client.keys(modelPattern)
+                const keysTimeout = new Promise(
+                  (_, reject) =>
+                    setTimeout(() => reject(new Error('Model keys query timeout')), 10000) // 10秒超时
+                )
+
+                const foundModelKeys = await Promise.race([keysPromise, keysTimeout])
+                modelKeys.push(...foundModelKeys)
+                logger.debug(`   Found ${foundModelKeys.length} model keys for hour ${hourStr}`)
+              } catch (keyError) {
+                logger.warn(`⚠️ Failed to get model keys for hour ${hourStr}:`, keyError.message)
+                // 继续处理下一个小时，不中断整个流程
+              }
+
+              modelHour.setHours(modelHour.getHours() + 1)
+            } catch (hourProcessError) {
+              logger.warn(
+                `⚠️ Failed to process model hour ${modelHour.toISOString()}:`,
+                hourProcessError.message
+              )
+              modelHour.setHours(modelHour.getHours() + 1)
+              continue
+            }
+          }
+        } catch (modelKeysError) {
+          logger.error(`❌ Model keys collection failed:`, modelKeysError.message)
+          // 不中断主流程，模型数据为可选数据
+        }
+
+        // 批量获取模型数据（增强错误处理）
+        if (modelKeys.length > 0) {
+          logger.debug(`📊 Processing ${modelKeys.length} model keys...`)
+          try {
+            // 添加模型数据管道超时保护
+            const modelPipeline = client.pipeline()
+            modelKeys.forEach((key) => modelPipeline.hgetall(key))
+
+            const modelPipelinePromise = modelPipeline.exec()
+            const modelTimeoutPromise = new Promise(
+              (_, reject) =>
+                setTimeout(() => reject(new Error('Model pipeline execution timeout')), 20000) // 20秒超时
+            )
+
+            const modelResults = await Promise.race([modelPipelinePromise, modelTimeoutPromise])
+
+            let processedModels = 0
+            let skippedModels = 0
+
+            modelResults.forEach(([err, data], index) => {
+              if (err) {
+                logger.debug(`   Skipping model result ${index} due to error: ${err.message}`)
+                skippedModels++
+                return
+              }
+
+              if (!data || Object.keys(data).length === 0) {
+                return
+              }
+
+              try {
+                // 从键名中提取模型名: account_usage:model:hourly:accountId:modelName:hour
+                const keyParts = modelKeys[index].split(':')
+                if (keyParts.length < 5) {
+                  logger.warn(`⚠️ Invalid model key format: ${modelKeys[index]}`)
+                  skippedModels++
+                  return
+                }
+
+                const modelName = keyParts[4] // 模型名在第5个位置（索引4）
+
+                if (!modelUsage[modelName]) {
+                  modelUsage[modelName] = {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheCreateTokens: 0,
+                    cacheReadTokens: 0,
+                    allTokens: 0,
+                    requests: 0
+                  }
+                }
+
+                // 增强数据验证和处理
+                modelUsage[modelName].inputTokens += Math.max(0, parseInt(data.inputTokens || 0))
+                modelUsage[modelName].outputTokens += Math.max(0, parseInt(data.outputTokens || 0))
+                modelUsage[modelName].cacheCreateTokens += Math.max(
+                  0,
+                  parseInt(data.cacheCreateTokens || 0)
+                )
+                modelUsage[modelName].cacheReadTokens += Math.max(
+                  0,
+                  parseInt(data.cacheReadTokens || 0)
+                )
+                modelUsage[modelName].allTokens += Math.max(0, parseInt(data.allTokens || 0))
+                modelUsage[modelName].requests += Math.max(0, parseInt(data.requests || 0))
+                processedModels++
+
+                logger.debug(
+                  `   Model ${modelName}: ${data.allTokens} tokens, ${data.requests} requests`
+                )
+              } catch (modelProcessError) {
+                logger.warn(
+                  `⚠️ Failed to process model data for key ${modelKeys[index]}:`,
+                  modelProcessError.message
+                )
+                skippedModels++
+              }
+            })
+
+            logger.debug(
+              `✅ Successfully processed ${processedModels} model entries, skipped ${skippedModels}`
+            )
+          } catch (modelPipelineError) {
+            logger.error(`❌ Failed to get model data:`, modelPipelineError.message)
+            // 不中断主流程，模型数据为可选数据
+          }
+        } else {
+          logger.debug(`ℹ️ No model-specific data found for the time window`)
+        }
+
+        // 最终结果汇总和验证
+        logger.debug(`📊 Session window usage summary:`)
+        logger.debug(`   Total allTokens: ${totalAllTokens}`)
+        logger.debug(`   Total requests: ${totalRequests}`)
+        logger.debug(`   Input: ${totalInputTokens}, Output: ${totalOutputTokens}`)
+        logger.debug(
+          `   Cache Create: ${totalCacheCreateTokens}, Cache Read: ${totalCacheReadTokens}`
+        )
+
+        const result = {
+          totalInputTokens,
+          totalOutputTokens,
+          totalCacheCreateTokens,
+          totalCacheReadTokens,
+          totalAllTokens,
+          totalRequests,
+          modelUsage,
+          window: {
+            start: windowStart,
+            end: windowEnd,
+            durationHours: Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60))
+          }
+        }
+
+        // 成功完成，返回结果
+        logger.debug(
+          `✅ Successfully completed session window usage query for account ${accountId}`
+        )
+        return result
+      } catch (error) {
+        retries++
+
+        // 区分不同类型的错误
+        const isRetryableError = !(
+          error.message.includes('Invalid') ||
+          error.message.includes('format') ||
+          error.message.includes('before end date')
+        )
+
+        if (!isRetryableError) {
+          logger.error(
+            `❌ Non-retryable error in getSessionWindowUsage for account ${accountId}:`,
+            error.message
+          )
+          return this._getEmptySessionUsage()
+        }
+
+        if (retries >= maxRetries) {
+          logger.error(
+            `❌ Failed to get session window usage for account ${accountId} after ${maxRetries} attempts:`,
+            error.message
+          )
+          return this._getEmptySessionUsage()
+        }
+
+        // 指数退避重试
+        const backoffDelay = Math.min(1000 * Math.pow(2, retries - 1), 5000)
+        logger.warn(
+          `⚠️ Retrying getSessionWindowUsage for account ${accountId} (attempt ${retries}/${maxRetries}) after ${backoffDelay}ms delay:`,
+          error.message
+        )
+
+        await new Promise((resolve) => setTimeout(resolve, backoffDelay))
+      }
+    }
+
+    // 如果所有重试都失败，返回空结果
+    logger.error(`❌ All retry attempts exhausted for getSessionWindowUsage, account ${accountId}`)
+    return this._getEmptySessionUsage()
+  }
+
+  /**
+   * 返回空的会话使用统计对象
+   * @private
+   * @returns {Object} 空的使用统计
+   */
+  _getEmptySessionUsage() {
+    return {
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCacheCreateTokens: 0,
+      totalCacheReadTokens: 0,
+      totalAllTokens: 0,
+      totalRequests: 0,
+      modelUsage: {},
+      window: {
+        start: null,
+        end: null,
+        durationHours: 0
+      }
+    }
+  }
+
   // ==================== Claude 账户管理 (6个方法) ====================
 
   /**
@@ -1521,7 +2386,9 @@ class RedisAdapter extends DatabaseAdapter {
       sequentialOrder: accountData.sequentialOrder || '1',
       roundRobinIndex: accountData.roundRobinIndex || '0',
       usageCount: accountData.usageCount || '0',
-      lastScheduledAt: accountData.lastScheduledAt || ''
+      lastScheduledAt: accountData.lastScheduledAt || '',
+      // 新增警告控制字段的默认值（向后兼容）
+      autoStopOnWarning: accountData.autoStopOnWarning || 'false'
     }
 
     await this.client.hmset(key, enrichedAccountData)
@@ -1548,7 +2415,9 @@ class RedisAdapter extends DatabaseAdapter {
       sequentialOrder: accountData.sequentialOrder || '1',
       roundRobinIndex: accountData.roundRobinIndex || '0',
       usageCount: accountData.usageCount || '0',
-      lastScheduledAt: accountData.lastScheduledAt || ''
+      lastScheduledAt: accountData.lastScheduledAt || '',
+      // 新增警告控制字段的默认值（向后兼容）
+      autoStopOnWarning: accountData.autoStopOnWarning || 'false'
     }
   }
 
@@ -1571,7 +2440,9 @@ class RedisAdapter extends DatabaseAdapter {
           sequentialOrder: accountData.sequentialOrder || '1',
           roundRobinIndex: accountData.roundRobinIndex || '0',
           usageCount: accountData.usageCount || '0',
-          lastScheduledAt: accountData.lastScheduledAt || ''
+          lastScheduledAt: accountData.lastScheduledAt || '',
+          // 新增警告控制字段的默认值（向后兼容）
+          autoStopOnWarning: accountData.autoStopOnWarning || 'false'
         }
         accounts.push(enrichedAccount)
       }
@@ -1598,7 +2469,9 @@ class RedisAdapter extends DatabaseAdapter {
           sequentialOrder: accountData.sequentialOrder || '1',
           roundRobinIndex: accountData.roundRobinIndex || '0',
           usageCount: accountData.usageCount || '0',
-          lastScheduledAt: accountData.lastScheduledAt || ''
+          lastScheduledAt: accountData.lastScheduledAt || '',
+          // 新增警告控制字段的默认值（向后兼容）
+          autoStopOnWarning: accountData.autoStopOnWarning || 'false'
         }
         accounts.push(enrichedAccount)
       }
@@ -4525,6 +5398,161 @@ class RedisAdapter extends DatabaseAdapter {
     merged.originalLogCount = logEntries.length
 
     return merged
+  }
+
+  // ==================== 账户费用统计方法 ====================
+
+  /**
+   * 获取账户费用统计
+   * @param {string} accountId - Claude账户ID
+   * @returns {Promise<Object>} 账户费用统计数据
+   */
+  async getAccountCostStats(accountId) {
+    try {
+      // 参数验证
+      if (!accountId || typeof accountId !== 'string') {
+        throw new Error('Invalid accountId: must be a non-empty string')
+      }
+
+      const now = new Date()
+      const tzDate = getDateInTimezone(now)
+      const dateString = getDateStringInTimezone(now)
+      const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
+      const currentHour = `${dateString}:${String(tzDate.getUTCHours()).padStart(2, '0')}`
+
+      // Redis键
+      const dailyKey = `usage:cost:daily:account:${accountId}:${dateString}`
+      const monthlyKey = `usage:cost:monthly:account:${accountId}:${currentMonth}`
+      const hourlyKey = `usage:cost:hourly:account:${accountId}:${currentHour}`
+      const totalKey = `usage:cost:total:account:${accountId}`
+
+      // 批量获取费用数据
+      const [daily, monthly, hourly, total] = await Promise.all([
+        this.client.get(dailyKey),
+        this.client.get(monthlyKey),
+        this.client.get(hourlyKey),
+        this.client.get(totalKey)
+      ])
+
+      // 获取模型级别的费用统计
+      const modelDailyPattern = `usage:cost:daily:account:${accountId}:*:${dateString}`
+      const modelMonthlyPattern = `usage:cost:monthly:account:${accountId}:*:${currentMonth}`
+
+      const [modelDailyKeys, modelMonthlyKeys] = await Promise.all([
+        this.client.keys(modelDailyPattern),
+        this.client.keys(modelMonthlyPattern)
+      ])
+
+      // 获取模型费用详情
+      const modelStats = {
+        daily: {},
+        monthly: {}
+      }
+
+      if (modelDailyKeys.length > 0) {
+        const modelDailyPipeline = this.client.pipeline()
+        modelDailyKeys.forEach((key) => modelDailyPipeline.get(key))
+        const modelDailyResults = await modelDailyPipeline.exec()
+
+        modelDailyKeys.forEach((key, index) => {
+          const model = key.split(':')[6] // 提取模型名
+          const cost = parseFloat(modelDailyResults[index][1]) || 0
+          if (cost > 0) {
+            modelStats.daily[model] = cost
+          }
+        })
+      }
+
+      if (modelMonthlyKeys.length > 0) {
+        const modelMonthlyPipeline = this.client.pipeline()
+        modelMonthlyKeys.forEach((key) => modelMonthlyPipeline.get(key))
+        const modelMonthlyResults = await modelMonthlyPipeline.exec()
+
+        modelMonthlyKeys.forEach((key, index) => {
+          const model = key.split(':')[6] // 提取模型名
+          const cost = parseFloat(modelMonthlyResults[index][1]) || 0
+          if (cost > 0) {
+            modelStats.monthly[model] = cost
+          }
+        })
+      }
+
+      // 使用Decimal.js确保精度
+      const dailyCost = new Decimal(parseFloat(daily) || 0)
+      const monthlyCost = new Decimal(parseFloat(monthly) || 0)
+      const hourlyCost = new Decimal(parseFloat(hourly) || 0)
+      const totalCost = new Decimal(parseFloat(total) || 0)
+
+      const costStats = {
+        accountId,
+        timestamp: now.toISOString(),
+        timezone: config.timezone || 'UTC',
+        costs: {
+          daily: dailyCost.toNumber(),
+          monthly: monthlyCost.toNumber(),
+          hourly: hourlyCost.toNumber(),
+          total: totalCost.toNumber()
+        },
+        formatted: {
+          daily: CostCalculator.formatCost(dailyCost.toNumber()),
+          monthly: CostCalculator.formatCost(monthlyCost.toNumber()),
+          hourly: CostCalculator.formatCost(hourlyCost.toNumber()),
+          total: CostCalculator.formatCost(totalCost.toNumber())
+        },
+        modelBreakdown: modelStats,
+        period: {
+          daily: dateString,
+          monthly: currentMonth,
+          hourly: `${dateString}:${String(tzDate.getUTCHours()).padStart(2, '0')}`
+        },
+        averages: {
+          // 计算月度日均费用
+          dailyAverage: monthlyCost.div(new Date().getDate()).toNumber(),
+          // 计算小时均费用
+          hourlyAverage: dailyCost.div(24).toNumber()
+        }
+      }
+
+      logger.debug(
+        `💰 Retrieved cost stats for account ${accountId}: daily=$${dailyCost.toString()}, monthly=$${monthlyCost.toString()}, total=$${totalCost.toString()}`
+      )
+
+      return costStats
+    } catch (error) {
+      logger.error(`❌ Failed to get account cost stats for ${accountId}:`, error)
+      // 降级处理 - 返回默认统计结构
+      return {
+        accountId,
+        timestamp: new Date().toISOString(),
+        timezone: config.timezone || 'UTC',
+        costs: {
+          daily: 0,
+          monthly: 0,
+          hourly: 0,
+          total: 0
+        },
+        formatted: {
+          daily: '$0.000000',
+          monthly: '$0.000000',
+          hourly: '$0.000000',
+          total: '$0.000000'
+        },
+        modelBreakdown: {
+          daily: {},
+          monthly: {}
+        },
+        period: {
+          daily: getDateStringInTimezone(),
+          monthly: new Date().toISOString().substring(0, 7),
+          hourly: `${getDateStringInTimezone()}:${String(getHourInTimezone()).padStart(2, '0')}`
+        },
+        averages: {
+          dailyAverage: 0,
+          hourlyAverage: 0
+        },
+        error: error.message
+      }
+    }
   }
 }
 

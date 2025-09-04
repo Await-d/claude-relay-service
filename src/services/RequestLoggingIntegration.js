@@ -196,7 +196,7 @@ class RequestLoggingIntegration {
     const tokenDetails = this._buildTokenDetailsFromUsage(params.usageData, params.requestBody)
 
     // 3. 计算费用详细信息
-    const costDetails = this._buildCostDetailsFromUsage(params.usageData, tokenDetails)
+    const costDetails = this._buildCostDetailsFromUsage(params.usageData, tokenDetails, params.accountId)
 
     // 4. 处理头部信息（如果启用）
     const requestHeaders = this.config.enableHeadersCapture ? params.requestHeaders : {}
@@ -394,39 +394,62 @@ class RequestLoggingIntegration {
    * 从使用数据构建费用详细信息
    * @private
    */
-  _buildCostDetailsFromUsage(usageData, tokenDetails) {
+  _buildCostDetailsFromUsage(usageData, tokenDetails, accountId = null) {
     if (!usageData || !this.config.enableCostDetails || !tokenDetails.model) {
       return {}
     }
 
     try {
-      // 使用现有的费用计算器
-      const modelCost = costCalculator.getModelCost(tokenDetails.model)
+      // 使用现有的费用计算器（使用正确的方法名）
+      const costResult = costCalculator.calculateCost(usageData, tokenDetails.model)
 
-      if (!modelCost) {
+      if (!costResult || !costResult.costs) {
         return { totalCost: 0, currency: 'USD', calculationFailed: true }
       }
 
-      const inputCost = (tokenDetails.inputTokens / 1000000) * modelCost.input
-      const outputCost = (tokenDetails.outputTokens / 1000000) * modelCost.output
-      const totalCost = inputCost + outputCost
+      const totalCost = costResult.costs.total
+      const inputCost = costResult.costs.input
+      const outputCost = costResult.costs.output
+      const cacheWriteCost = costResult.costs.cacheWrite
+      const cacheReadCost = costResult.costs.cacheRead
 
       return {
+        // 基本费用信息
         totalCost,
         inputCost,
         outputCost,
-        cacheCost: 0, // 缓存暂时不计费
-        inputTokenPrice: modelCost.input,
-        outputTokenPrice: modelCost.output,
+        cacheCost: cacheWriteCost + cacheReadCost,
+        cacheWriteCost,
+        cacheReadCost,
+        
+        // 定价信息
+        inputTokenPrice: costResult.pricing?.input || 0,
+        outputTokenPrice: costResult.pricing?.output || 0,
+        cacheWriteTokenPrice: costResult.pricing?.cacheWrite || 0,
+        cacheReadTokenPrice: costResult.pricing?.cacheRead || 0,
+        
+        // 元信息
         currency: 'USD',
         exchangeRate: 1.0,
         billingPeriod: 'per-request',
-        costPerToken: totalCost / tokenDetails.totalTokens,
+        costPerToken: tokenDetails.totalTokens > 0 ? totalCost / tokenDetails.totalTokens : 0,
+        usingDynamicPricing: costResult.usingDynamicPricing || false,
+        
+        // 新增：账户相关费用信息
+        accountId: accountId || null,
+        accountCost: totalCost, // 当前请求产生的账户费用
+        
         recordedAt: new Date().toISOString()
       }
     } catch (error) {
       logger.warn('⚠️ Cost calculation failed:', error.message)
-      return { totalCost: 0, currency: 'USD', calculationError: error.message }
+      return { 
+        totalCost: 0, 
+        currency: 'USD', 
+        calculationError: error.message,
+        accountId: accountId || null,
+        accountCost: 0
+      }
     }
   }
 

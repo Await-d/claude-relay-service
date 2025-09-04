@@ -198,6 +198,58 @@ class DatabaseAdapter {
   }
 
   /**
+   * 获取账户每日费用
+   * @param {string} accountId 账户ID
+   * @param {Date|string} date 日期（可选，默认当天）
+   * @returns {Promise<number>} 账户指定日期的费用
+   */
+  async getAccountDailyCost(_accountId, _date = null) {
+    throw new Error('getAccountDailyCost method must be implemented by subclass')
+  }
+
+  /**
+   * 根据日期范围获取账户费用
+   * @param {string} accountId 账户ID
+   * @param {Date} startDate 开始日期
+   * @param {Date} endDate 结束日期
+   * @returns {Promise<number>} 指定日期范围内的账户费用
+   */
+  async getAccountCostByDateRange(_accountId, _startDate, _endDate) {
+    throw new Error('getAccountCostByDateRange method must be implemented by subclass')
+  }
+
+  /**
+   * 增加账户费用
+   * @param {string} accountId 账户ID
+   * @param {number} amount 费用金额
+   * @param {Date|string} date 日期（可选，默认当天）
+   * @returns {Promise<void>}
+   */
+  async incrementAccountCost(_accountId, _amount, _date = null) {
+    throw new Error('incrementAccountCost method must be implemented by subclass')
+  }
+
+  /**
+   * 获取总费用（根据日期范围）
+   * @param {string} keyId API Key ID
+   * @param {Date} startDate 开始日期
+   * @param {Date} endDate 结束日期
+   * @returns {Promise<number>} 指定日期范围内的总费用
+   */
+  async getCostByDateRange(_keyId, _startDate, _endDate) {
+    throw new Error('getCostByDateRange method must be implemented by subclass')
+  }
+
+  /**
+   * 获取API Key总费用
+   * @param {string} keyId API Key ID
+   * @returns {Promise<number>} 总费用
+   */
+  async getTotalCost(_keyId) {
+    throw new Error('getTotalCost method must be implemented by subclass')
+  }
+
+  /**
    * 获取账户使用统计
    * @param {string} accountId 账户ID
    * @returns {Promise<Object>} 账户使用统计数据

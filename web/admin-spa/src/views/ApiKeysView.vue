@@ -413,22 +413,66 @@
                       </div>
                     </div>
 
-                    <!-- 每日费用限制进度条 -->
-                    <div v-if="key.dailyCostLimit > 0" class="space-y-1">
-                      <div class="flex items-center justify-between text-xs">
-                        <span class="text-gray-500 dark:text-gray-400">费用限额</span>
-                        <span class="text-gray-700 dark:text-gray-300">
-                          ${{ (key.dailyCost || 0).toFixed(2) }} / ${{
-                            key.dailyCostLimit.toFixed(2)
-                          }}
-                        </span>
-                      </div>
-                      <div class="h-1.5 w-full rounded-full bg-gray-200">
+                    <!-- 增强版每日费用限制进度条 -->
+                    <div v-if="key.dailyCostLimit > 0" class="space-y-2">
+                      <div
+                        class="rounded-lg border border-green-200 bg-green-50 p-2 dark:border-green-700 dark:bg-green-900/20"
+                      >
+                        <div class="mb-1 flex items-center justify-between">
+                          <div class="flex items-center gap-1">
+                            <i
+                              class="fas fa-dollar-sign text-xs text-green-600 dark:text-green-400"
+                            />
+                            <span class="text-xs font-medium text-green-700 dark:text-green-300"
+                              >费用限额</span
+                            >
+                          </div>
+                          <span class="text-xs font-semibold" :class="getCostLimitTextColor(key)">
+                            ${{ (key.dailyCost || 0).toFixed(2) }} / ${{
+                              key.dailyCostLimit.toFixed(2)
+                            }}
+                          </span>
+                        </div>
+
+                        <div class="relative">
+                          <div class="h-2 w-full rounded-full bg-gray-200 dark:bg-gray-600">
+                            <div
+                              class="h-2 rounded-full transition-all duration-300 ease-in-out"
+                              :class="getDailyCostProgressColor(key)"
+                              :style="{ width: getDailyCostProgress(key) + '%' }"
+                            />
+                          </div>
+
+                          <!-- 进度百分比显示 -->
+                          <div class="absolute inset-0 flex items-center justify-center">
+                            <span class="text-xs font-medium text-white drop-shadow-sm">
+                              {{ Math.round(getDailyCostProgress(key)) }}%
+                            </span>
+                          </div>
+                        </div>
+
+                        <!-- 警告提示 -->
                         <div
-                          class="h-1.5 rounded-full transition-all duration-300"
-                          :class="getDailyCostProgressColor(key)"
-                          :style="{ width: getDailyCostProgress(key) + '%' }"
-                        />
+                          v-if="getDailyCostProgress(key) >= 80"
+                          class="mt-1 flex items-center gap-1"
+                        >
+                          <i
+                            class="fas fa-exclamation-triangle text-xs"
+                            :class="
+                              getDailyCostProgress(key) >= 100 ? 'text-red-500' : 'text-yellow-500'
+                            "
+                          />
+                          <span
+                            class="text-xs"
+                            :class="
+                              getDailyCostProgress(key) >= 100
+                                ? 'text-red-600 dark:text-red-400'
+                                : 'text-yellow-600 dark:text-yellow-400'
+                            "
+                          >
+                            {{ getDailyCostProgress(key) >= 100 ? '已超过限额' : '接近限额' }}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -968,20 +1012,61 @@
               </div>
             </div>
 
-            <!-- 限制进度 -->
-            <div v-if="key.dailyCostLimit > 0" class="space-y-1">
-              <div class="flex items-center justify-between text-xs">
-                <span class="text-gray-500">每日费用限额</span>
-                <span class="text-gray-700">
-                  ${{ (key.dailyCost || 0).toFixed(2) }} / ${{ key.dailyCostLimit.toFixed(2) }}
-                </span>
-              </div>
-              <div class="h-2 w-full rounded-full bg-gray-200">
-                <div
-                  class="h-2 rounded-full transition-all duration-300"
-                  :class="getDailyCostProgressColor(key)"
-                  :style="{ width: getDailyCostProgress(key) + '%' }"
-                />
+            <!-- 移动端增强版费用限制进度 -->
+            <div v-if="key.dailyCostLimit > 0" class="space-y-2">
+              <div
+                class="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-700 dark:bg-green-900/20"
+              >
+                <div class="mb-2 flex items-center justify-between">
+                  <div class="flex items-center gap-1">
+                    <i class="fas fa-dollar-sign text-xs text-green-600 dark:text-green-400" />
+                    <span class="text-xs font-medium text-green-700 dark:text-green-300"
+                      >每日费用限额</span
+                    >
+                  </div>
+                  <span class="text-xs font-semibold" :class="getCostLimitTextColor(key)">
+                    ${{ (key.dailyCost || 0).toFixed(2) }} / ${{ key.dailyCostLimit.toFixed(2) }}
+                  </span>
+                </div>
+
+                <div class="relative">
+                  <div class="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-600">
+                    <div
+                      class="h-2.5 rounded-full transition-all duration-300 ease-in-out"
+                      :class="getDailyCostProgressColor(key)"
+                      :style="{ width: getDailyCostProgress(key) + '%' }"
+                    />
+                  </div>
+
+                  <!-- 进度百分比显示 -->
+                  <div class="absolute inset-0 flex items-center justify-center">
+                    <span class="text-xs font-medium text-white drop-shadow-sm">
+                      {{ Math.round(getDailyCostProgress(key)) }}%
+                    </span>
+                  </div>
+                </div>
+
+                <!-- 警告提示 -->
+                <div v-if="getDailyCostProgress(key) >= 80" class="mt-2 flex items-start gap-1">
+                  <i
+                    class="fas fa-exclamation-triangle mt-0.5 text-xs"
+                    :class="getDailyCostProgress(key) >= 100 ? 'text-red-500' : 'text-yellow-500'"
+                  />
+                  <span
+                    class="text-xs"
+                    :class="
+                      getDailyCostProgress(key) >= 100
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-yellow-600 dark:text-yellow-400'
+                    "
+                  >
+                    {{
+                      getDailyCostProgress(key) >= 100
+                        ? '已超过费用限额，新请求将被拒绝'
+                        : '费用即将达到限额，请注意控制'
+                    }}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -2233,9 +2318,19 @@ const getDailyCostProgress = (key) => {
 // 获取每日费用进度条颜色
 const getDailyCostProgressColor = (key) => {
   const progress = getDailyCostProgress(key)
-  if (progress >= 100) return 'bg-red-500'
-  if (progress >= 80) return 'bg-yellow-500'
-  return 'bg-green-500'
+  if (progress >= 100) return 'bg-gradient-to-r from-red-500 to-red-600'
+  if (progress >= 90) return 'bg-gradient-to-r from-red-400 to-red-500'
+  if (progress >= 80) return 'bg-gradient-to-r from-yellow-400 to-orange-500'
+  if (progress >= 60) return 'bg-gradient-to-r from-yellow-400 to-yellow-500'
+  return 'bg-gradient-to-r from-green-400 to-green-500'
+}
+
+// 获取费用限制文本颜色
+const getCostLimitTextColor = (key) => {
+  const progress = getDailyCostProgress(key)
+  if (progress >= 100) return 'text-red-600 dark:text-red-400'
+  if (progress >= 80) return 'text-yellow-600 dark:text-yellow-400'
+  return 'text-gray-700 dark:text-gray-300'
 }
 
 // 显示使用详情

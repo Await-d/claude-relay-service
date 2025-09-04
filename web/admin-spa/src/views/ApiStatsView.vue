@@ -104,8 +104,22 @@
                   <i class="fas fa-calendar-alt text-xs md:text-sm" />
                   本月
                 </button>
+                <button
+                  class="flex flex-1 items-center justify-center gap-1 px-4 py-2 text-xs font-medium md:flex-none md:gap-2 md:px-6 md:text-sm"
+                  :class="['period-btn', { active: statsPeriod === 'hourly' }]"
+                  :disabled="loading || modelStatsLoading"
+                  @click="switchPeriod('hourly')"
+                >
+                  <i class="fas fa-clock text-xs md:text-sm" />
+                  小时
+                </button>
               </div>
             </div>
+          </div>
+
+          <!-- 小时统计控制面板 -->
+          <div v-if="statsPeriod === 'hourly'" class="mb-6 md:mb-8">
+            <HourlyStatsControls />
           </div>
 
           <!-- 基本信息和统计概览 -->
@@ -115,6 +129,11 @@
           <div class="mb-6 grid grid-cols-1 gap-4 md:mb-8 md:gap-6 lg:grid-cols-2">
             <TokenDistribution />
             <LimitConfig />
+          </div>
+
+          <!-- 小时统计图表 -->
+          <div v-if="statsPeriod === 'hourly'" class="mb-6 md:mb-8">
+            <HourlyChart />
           </div>
 
           <!-- 模型使用统计 -->
@@ -145,6 +164,8 @@ import StatsOverview from '@/components/apistats/StatsOverview.vue'
 import TokenDistribution from '@/components/apistats/TokenDistribution.vue'
 import LimitConfig from '@/components/apistats/LimitConfig.vue'
 import ModelUsageStats from '@/components/apistats/ModelUsageStats.vue'
+import HourlyStatsControls from '@/components/apistats/HourlyStatsControls.vue'
+import HourlyChart from '@/components/apistats/HourlyChart.vue'
 import TutorialView from './TutorialView.vue'
 
 const route = useRoute()

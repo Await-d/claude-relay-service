@@ -5,13 +5,32 @@ const bedrockRelayService = require('../services/bedrockRelayService')
 const bedrockAccountService = require('../services/bedrockAccountService')
 const unifiedClaudeScheduler = require('../services/unifiedClaudeScheduler')
 const apiKeyService = require('../services/apiKeyService')
+const claudeAccountService = require('../services/claudeAccountService')
 const { authenticateApiKey } = require('../middleware/auth')
 const logger = require('../utils/logger')
 const database = require('../models/database')
 const sessionHelper = require('../utils/sessionHelper')
 const { unifiedLogServiceFactory } = require('../services/UnifiedLogServiceFactory')
+const { costLimitService } = require('../services/costLimitService')
+const { costEstimator } = require('../utils/costEstimator')
 
 const router = express.Router()
+
+// 💰 统一账户费用记录函数
+const recordAccountCostAsync = async (accountId, usageData, model) => {
+  if (!accountId || !usageData || !model) {
+    return
+  }
+
+  // 异步记录账户费用，不阻塞主流程
+  setImmediate(async () => {
+    try {
+      await claudeAccountService.recordAccountCost(accountId, usageData, model)
+    } catch (error) {
+      logger.warn(`⚠️ Account cost recording failed for ${accountId}:`, error.message)
+    }
+  })
+}
 
 // 🔧 统一日志服务实例获取
 let unifiedLogService = null
@@ -110,10 +129,60 @@ async function handleMessagesRequest(req, res) {
 
     // 检查是否为流式请求
     const isStream = req.body.stream === true
+    const requestedModel = req.body.model || 'unknown'
 
     logger.api(
-      `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for key: ${req.apiKey.name}`
+      `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for key: ${req.apiKey.name}, model: ${requestedModel}`
     )
+
+    // 💰 费用预估和限制检查（P1.2 核心功能）
+    let estimatedCost = 0
+    let costEstimation = null
+
+    try {
+      // 1. 预估请求费用
+      costEstimation = costEstimator.estimateRequestCost(req.body, requestedModel)
+      estimatedCost = costEstimation.estimatedCost || 0
+
+      logger.debug(
+        `💰 Request cost estimation: $${estimatedCost.toFixed(4)} (confidence: ${costEstimation.confidence})`
+      )
+
+      // 2. 执行API Key级别的费用限制检查（包含预估费用）
+      const apiKeyCostCheck = await costLimitService.checkApiKeyCostLimit(
+        req.apiKey.id,
+        estimatedCost
+      )
+
+      if (!apiKeyCostCheck.allowed) {
+        const violationResponse = costLimitService.formatViolationResponse(
+          apiKeyCostCheck.violations
+        )
+
+        logger.security(
+          `💰 API Key cost limit exceeded before request: ${req.apiKey.id} (${req.apiKey.name}), estimated: $${estimatedCost.toFixed(4)}`
+        )
+
+        return res.status(429).json({
+          ...violationResponse,
+          type: 'api_key_cost_limit',
+          estimatedCost: estimatedCost,
+          estimation: {
+            breakdown: costEstimation.breakdown,
+            confidence: costEstimation.confidence
+          }
+        })
+      }
+
+      // 3. 添加预估费用信息到请求对象（供后续使用）
+      req.costEstimation = costEstimation
+      req.estimatedCost = estimatedCost
+    } catch (costError) {
+      // 费用预估失败不应阻塞请求，但需要记录日志
+      logger.warn(`⚠️ Cost estimation failed for request: ${costError.message}`)
+      estimatedCost = 0
+      req.estimatedCost = 0
+    }
 
     // 智能采样决策：检查是否应该记录此请求到日志系统
     shouldLogRequest = false
@@ -147,12 +216,54 @@ async function handleMessagesRequest(req, res) {
       const sessionHash = sessionHelper.generateSessionHash(req.body)
 
       // 使用统一调度选择账号（传递请求的模型）
-      const requestedModel = req.body.model
       const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
         req.apiKey,
         sessionHash,
         requestedModel
       )
+
+      // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 流式请求）
+      if (accountId && (accountType === 'claude-official' || accountType === 'claude-console')) {
+        try {
+          const accountCostCheck = await costLimitService.checkAccountCostLimit(
+            accountId,
+            estimatedCost
+          )
+
+          if (!accountCostCheck.allowed) {
+            const violationResponse = costLimitService.formatViolationResponse(
+              accountCostCheck.violations
+            )
+
+            logger.security(
+              `💰 Account cost limit exceeded before stream request: ${accountId}, estimated: $${estimatedCost.toFixed(4)}`
+            )
+
+            return res.status(429).json({
+              ...violationResponse,
+              type: 'account_cost_limit',
+              accountId: accountId,
+              estimatedCost: estimatedCost,
+              estimation: {
+                breakdown: costEstimation?.breakdown,
+                confidence: costEstimation?.confidence
+              }
+            })
+          }
+
+          // 记录账户费用预警（如果有）
+          if (accountCostCheck.warnings && accountCostCheck.warnings.length > 0) {
+            logger.warn(
+              `💰 Account cost usage warning for stream request: ${accountId}, warnings: ${accountCostCheck.warnings.length}, estimated: $${estimatedCost.toFixed(4)}`
+            )
+          }
+        } catch (accountCostError) {
+          // 账户费用检查失败不应阻塞请求，但需要记录日志
+          logger.warn(
+            `⚠️ Account cost limit check failed for stream request ${accountId}: ${accountCostError.message}`
+          )
+        }
+      }
 
       // 根据账号类型选择对应的转发服务并调用
       if (accountType === 'claude-official') {
@@ -229,6 +340,9 @@ async function handleMessagesRequest(req, res) {
               }
 
               usageDataCaptured = true
+
+              // 💰 记录账户费用（异步，不阻塞主流程）
+              recordAccountCostAsync(usageAccountId, usageObject, model)
 
               // 🔍 使用统一日志服务记录 (Claude Official)
               if (shouldLogRequest) {
@@ -329,6 +443,9 @@ async function handleMessagesRequest(req, res) {
 
               usageDataCaptured = true
 
+              // 💰 记录账户费用（异步，不阻塞主流程）
+              recordAccountCostAsync(usageAccountId, usageObject, model)
+
               // 🔍 使用统一日志服务记录 (Claude Console)
               if (shouldLogRequest) {
                 logger.info(`🚀 Logging with UnifiedLogService (Claude Console)`)
@@ -424,12 +541,54 @@ async function handleMessagesRequest(req, res) {
       const sessionHash = sessionHelper.generateSessionHash(req.body)
 
       // 使用统一调度选择账号（传递请求的模型）
-      const requestedModel = req.body.model
       const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
         req.apiKey,
         sessionHash,
         requestedModel
       )
+
+      // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 非流式请求）
+      if (accountId && (accountType === 'claude-official' || accountType === 'claude-console')) {
+        try {
+          const accountCostCheck = await costLimitService.checkAccountCostLimit(
+            accountId,
+            estimatedCost
+          )
+
+          if (!accountCostCheck.allowed) {
+            const violationResponse = costLimitService.formatViolationResponse(
+              accountCostCheck.violations
+            )
+
+            logger.security(
+              `💰 Account cost limit exceeded before non-stream request: ${accountId}, estimated: $${estimatedCost.toFixed(4)}`
+            )
+
+            return res.status(429).json({
+              ...violationResponse,
+              type: 'account_cost_limit',
+              accountId: accountId,
+              estimatedCost: estimatedCost,
+              estimation: {
+                breakdown: costEstimation?.breakdown,
+                confidence: costEstimation?.confidence
+              }
+            })
+          }
+
+          // 记录账户费用预警（如果有）
+          if (accountCostCheck.warnings && accountCostCheck.warnings.length > 0) {
+            logger.warn(
+              `💰 Account cost usage warning for non-stream request: ${accountId}, warnings: ${accountCostCheck.warnings.length}, estimated: $${estimatedCost.toFixed(4)}`
+            )
+          }
+        } catch (accountCostError) {
+          // 账户费用检查失败不应阻塞请求，但需要记录日志
+          logger.warn(
+            `⚠️ Account cost limit check failed for non-stream request ${accountId}: ${accountCostError.message}`
+          )
+        }
+      }
 
       // 根据账号类型选择对应的转发服务
       let response
@@ -546,6 +705,16 @@ async function handleMessagesRequest(req, res) {
           }
 
           usageRecorded = true
+
+          // 💰 记录账户费用（异步，不阻塞主流程）
+          const nonStreamUsageObject = {
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            cache_creation_input_tokens: cacheCreateTokens,
+            cache_read_input_tokens: cacheReadTokens
+          }
+          recordAccountCostAsync(responseAccountId, nonStreamUsageObject, model)
+
           logger.api(
             `📊 Non-stream usage recorded (real) - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Cache Create: ${cacheCreateTokens}, Cache Read: ${cacheReadTokens}, Total: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
           )

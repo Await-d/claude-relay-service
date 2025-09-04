@@ -287,52 +287,151 @@
             </div>
           </div>
 
-          <div>
-            <label class="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300"
-              >每日费用限制 (美元)</label
-            >
-            <div class="space-y-2">
-              <div class="flex gap-2">
-                <button
-                  class="rounded bg-gray-100 px-2 py-1 text-xs font-medium hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                  type="button"
-                  @click="form.dailyCostLimit = '50'"
-                >
-                  $50
-                </button>
-                <button
-                  class="rounded bg-gray-100 px-2 py-1 text-xs font-medium hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                  type="button"
-                  @click="form.dailyCostLimit = '100'"
-                >
-                  $100
-                </button>
-                <button
-                  class="rounded bg-gray-100 px-2 py-1 text-xs font-medium hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                  type="button"
-                  @click="form.dailyCostLimit = '200'"
-                >
-                  $200
-                </button>
-                <button
-                  class="rounded bg-gray-100 px-2 py-1 text-xs font-medium hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                  type="button"
-                  @click="form.dailyCostLimit = ''"
-                >
-                  自定义
-                </button>
+          <!-- 费用限制配置 -->
+          <div
+            class="rounded-lg border border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 p-3 dark:border-green-700 dark:from-green-900/20 dark:to-emerald-900/20 sm:p-4"
+          >
+            <div class="mb-3 flex items-center gap-2">
+              <div
+                class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-green-500"
+              >
+                <i class="fas fa-dollar-sign text-xs text-white" />
               </div>
-              <input
-                v-model="form.dailyCostLimit"
-                class="form-input w-full dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                min="0"
-                placeholder="0 表示无限制"
-                step="0.01"
-                type="number"
-              />
-              <p class="text-xs text-gray-500 dark:text-gray-400">
-                设置此 API Key 每日的费用限制，超过限制将拒绝请求，0 或留空表示无限制
-              </p>
+              <h4 class="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                每日费用限制 (可选)
+              </h4>
+            </div>
+
+            <div class="space-y-3">
+              <!-- 预设金额选择 -->
+              <div>
+                <label class="mb-2 block text-xs font-medium text-gray-600 dark:text-gray-400"
+                  >选择预设限额</label
+                >
+                <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  <button
+                    v-for="preset in costLimitPresets"
+                    :key="preset.value"
+                    :class="[
+                      'group relative flex flex-col items-center justify-center rounded-lg border-2 p-2 text-center transition-all duration-200 hover:shadow-md sm:p-3',
+                      form.dailyCostLimit == preset.value
+                        ? 'border-green-500 bg-green-100 text-green-800 dark:border-green-400 dark:bg-green-900/30 dark:text-green-300'
+                        : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500'
+                    ]"
+                    type="button"
+                    @click="form.dailyCostLimit = preset.value"
+                  >
+                    <div class="flex items-center gap-1">
+                      <span class="text-xs font-bold sm:text-sm">${{ preset.value }}</span>
+                      <i
+                        v-if="form.dailyCostLimit == preset.value"
+                        class="fas fa-check text-xs text-green-600 dark:text-green-400"
+                      />
+                    </div>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ preset.label }}</span>
+                  </button>
+
+                  <!-- 自定义选项 -->
+                  <button
+                    :class="[
+                      'group relative flex flex-col items-center justify-center rounded-lg border-2 p-2 text-center transition-all duration-200 hover:shadow-md sm:p-3',
+                      !costLimitPresets.find((p) => p.value == form.dailyCostLimit) &&
+                      form.dailyCostLimit &&
+                      form.dailyCostLimit != '0'
+                        ? 'border-blue-500 bg-blue-100 text-blue-800 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300'
+                        : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500'
+                    ]"
+                    type="button"
+                    @click="form.dailyCostLimit = ''"
+                  >
+                    <div class="flex items-center gap-1">
+                      <i class="fas fa-edit text-xs sm:text-sm" />
+                      <i
+                        v-if="
+                          !costLimitPresets.find((p) => p.value == form.dailyCostLimit) &&
+                          form.dailyCostLimit &&
+                          form.dailyCostLimit != '0'
+                        "
+                        class="fas fa-check text-xs text-blue-600 dark:text-blue-400"
+                      />
+                    </div>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">自定义</span>
+                  </button>
+
+                  <!-- 无限制选项 -->
+                  <button
+                    :class="[
+                      'group relative flex flex-col items-center justify-center rounded-lg border-2 p-2 text-center transition-all duration-200 hover:shadow-md sm:p-3',
+                      !form.dailyCostLimit || form.dailyCostLimit == '0'
+                        ? 'border-gray-500 bg-gray-100 text-gray-800 dark:border-gray-400 dark:bg-gray-700 dark:text-gray-300'
+                        : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500'
+                    ]"
+                    type="button"
+                    @click="form.dailyCostLimit = '0'"
+                  >
+                    <div class="flex items-center gap-1">
+                      <i class="fas fa-infinity text-xs sm:text-sm" />
+                      <i
+                        v-if="!form.dailyCostLimit || form.dailyCostLimit == '0'"
+                        class="fas fa-check text-xs text-gray-600 dark:text-gray-400"
+                      />
+                    </div>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">无限制</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 自定义金额输入 -->
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400"
+                  >自定义金额 (美元)</label
+                >
+                <div class="relative">
+                  <div class="absolute inset-y-0 left-0 flex items-center pl-3">
+                    <span class="text-gray-500 dark:text-gray-400">$</span>
+                  </div>
+                  <input
+                    v-model="form.dailyCostLimit"
+                    class="form-input w-full pl-8 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                    min="0"
+                    placeholder="输入自定义金额或0表示无限制"
+                    step="0.01"
+                    type="number"
+                  />
+                </div>
+              </div>
+
+              <!-- 费用预估和提示 -->
+              <div class="rounded-lg bg-green-100 p-3 dark:bg-green-900/30">
+                <div class="mb-2 flex items-start gap-2">
+                  <i class="fas fa-lightbulb mt-0.5 text-xs text-green-600 dark:text-green-400" />
+                  <div class="flex-1">
+                    <h5 class="text-xs font-semibold text-green-800 dark:text-green-300">
+                      费用控制说明
+                    </h5>
+                    <div class="mt-1 space-y-1 text-xs text-green-700 dark:text-green-300">
+                      <p>• 达到限制后，新请求将被拒绝并返回 402 错误</p>
+                      <p>• 费用统计每分钟更新一次，可能存在轻微延迟</p>
+                      <p>• 建议根据使用场景设置合理的限制金额</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 费用参考 -->
+                <div class="mt-2 border-t border-green-200 pt-2 dark:border-green-800">
+                  <div class="text-xs font-medium text-green-800 dark:text-green-300">
+                    参考费用 (Claude)：
+                  </div>
+                  <div
+                    class="mt-1 grid grid-cols-1 gap-x-4 text-xs text-green-700 dark:text-green-300 sm:grid-cols-2"
+                  >
+                    <div>• Haiku: ~$0.25/1M tokens</div>
+                    <div>• Sonnet: ~$3/1M tokens</div>
+                    <div>• Opus: ~$15/1M tokens</div>
+                    <div>• 1万字约1.5K tokens</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -732,6 +831,14 @@ const unselectedTags = computed(() => {
 
 // 支持的客户端列表
 const supportedClients = ref([])
+
+// 费用限制预设选项
+const costLimitPresets = ref([
+  { value: '10', label: '轻度使用' },
+  { value: '50', label: '中度使用' },
+  { value: '100', label: '重度使用' },
+  { value: '200', label: '企业级' }
+])
 
 // 表单数据
 const form = reactive({

@@ -45,6 +45,7 @@ class PricingService {
       'claude-sonnet-3-5': 0.000006,
       'claude-sonnet-3-7': 0.000006,
       'claude-sonnet-4': 0.000006,
+      'claude-sonnet-4-20250514': 0.000006,
 
       // Haiku 系列: $1.6/MTok
       'claude-3-5-haiku': 0.0000016,
@@ -249,6 +250,7 @@ class PricingService {
 
     // 尝试直接匹配
     if (this.pricingData[modelName]) {
+      logger.debug(`💰 Found exact pricing match for ${modelName}`)
       return this.pricingData[modelName]
     }
 
@@ -325,6 +327,22 @@ class PricingService {
     // 默认返回 0（未知模型）
     logger.debug(`💰 No 1h cache pricing found for model: ${modelName}`)
     return 0
+  }
+
+  // 确保价格对象包含缓存价格
+  ensureCachePricing(pricing) {
+    if (!pricing) {
+      return pricing
+    }
+
+    // 如果缺少缓存价格，根据输入价格计算（缓存创建价格通常是输入价格的1.25倍，缓存读取是0.1倍）
+    if (!pricing.cache_creation_input_token_cost && pricing.input_cost_per_token) {
+      pricing.cache_creation_input_token_cost = pricing.input_cost_per_token * 1.25
+    }
+    if (!pricing.cache_read_input_token_cost && pricing.input_cost_per_token) {
+      pricing.cache_read_input_token_cost = pricing.input_cost_per_token * 0.1
+    }
+    return pricing
   }
 
   // 计算使用费用

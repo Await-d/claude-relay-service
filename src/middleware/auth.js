@@ -5,6 +5,7 @@ const { RateLimiterRedis } = require('rate-limiter-flexible')
 const config = require('../../config/config')
 const { unifiedLogServiceFactory } = require('../services/UnifiedLogServiceFactory')
 const { dynamicConfigManager } = require('../services/dynamicConfigService')
+const { costLimitService } = require('../services/costLimitService')
 
 // 🔧 请求日志配置缓存和动态检查机制
 let cachedRequestLoggingConfig = {
@@ -269,20 +270,27 @@ const authenticateApiKey = async (req, res, next) => {
 
         if (!windowStart) {
           // 第一次请求，设置窗口开始时间
-          await dbClient.set(windowStartKey, now, 'PX', windowDuration)
-          await dbClient.set(requestCountKey, 0, 'PX', windowDuration)
-          await dbClient.set(tokenCountKey, 0, 'PX', windowDuration)
+          // 使用原子操作确保所有键同时设置
+          const pipeline = dbClient.pipeline()
+          pipeline.set(windowStartKey, now, 'PX', windowDuration)
+          pipeline.set(requestCountKey, 0, 'PX', windowDuration)
+          pipeline.set(tokenCountKey, 0, 'PX', windowDuration)
+          await pipeline.exec()
           windowStart = now
+          logger.debug(`🚀 Initialized rate limit window for API Key: ${validation.keyData.id}`)
         } else {
           windowStart = parseInt(windowStart)
 
           // 检查窗口是否已过期
           if (now - windowStart >= windowDuration) {
-            // 窗口已过期，重置
-            await dbClient.set(windowStartKey, now, 'PX', windowDuration)
-            await dbClient.set(requestCountKey, 0, 'PX', windowDuration)
-            await dbClient.set(tokenCountKey, 0, 'PX', windowDuration)
+            // 窗口已过期，重置所有键
+            const pipeline = dbClient.pipeline()
+            pipeline.set(windowStartKey, now, 'PX', windowDuration)
+            pipeline.set(requestCountKey, 0, 'PX', windowDuration)
+            pipeline.set(tokenCountKey, 0, 'PX', windowDuration)
+            await pipeline.exec()
             windowStart = now
+            logger.debug(`🔄 Reset expired rate limit window for API Key: ${validation.keyData.id}`)
           }
         }
 
@@ -346,28 +354,40 @@ const authenticateApiKey = async (req, res, next) => {
       }
     }
 
-    // 检查每日费用限制
-    const dailyCostLimit = validation.keyData.dailyCostLimit || 0
-    if (dailyCostLimit > 0) {
-      const dailyCost = validation.keyData.dailyCost || 0
+    // 🔧 增强费用限制检查（向下兼容 + 多时间周期支持）
+    const costCheckResult = await costLimitService.checkCostLimits(
+      validation.keyData.id,
+      validation.keyData
+    )
 
-      if (dailyCost >= dailyCostLimit) {
-        logger.security(
-          `💰 Daily cost limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name}), cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
-        )
+    // 处理费用限制违规
+    if (!costCheckResult.allowed) {
+      const violationResponse = costLimitService.formatViolationResponse(costCheckResult.violations)
 
-        return res.status(429).json({
-          error: 'Daily cost limit exceeded',
-          message: `已达到每日费用限制 ($${dailyCostLimit})`,
-          currentCost: dailyCost,
-          costLimit: dailyCostLimit,
-          resetAt: new Date(new Date().setHours(24, 0, 0, 0)).toISOString() // 明天0点重置
-        })
-      }
+      logger.security(
+        `💰 Cost limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name}), violations: ${costCheckResult.violations.length}, check time: ${costCheckResult.checkDuration || 0}ms`
+      )
 
-      // 记录当前费用使用情况
-      logger.api(
-        `💰 Cost usage for key: ${validation.keyData.id} (${validation.keyData.name}), current: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
+      return res.status(429).json(violationResponse)
+    }
+
+    // 处理费用使用预警
+    if (costCheckResult.warnings && costCheckResult.warnings.length > 0) {
+      const formattedWarnings = costLimitService.formatWarnings(costCheckResult.warnings)
+
+      logger.warn(
+        `💰 Cost usage warning for key: ${validation.keyData.id} (${validation.keyData.name}), warnings: ${costCheckResult.warnings.length}`
+      )
+
+      // 将预警信息添加到请求对象，供后续中间件或路由使用
+      req.costWarnings = formattedWarnings
+    }
+
+    // 记录费用限制检查通过（debug 级别，避免过多日志）
+    if (costCheckResult.checkDuration > 50) {
+      // 只在检查时间较长时记录，用于性能监控
+      logger.debug(
+        `💰 Cost limits check completed for key: ${validation.keyData.id} (${validation.keyData.name}), time: ${costCheckResult.checkDuration}ms`
       )
     }
 
@@ -389,8 +409,20 @@ const authenticateApiKey = async (req, res, next) => {
       restrictedModels: validation.keyData.restrictedModels,
       enableClientRestriction: validation.keyData.enableClientRestriction,
       allowedClients: validation.keyData.allowedClients,
-      dailyCostLimit: validation.keyData.dailyCostLimit,
-      dailyCost: validation.keyData.dailyCost,
+
+      // 🔧 增强费用限制支持（向下兼容 + 扩展支持）
+      dailyCostLimit: validation.keyData.dailyCostLimit, // 向下兼容
+      dailyCost: validation.keyData.dailyCost, // 向下兼容
+
+      // 扩展费用限制字段（可选）
+      weeklyCostLimit: validation.keyData.weeklyCostLimit || 0,
+      monthlyCostLimit: validation.keyData.monthlyCostLimit || 0,
+      totalCostLimit: validation.keyData.totalCostLimit || 0,
+
+      // 费用限制检查结果
+      costLimits: costCheckResult.limits || {},
+      currentCosts: costCheckResult.currentCosts || {},
+
       usage: validation.keyData.usage
     }
     req.usage = validation.keyData.usage

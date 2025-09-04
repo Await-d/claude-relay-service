@@ -9,13 +9,13 @@
           模型使用统计
         </span>
         <span class="text-xs font-normal text-gray-600 dark:text-gray-400 sm:ml-2 md:text-sm"
-          >({{ statsPeriod === 'daily' ? '今日' : '本月' }})</span
+          >({{ periodDisplayName }})</span
         >
       </h3>
     </div>
 
     <!-- 模型统计加载状态 -->
-    <div v-if="modelStatsLoading" class="py-6 text-center md:py-8">
+    <div v-if="isLoading" class="py-6 text-center md:py-8">
       <i
         class="fas fa-spinner loading-spinner mb-2 text-xl text-gray-600 dark:text-gray-400 md:text-2xl"
       />
@@ -23,15 +23,22 @@
     </div>
 
     <!-- 模型统计数据 -->
-    <div v-else-if="modelStats.length > 0" class="space-y-3 md:space-y-4">
-      <div v-for="(model, index) in modelStats" :key="index" class="model-usage-item">
+    <div v-else-if="displayStats.length > 0" class="space-y-3 md:space-y-4">
+      <div v-for="(model, index) in displayStats" :key="index" class="model-usage-item">
         <div class="mb-2 flex items-start justify-between md:mb-3">
           <div class="min-w-0 flex-1">
             <h4 class="break-all text-base font-bold text-gray-900 dark:text-gray-100 md:text-lg">
               {{ model.model }}
+              <!-- 小时统计显示时间信息 -->
+              <span v-if="statsPeriod === 'hourly' && model.hour" class="ml-2 text-sm font-normal text-blue-600 dark:text-blue-400">
+                {{ formatHourTime(model.hour) }}
+              </span>
             </h4>
             <p class="text-xs text-gray-600 dark:text-gray-400 md:text-sm">
               {{ model.requests }} 次请求
+              <span v-if="statsPeriod === 'hourly' && model.date" class="ml-2">
+                · {{ formatDate(model.date) }}
+              </span>
             </p>
           </div>
           <div class="ml-3 flex-shrink-0 text-right">
@@ -75,18 +82,56 @@
     <div v-else class="py-6 text-center text-gray-500 dark:text-gray-400 md:py-8">
       <i class="fas fa-chart-pie mb-3 text-2xl md:text-3xl" />
       <p class="text-sm md:text-base">
-        暂无{{ statsPeriod === 'daily' ? '今日' : '本月' }}模型使用数据
+        暂无{{ periodDisplayName }}模型使用数据
       </p>
     </div>
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useApiStatsStore } from '@/stores/apistats'
 
 const apiStatsStore = useApiStatsStore()
-const { statsPeriod, modelStats, modelStatsLoading } = storeToRefs(apiStatsStore)
+const { 
+  statsPeriod, 
+  modelStats, 
+  modelStatsLoading, 
+  hourlyStats, 
+  hourlyLoading, 
+  hourlyConfig 
+} = storeToRefs(apiStatsStore)
+
+// 时间段显示名称
+const periodDisplayName = computed(() => {
+  switch (statsPeriod.value) {
+    case 'daily':
+      return '今日'
+    case 'monthly':
+      return '本月'
+    case 'hourly':
+      return `${hourlyConfig.value.selectedHours}小时内`
+    default:
+      return '当前时段'
+  }
+})
+
+// 获取要显示的统计数据
+const displayStats = computed(() => {
+  if (statsPeriod.value === 'hourly') {
+    return hourlyStats.value || []
+  }
+  return modelStats.value || []
+})
+
+// 加载状态
+const isLoading = computed(() => {
+  if (statsPeriod.value === 'hourly') {
+    return hourlyLoading.value
+  }
+  return modelStatsLoading.value
+})
 
 // 格式化数字
 const formatNumber = (num) => {
@@ -103,6 +148,44 @@ const formatNumber = (num) => {
     return (num / 1000).toFixed(1) + 'K'
   } else {
     return num.toLocaleString()
+  }
+}
+
+// 格式化小时时间
+const formatHourTime = (hour) => {
+  if (typeof hour === 'string' && hour.includes(':')) {
+    return hour
+  }
+  // 如果是数字，转换为 HH:00 格式
+  const hourNum = parseInt(hour)
+  if (!isNaN(hourNum)) {
+    return `${hourNum.toString().padStart(2, '0')}:00`
+  }
+  return hour
+}
+
+// 格式化日期
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  
+  try {
+    const date = new Date(dateStr)
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(today.getDate() - 1)
+    
+    if (date.toDateString() === today.toDateString()) {
+      return '今天'
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return '昨天'
+    } else {
+      return date.toLocaleDateString('zh-CN', {
+        month: 'short',
+        day: 'numeric'
+      })
+    }
+  } catch (e) {
+    return dateStr
   }
 }
 </script>

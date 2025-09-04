@@ -19,46 +19,38 @@ const config = require('../../config/config')
 const logger = require('../utils/logger')
 const { databaseFactory, DATABASE_TYPES } = require('./database/DatabaseFactory')
 
+// 导入统一时区处理工具
+const dateHelper = require('../utils/dateHelper')
+
 /**
- * 时区辅助函数
- * 注意：这个函数的目的是获取某个时间点在目标时区的"本地"表示
- * 例如：UTC时间 2025-07-30 01:00:00 在 UTC+8 时区表示为 2025-07-30 09:00:00
- *
+ * 时区辅助函数（向下兼容包装器）
+ * 注意：这些函数现在由 dateHelper.js 提供实现，此处仅为向下兼容
+ * 
  * @param {Date} date 要转换的日期对象，默认为当前时间
  * @returns {Date} 调整后的日期对象
  */
 function getDateInTimezone(date = new Date()) {
-  const offset = config.system.timezoneOffset || 8 // 默认UTC+8
-
-  // 方法：创建一个偏移后的Date对象，使其getUTCXXX方法返回目标时区的值
-  // 这样我们可以用getUTCFullYear()等方法获取目标时区的年月日时分秒
-  const offsetMs = offset * 3600000 // 时区偏移的毫秒数
-  const adjustedTime = new Date(date.getTime() + offsetMs)
-
-  return adjustedTime
+  return dateHelper.getDateInTimezone(date)
 }
 
 /**
  * 获取配置时区的日期字符串 (YYYY-MM-DD)
- *
+ * 
  * @param {Date} date 要转换的日期对象，默认为当前时间
  * @returns {string} 格式化的日期字符串
  */
 function getDateStringInTimezone(date = new Date()) {
-  const tzDate = getDateInTimezone(date)
-  // 使用UTC方法获取偏移后的日期部分
-  return `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}-${String(tzDate.getUTCDate()).padStart(2, '0')}`
+  return dateHelper.getDateStringInTimezone(date)
 }
 
 /**
  * 获取配置时区的小时 (0-23)
- *
+ * 
  * @param {Date} date 要转换的日期对象，默认为当前时间
  * @returns {number} 小时值 (0-23)
  */
 function getHourInTimezone(date = new Date()) {
-  const tzDate = getDateInTimezone(date)
-  return tzDate.getUTCHours()
+  return dateHelper.getHourInTimezone(date)
 }
 
 /**
@@ -673,6 +665,9 @@ module.exports.verifyLogWrite = async function (...args) {
 // 系统统计方法 - IDE识别 + 实际转发到Proxy
 module.exports.getSystemStats = async function (...args) {
   return await databaseProxy.getSystemStats(...args)
+}
+module.exports.getSessionWindowUsage = async function (...args) {
+  return await databaseProxy.getSessionWindowUsage(...args)
 }
 module.exports.getTodayStats = async function (...args) {
   return await databaseProxy.getTodayStats(...args)

@@ -242,7 +242,5 @@ web/apiStats/
 
 # Admin SPA build files
 web/admin-spa/dist/
-/web/admin-spa/package-lock.json
 /package-lock.json
 /pnpm-lock.yaml
-/web/admin-spa/pnpm-lock.yaml

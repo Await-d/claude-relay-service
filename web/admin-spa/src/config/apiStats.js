@@ -60,6 +60,14 @@ class ApiStatsClient {
     })
   }
 
+  // 获取小时级别模型使用统计
+  async getUserHourlyStats(apiKey, date, hours = 24) {
+    return this.request('/apiStats/api/user-model-stats/hourly', {
+      method: 'POST',
+      body: JSON.stringify({ apiKey, date, hours })
+    })
+  }
+
   // 获取 OEM 设置（用于网站名称和图标）
   async getOemSettings() {
     try {

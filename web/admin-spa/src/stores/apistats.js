@@ -15,6 +15,16 @@ export const useApiStatsStore = defineStore('apistats', () => {
   const modelStats = ref([])
   const dailyStats = ref(null)
   const monthlyStats = ref(null)
+  
+  // 小时统计相关状态
+  const hourlyStats = ref([])
+  const hourlyLoading = ref(false)
+  const hourlyError = ref('')
+  const hourlyConfig = ref({
+    selectedHours: 24,
+    selectedDate: new Date().toISOString().split('T')[0]
+  })
+  
   const oemSettings = ref({
     siteName: '',
     siteIcon: '',
@@ -36,9 +46,43 @@ export const useApiStatsStore = defineStore('apistats', () => {
 
     if (statsPeriod.value === 'daily') {
       return dailyStats.value || defaultData
-    } else {
+    } else if (statsPeriod.value === 'monthly') {
       return monthlyStats.value || defaultData
+    } else if (statsPeriod.value === 'hourly') {
+      return hourlyStatsSummary.value || defaultData
     }
+    return defaultData
+  })
+
+  // 小时统计汇总数据
+  const hourlyStatsSummary = computed(() => {
+    if (!hourlyStats.value || hourlyStats.value.length === 0) {
+      return null
+    }
+
+    const summary = {
+      requests: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreateTokens: 0,
+      cacheReadTokens: 0,
+      allTokens: 0,
+      cost: 0,
+      formattedCost: '$0.000000'
+    }
+
+    hourlyStats.value.forEach((item) => {
+      summary.requests += item.requests || 0
+      summary.inputTokens += item.inputTokens || 0
+      summary.outputTokens += item.outputTokens || 0
+      summary.cacheCreateTokens += item.cacheCreateTokens || 0
+      summary.cacheReadTokens += item.cacheReadTokens || 0
+      summary.allTokens += item.allTokens || 0
+      summary.cost += item.costs?.total || 0
+    })
+
+    summary.formattedCost = formatCost(summary.cost)
+    return summary
   })
 
   const usagePercentages = computed(() => {
@@ -210,10 +254,53 @@ export const useApiStatsStore = defineStore('apistats', () => {
       (period === 'monthly' && !monthlyStats.value)
     ) {
       await loadPeriodStats(period)
+    } else if (period === 'hourly') {
+      // 小时统计需要重新加载，因为参数可能变化
+      await loadHourlyStats()
     }
 
     // 加载对应的模型统计
     await loadModelStats(period)
+  }
+
+  // 加载小时统计数据
+  async function loadHourlyStats() {
+    if (!apiKey.value) {
+      hourlyError.value = '请先输入 API Key'
+      return
+    }
+
+    hourlyLoading.value = true
+    hourlyError.value = ''
+
+    try {
+      const result = await apiStatsClient.getUserHourlyStats(
+        apiKey.value,
+        hourlyConfig.value.selectedDate,
+        hourlyConfig.value.selectedHours
+      )
+
+      if (result.success) {
+        hourlyStats.value = result.data || []
+        hourlyError.value = ''
+      } else {
+        throw new Error(result.message || '加载小时统计失败')
+      }
+    } catch (err) {
+      console.error('Load hourly stats error:', err)
+      hourlyError.value = err.message || '加载小时统计失败'
+      hourlyStats.value = []
+    } finally {
+      hourlyLoading.value = false
+    }
+  }
+
+  // 更新小时配置并重新加载数据
+  async function updateHourlyConfig(config) {
+    hourlyConfig.value = { ...hourlyConfig.value, ...config }
+    if (statsPeriod.value === 'hourly') {
+      await loadHourlyStats()
+    }
   }
 
   // 使用 apiId 直接加载数据
@@ -303,6 +390,8 @@ export const useApiStatsStore = defineStore('apistats', () => {
     modelStats.value = []
     dailyStats.value = null
     monthlyStats.value = null
+    hourlyStats.value = []
+    hourlyError.value = ''
     error.value = ''
     statsPeriod.value = 'daily'
     apiId.value = null
@@ -327,10 +416,15 @@ export const useApiStatsStore = defineStore('apistats', () => {
     modelStats,
     dailyStats,
     monthlyStats,
+    hourlyStats,
+    hourlyLoading,
+    hourlyError,
+    hourlyConfig,
     oemSettings,
 
     // Computed
     currentPeriodData,
+    hourlyStatsSummary,
     usagePercentages,
 
     // Actions
@@ -339,6 +433,8 @@ export const useApiStatsStore = defineStore('apistats', () => {
     loadPeriodStats,
     loadModelStats,
     switchPeriod,
+    loadHourlyStats,
+    updateHourlyConfig,
     loadStatsWithApiId,
     loadOemSettings,
     clearData,

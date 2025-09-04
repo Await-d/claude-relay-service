@@ -291,29 +291,48 @@ router.post('/api/user-stats', async (req, res) => {
         const tokenCountKey = `rate_limit:tokens:${keyId}`
         const windowStartKey = `rate_limit:window_start:${keyId}`
 
-        currentWindowRequests = parseInt((await client.get(requestCountKey)) || '0')
-        currentWindowTokens = parseInt((await client.get(tokenCountKey)) || '0')
-
-        // 获取窗口开始时间和计算剩余时间
+        // 获取窗口开始时间
         const windowStart = await client.get(windowStartKey)
+        const now = Date.now()
+        const windowDuration = fullKeyData.rateLimitWindow * 60 * 1000 // 转换为毫秒
+
         if (windowStart) {
-          const now = Date.now()
           windowStartTime = parseInt(windowStart)
-          const windowDuration = fullKeyData.rateLimitWindow * 60 * 1000 // 转换为毫秒
           windowEndTime = windowStartTime + windowDuration
 
-          // 如果窗口还有效
-          if (now < windowEndTime) {
-            windowRemainingSeconds = Math.max(0, Math.floor((windowEndTime - now) / 1000))
-          } else {
-            // 窗口已过期，下次请求会重置
+          // 检查窗口是否已过期
+          if (now >= windowEndTime) {
+            // 窗口已过期，清理过期数据
+            try {
+              await client.del(windowStartKey)
+              await client.del(requestCountKey)
+              await client.del(tokenCountKey)
+              logger.debug(`🧹 Cleaned expired rate limit window for API Key: ${keyId}`)
+            } catch (cleanupError) {
+              logger.error(`❌ Failed to cleanup expired window for ${keyId}:`, cleanupError)
+            }
+
+            // 设置为窗口未开始状态
             windowStartTime = null
             windowEndTime = null
-            windowRemainingSeconds = 0
-            // 重置计数为0，因为窗口已过期
+            windowRemainingSeconds = null
             currentWindowRequests = 0
             currentWindowTokens = 0
+          } else {
+            // 窗口仍然有效，获取实际计数
+            const [requestCount, tokenCount] = await Promise.all([
+              client.get(requestCountKey),
+              client.get(tokenCountKey)
+            ])
+
+            windowRemainingSeconds = Math.max(0, Math.floor((windowEndTime - now) / 1000))
+            currentWindowRequests = parseInt(requestCount || '0')
+            currentWindowTokens = parseInt(tokenCount || '0')
           }
+        } else {
+          // 窗口还未开始（没有任何请求）
+          currentWindowRequests = 0
+          currentWindowTokens = 0
         }
       }
 
@@ -404,7 +423,39 @@ router.post('/api/user-stats', async (req, res) => {
 // 📊 用户模型统计查询接口 - 安全的自查询接口
 router.post('/api/user-model-stats', async (req, res) => {
   try {
-    const { apiKey, apiId, period = 'monthly' } = req.body
+    const { apiKey, apiId, period = 'monthly', date, hours = 24 } = req.body
+    
+    // 参数验证
+    if (period && !['daily', 'monthly', 'hourly'].includes(period)) {
+      return res.status(400).json({
+        error: 'Invalid period parameter',
+        message: 'Period must be one of: daily, monthly, hourly'
+      })
+    }
+    
+    // 小时统计的额外参数验证
+    if (period === 'hourly') {
+      if (!date) {
+        return res.status(400).json({
+          error: 'Missing date parameter',
+          message: 'Date parameter is required for hourly period (format: YYYY-MM-DD)'
+        })
+      }
+      
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({
+          error: 'Invalid date format',
+          message: 'Date must be in YYYY-MM-DD format'
+        })
+      }
+      
+      if (typeof hours !== 'number' || hours < 1 || hours > 168) {
+        return res.status(400).json({
+          error: 'Invalid hours parameter',
+          message: 'Hours parameter must be between 1 and 168'
+        })
+      }
+    }
 
     let keyData
     let keyId
@@ -475,60 +526,180 @@ router.post('/api/user-model-stats', async (req, res) => {
     }
 
     logger.api(
-      `📊 User model stats query from key: ${keyData.name} (${keyId}) for period: ${period}`
+      `📊 User model stats query from key: ${keyData.name} (${keyId}) for period: ${period}${period === 'hourly' ? `, date: ${date}, hours: ${hours}` : ''}`
     )
 
-    // 重用管理后台的模型统计逻辑，但只返回该API Key的数据
-    const client = database.getClientSafe()
-    // 使用与管理页面相同的时区处理逻辑
-    const tzDate = database.getDateInTimezone()
-    const today = database.getDateStringInTimezone()
-    const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`
-
-    const pattern =
-      period === 'daily'
-        ? `usage:${keyId}:model:daily:*:${today}`
-        : `usage:${keyId}:model:monthly:*:${currentMonth}`
-
-    const keys = await client.keys(pattern)
-    const modelStats = []
-
-    for (const key of keys) {
-      const match = key.match(
-        period === 'daily'
-          ? /usage:.+:model:daily:(.+):\d{4}-\d{2}-\d{2}$/
-          : /usage:.+:model:monthly:(.+):\d{4}-\d{2}$/
-      )
-
-      if (!match) {
-        continue
+    let modelStats = []
+    
+    if (period === 'hourly') {
+      // 使用新的小时统计方法
+      try {
+        const startDate = new Date(`${date}T00:00:00.000Z`)
+        if (isNaN(startDate.getTime())) {
+          return res.status(400).json({
+            error: 'Invalid date format',
+            message: 'Unable to parse the provided date'
+          })
+        }
+        
+        const hourlyStats = await database.getModelUsageHourly(keyId, startDate, hours)
+        
+        // 聚合所有小时的模型数据
+        const modelAggregation = new Map()
+        let totalHourlyTokens = 0
+        let totalHourlyRequests = 0
+        let totalHourlyCost = 0
+        let peakHour = null
+        let peakHourTokens = 0
+        
+        for (const hourStat of hourlyStats) {
+          // 计算峰值小时
+          if (hourStat.totalTokens > peakHourTokens) {
+            peakHourTokens = hourStat.totalTokens
+            peakHour = hourStat.hour
+          }
+          
+          totalHourlyTokens += hourStat.totalTokens
+          totalHourlyRequests += hourStat.totalRequests
+          totalHourlyCost += hourStat.totalCost
+          
+          // 聚合各模型数据
+          for (const [modelName, modelData] of Object.entries(hourStat.models)) {
+            if (!modelAggregation.has(modelName)) {
+              modelAggregation.set(modelName, {
+                model: modelName,
+                requests: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheCreateTokens: 0,
+                cacheReadTokens: 0,
+                allTokens: 0,
+                totalCost: 0
+              })
+            }
+            
+            const aggregated = modelAggregation.get(modelName)
+            aggregated.requests += modelData.requests
+            aggregated.inputTokens += modelData.inputTokens
+            aggregated.outputTokens += modelData.outputTokens
+            aggregated.cacheCreateTokens += modelData.cacheCreateTokens
+            aggregated.cacheReadTokens += modelData.cacheReadTokens
+            aggregated.allTokens += modelData.tokens
+            aggregated.totalCost += modelData.cost
+          }
+        }
+        
+        // 转换为标准格式
+        for (const [modelName, aggregated] of modelAggregation) {
+          const usage = {
+            input_tokens: aggregated.inputTokens,
+            output_tokens: aggregated.outputTokens,
+            cache_creation_input_tokens: aggregated.cacheCreateTokens,
+            cache_read_input_tokens: aggregated.cacheReadTokens
+          }
+          
+          const costData = CostCalculator.calculateCost(usage, modelName)
+          
+          modelStats.push({
+            model: modelName,
+            requests: aggregated.requests,
+            inputTokens: aggregated.inputTokens,
+            outputTokens: aggregated.outputTokens,
+            cacheCreateTokens: aggregated.cacheCreateTokens,
+            cacheReadTokens: aggregated.cacheReadTokens,
+            allTokens: aggregated.allTokens,
+            costs: costData.costs,
+            formatted: costData.formatted,
+            pricing: costData.pricing,
+            // 小时统计特有字段
+            hourlyDetails: {
+              totalCost: aggregated.totalCost,
+              peakHour: peakHour,
+              hoursWithActivity: hourlyStats.filter(h => h.totalTokens > 0).length
+            }
+          })
+        }
+        
+        // 为响应添加汇总信息
+        const hourlySummary = {
+          totalTokens: totalHourlyTokens,
+          totalRequests: totalHourlyRequests,
+          totalCost: totalHourlyCost,
+          activeModels: modelAggregation.size,
+          peakHour: peakHour,
+          hourlyData: hourlyStats // 包含完整的小时数据
+        }
+        
+        // 按总token数降序排列
+        modelStats.sort((a, b) => b.allTokens - a.allTokens)
+        
+        return res.json({
+          success: true,
+          data: modelStats,
+          period: period,
+          range: period,
+          summary: hourlySummary
+        })
+        
+      } catch (error) {
+        logger.error(`❌ Failed to get hourly model stats for ${keyId}:`, error)
+        return res.status(500).json({
+          error: 'Internal server error',
+          message: 'Failed to retrieve hourly model statistics'
+        })
       }
+    } else {
+      // 原有的daily和monthly逻辑
+      const client = database.getClientSafe()
+      // 使用与管理页面相同的时区处理逻辑
+      const tzDate = database.getDateInTimezone()
+      const today = database.getDateStringInTimezone()
+      const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`
 
-      const model = match[1]
-      const data = await client.hgetall(key)
+      const pattern =
+        period === 'daily'
+          ? `usage:${keyId}:model:daily:*:${today}`
+          : `usage:${keyId}:model:monthly:*:${currentMonth}`
 
-      if (data && Object.keys(data).length > 0) {
-        const usage = {
-          input_tokens: parseInt(data.inputTokens) || 0,
-          output_tokens: parseInt(data.outputTokens) || 0,
-          cache_creation_input_tokens: parseInt(data.cacheCreateTokens) || 0,
-          cache_read_input_tokens: parseInt(data.cacheReadTokens) || 0
+      const keys = await client.keys(pattern)
+
+      for (const key of keys) {
+        const match = key.match(
+          period === 'daily'
+            ? /usage:.+:model:daily:(.+):\d{4}-\d{2}-\d{2}$/
+            : /usage:.+:model:monthly:(.+):\d{4}-\d{2}$/
+        )
+
+        if (!match) {
+          continue
         }
 
-        const costData = CostCalculator.calculateCost(usage, model)
+        const model = match[1]
+        const data = await client.hgetall(key)
 
-        modelStats.push({
-          model,
-          requests: parseInt(data.requests) || 0,
-          inputTokens: usage.input_tokens,
-          outputTokens: usage.output_tokens,
-          cacheCreateTokens: usage.cache_creation_input_tokens,
-          cacheReadTokens: usage.cache_read_input_tokens,
-          allTokens: parseInt(data.allTokens) || 0,
-          costs: costData.costs,
-          formatted: costData.formatted,
-          pricing: costData.pricing
-        })
+        if (data && Object.keys(data).length > 0) {
+          const usage = {
+            input_tokens: parseInt(data.inputTokens) || 0,
+            output_tokens: parseInt(data.outputTokens) || 0,
+            cache_creation_input_tokens: parseInt(data.cacheCreateTokens) || 0,
+            cache_read_input_tokens: parseInt(data.cacheReadTokens) || 0
+          }
+
+          const costData = CostCalculator.calculateCost(usage, model)
+
+          modelStats.push({
+            model,
+            requests: parseInt(data.requests) || 0,
+            inputTokens: usage.input_tokens,
+            outputTokens: usage.output_tokens,
+            cacheCreateTokens: usage.cache_creation_input_tokens,
+            cacheReadTokens: usage.cache_read_input_tokens,
+            allTokens: parseInt(data.allTokens) || 0,
+            costs: costData.costs,
+            formatted: costData.formatted,
+            pricing: costData.pricing
+          })
+        }
       }
     }
 
@@ -551,6 +722,172 @@ router.post('/api/user-model-stats', async (req, res) => {
     return res.status(500).json({
       error: 'Internal server error',
       message: 'Failed to retrieve model statistics'
+    })
+  }
+})
+
+// 📊 专用小时统计API接口 - 获取指定时间段的小时级模型使用统计
+router.post('/api/user-model-stats/hourly', async (req, res) => {
+  try {
+    const { apiKey, apiId, date, hours = 24 } = req.body
+
+    // 参数验证
+    if (!date) {
+      return res.status(400).json({
+        error: 'Missing date parameter',
+        message: 'Date parameter is required (format: YYYY-MM-DD)'
+      })
+    }
+    
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        error: 'Invalid date format',
+        message: 'Date must be in YYYY-MM-DD format'
+      })
+    }
+    
+    if (typeof hours !== 'number' || hours < 1 || hours > 168) {
+      return res.status(400).json({
+        error: 'Invalid hours parameter',
+        message: 'Hours parameter must be between 1 and 168'
+      })
+    }
+
+    let keyData
+    let keyId
+
+    // API Key验证逻辑（复用现有逻辑）
+    if (apiId) {
+      // 通过 apiId 查询
+      if (
+        typeof apiId !== 'string' ||
+        !apiId.match(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i)
+      ) {
+        return res.status(400).json({
+          error: 'Invalid API ID format',
+          message: 'API ID must be a valid UUID'
+        })
+      }
+
+      keyData = await database.getApiKey(apiId)
+
+      if (!keyData || Object.keys(keyData).length === 0) {
+        logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`)
+        return res.status(404).json({
+          error: 'API key not found',
+          message: 'The specified API key does not exist'
+        })
+      }
+
+      if (keyData.isActive !== 'true') {
+        return res.status(403).json({
+          error: 'API key is disabled',
+          message: 'This API key has been disabled'
+        })
+      }
+
+      keyId = apiId
+      keyData.name = keyData.name || 'Unknown'
+    } else if (apiKey) {
+      // 通过 apiKey 查询
+      const validation = await apiKeyService.validateApiKey(apiKey)
+
+      if (!validation.valid) {
+        const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
+        logger.security(
+          `🔒 Invalid API key in hourly stats query: ${validation.error} from ${clientIP}`
+        )
+        return res.status(401).json({
+          error: 'Invalid API key',
+          message: validation.error
+        })
+      }
+
+      const { keyData: validatedKeyData } = validation
+      keyData = validatedKeyData
+      keyId = keyData.id
+    } else {
+      logger.security(
+        `🔒 Missing API key or ID in hourly stats query from ${req.ip || 'unknown'}`
+      )
+      return res.status(400).json({
+        error: 'API Key or ID is required',
+        message: 'Please provide your API Key or API ID'
+      })
+    }
+
+    logger.api(
+      `📊 Hourly model stats query from key: ${keyData.name} (${keyId}), date: ${date}, hours: ${hours}`
+    )
+
+    // 解析日期
+    const startDate = new Date(`${date}T00:00:00.000Z`)
+    if (isNaN(startDate.getTime())) {
+      return res.status(400).json({
+        error: 'Invalid date format',
+        message: 'Unable to parse the provided date'
+      })
+    }
+
+    // 获取小时级统计数据
+    const hourlyStats = await database.getModelUsageHourly(keyId, startDate, hours)
+
+    // 计算汇总信息
+    let totalTokens = 0
+    let totalRequests = 0
+    let totalCost = 0
+    const activeModels = new Set()
+    let peakHour = null
+    let peakHourTokens = 0
+
+    for (const hourStat of hourlyStats) {
+      totalTokens += hourStat.totalTokens
+      totalRequests += hourStat.totalRequests
+      totalCost += hourStat.totalCost
+
+      // 计算峰值小时
+      if (hourStat.totalTokens > peakHourTokens) {
+        peakHourTokens = hourStat.totalTokens
+        peakHour = hourStat.hour
+      }
+
+      // 统计活跃模型
+      for (const modelName of Object.keys(hourStat.models)) {
+        activeModels.add(modelName)
+      }
+    }
+
+    const summary = {
+      totalTokens,
+      totalRequests,
+      totalCost: Math.round(totalCost * 1000000) / 1000000, // 保留6位小数
+      activeModels: Array.from(activeModels),
+      peakHour,
+      hoursQueried: hours,
+      hoursWithActivity: hourlyStats.filter(h => h.totalTokens > 0).length
+    }
+
+    const response = {
+      success: true,
+      data: {
+        range: 'hourly',
+        period: { 
+          start: startDate.toISOString(), 
+          hours: hours,
+          end: new Date(startDate.getTime() + hours * 60 * 60 * 1000).toISOString()
+        },
+        hourlyStats: hourlyStats,
+        summary: summary
+      }
+    }
+
+    return res.json(response)
+
+  } catch (error) {
+    logger.error('❌ Failed to process hourly model stats query:', error)
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to retrieve hourly model statistics'
     })
   }
 })
