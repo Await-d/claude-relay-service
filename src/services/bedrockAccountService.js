@@ -587,7 +587,7 @@ class BedrockAccountService {
   // 📊 获取账户费用统计
   async getAccountCostStats(accountId, options = {}) {
     const AccountCostService = require('./accountCostService')
-    
+
     try {
       if (!accountId) {
         throw new Error('Account ID is required')

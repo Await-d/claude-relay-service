@@ -751,7 +751,7 @@ class ClaudeConsoleAccountService {
   // 📊 获取账户费用统计
   async getAccountCostStats(accountId, options = {}) {
     const AccountCostService = require('./accountCostService')
-    
+
     try {
       if (!accountId) {
         throw new Error('Account ID is required')
@@ -764,7 +764,11 @@ class ClaudeConsoleAccountService {
       }
 
       // 使用通用费用统计服务
-      const costStats = await AccountCostService.getAccountCostStats(accountId, 'claude-console', options)
+      const costStats = await AccountCostService.getAccountCostStats(
+        accountId,
+        'claude-console',
+        options
+      )
 
       // 添加账户名称
       costStats.accountName = accountData.name

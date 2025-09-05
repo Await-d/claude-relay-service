@@ -2179,45 +2179,49 @@ router.put(
 )
 
 // 获取Claude Console账户费用统计
-router.get('/claude-console-accounts/:accountId/cost-stats', authenticateAdmin, async (req, res) => {
-  try {
-    const { accountId } = req.params
-    const { period } = req.query
+router.get(
+  '/claude-console-accounts/:accountId/cost-stats',
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const { accountId } = req.params
+      const { period } = req.query
 
-    logger.debug(`📊 获取Claude Console账户费用统计: ${accountId}, period: ${period || 'all'}`)
+      logger.debug(`📊 获取Claude Console账户费用统计: ${accountId}, period: ${period || 'all'}`)
 
-    // 验证账户是否存在
-    const account = await claudeConsoleAccountService.getAccount(accountId)
-    if (!account) {
-      return res.status(404).json({
+      // 验证账户是否存在
+      const account = await claudeConsoleAccountService.getAccount(accountId)
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          error: 'Account not found',
+          message: '指定的账户不存在'
+        })
+      }
+
+      // 获取费用统计
+      const costStats = await claudeConsoleAccountService.getAccountCostStats(accountId, {
+        period: period || 'all'
+      })
+
+      logger.success(
+        `📊 成功获取Claude Console账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
+      )
+
+      return res.json({
+        success: true,
+        data: costStats
+      })
+    } catch (error) {
+      logger.error(`❌ 获取Claude Console账户费用统计失败 (${req.params.accountId}):`, error)
+      return res.status(500).json({
         success: false,
-        error: 'Account not found',
-        message: '指定的账户不存在'
+        error: 'Failed to get account cost stats',
+        message: error.message
       })
     }
-
-    // 获取费用统计
-    const costStats = await claudeConsoleAccountService.getAccountCostStats(accountId, {
-      period: period || 'all'
-    })
-
-    logger.success(
-      `📊 成功获取Claude Console账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
-    )
-
-    return res.json({
-      success: true,
-      data: costStats
-    })
-  } catch (error) {
-    logger.error(`❌ 获取Claude Console账户费用统计失败 (${req.params.accountId}):`, error)
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to get account cost stats',
-      message: error.message
-    })
   }
-})
+)
 
 // ☁️ Bedrock 账户管理
 

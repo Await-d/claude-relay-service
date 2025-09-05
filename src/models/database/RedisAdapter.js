@@ -518,8 +518,8 @@ class RedisAdapter extends DatabaseAdapter {
       return normalized
     }
 
-    // 对于其他模型，去掉常见的版本后缀
-    return model.replace(/-v\d+:\d+$|:latest$|\[\d+[a-zA-Z]*\]$/, '')
+    // 对于其他模型，去掉常见的版本后缀，包括1M上下文标识
+    return model.replace(/-v\d+:\d+$|:latest$|\[\d+[a-zA-Z]*\]$|\[1M\]$/, '')
   }
 
   /**
@@ -1005,7 +1005,7 @@ class RedisAdapter extends DatabaseAdapter {
 
         const hourStat = {
           hour: hourKey,
-          timestamp: timestamp,
+          timestamp,
           models: {},
           totalTokens: 0,
           totalRequests: 0,
@@ -4975,7 +4975,6 @@ class RedisAdapter extends DatabaseAdapter {
       logger.debug(
         `成功获取日志详情: ${actualLogKey}, 耗时: ${endTime - startTime}ms, 字段数: ${Object.keys(processedLogData).length}, hasHeaders: ${processedLogData.hasHeaders}, hasBody: ${processedLogData.hasBody}, tokens: ${processedLogData.tokenSummary.totalTokens}`
       )
-
 
       return processedLogData
     } catch (error) {

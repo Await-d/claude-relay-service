@@ -9,6 +9,7 @@ const sessionHelper = require('../utils/sessionHelper')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const claudeCodeHeadersService = require('./claudeCodeHeadersService')
+const modelUtils = require('../utils/modelUtils')
 
 class ClaudeRelayService {
   constructor() {
@@ -126,7 +127,10 @@ class ClaudeRelayService {
       const accessToken = await claudeAccountService.getValidAccessToken(accountId)
 
       // 处理请求体（传递 clientHeaders 以判断是否需要设置 Claude Code 系统提示词）
-      const processedBody = this._processRequestBody(requestBody, clientHeaders)
+      let processedBody = this._processRequestBody(requestBody, clientHeaders)
+
+      // 处理模型名称（检测1M上下文）
+      processedBody = modelUtils.processModelNameInRequest(processedBody)
 
       // 获取代理配置
       const proxyAgent = await this._getProxyAgent(accountId)
@@ -278,9 +282,11 @@ class ClaudeRelayService {
 
       if (responseBody && responseBody.usage) {
         const { usage } = responseBody
+        // 使用实际的模型名称（可能包含[1M]后缀）
+        const actualModelName = modelUtils.getActualModelName(requestBody)
         // 打印原始usage数据为JSON字符串
         logger.info(
-          `📊 === Non-Stream Request Usage Summary === Model: ${requestBody.model}, Usage: ${JSON.stringify(usage)}`
+          `📊 === Non-Stream Request Usage Summary === Model: ${actualModelName}, Usage: ${JSON.stringify(usage)}`
         )
       } else {
         // 如果没有usage数据，使用估算值
@@ -291,8 +297,9 @@ class ClaudeRelayService {
           ? response.content.reduce((sum, content) => sum + (content.text?.length || 0), 0) / 4
           : 0
 
+        const actualModelName = modelUtils.getActualModelName(requestBody)
         logger.info(
-          `✅ API request completed - Key: ${apiKeyData.name}, Account: ${accountId}, Model: ${requestBody.model}, Input: ~${Math.round(inputTokens)} tokens (estimated), Output: ~${Math.round(outputTokens)} tokens (estimated)`
+          `✅ API request completed - Key: ${apiKeyData.name}, Account: ${accountId}, Model: ${actualModelName}, Input: ~${Math.round(inputTokens)} tokens (estimated), Output: ~${Math.round(outputTokens)} tokens (estimated)`
         )
       }
 
@@ -784,7 +791,10 @@ class ClaudeRelayService {
       const accessToken = await claudeAccountService.getValidAccessToken(accountId)
 
       // 处理请求体（传递 clientHeaders 以判断是否需要设置 Claude Code 系统提示词）
-      const processedBody = this._processRequestBody(requestBody, clientHeaders)
+      let processedBody = this._processRequestBody(requestBody, clientHeaders)
+
+      // 处理模型名称（检测1M上下文）
+      processedBody = modelUtils.processModelNameInRequest(processedBody)
 
       // 获取代理配置
       const proxyAgent = await this._getProxyAgent(accountId)
@@ -1102,9 +1112,11 @@ class ClaudeRelayService {
               {}
             )
 
+            // 使用实际的模型名称（可能包含[1M]后缀）
+            const actualModelName = modelUtils.getActualModelName(body)
             // 打印原始的usage数据为JSON字符串，避免嵌套问题
             logger.info(
-              `📊 === Stream Request Usage Summary === Model: ${body.model}, Total Events: ${allUsageData.length}, Usage Data: ${JSON.stringify(allUsageData)}`
+              `📊 === Stream Request Usage Summary === Model: ${actualModelName}, Total Events: ${allUsageData.length}, Usage Data: ${JSON.stringify(allUsageData)}`
             )
 
             // 一般一个请求只会使用一个模型，即使有多个usage事件也应该合并
@@ -1114,7 +1126,7 @@ class ClaudeRelayService {
               output_tokens: totalUsage.output_tokens,
               cache_creation_input_tokens: totalUsage.cache_creation_input_tokens,
               cache_read_input_tokens: totalUsage.cache_read_input_tokens,
-              model: allUsageData[allUsageData.length - 1].model || body.model // 使用最后一个模型或请求模型
+              model: allUsageData[allUsageData.length - 1].model || actualModelName // 使用最后一个模型或实际模型名称
             }
 
             // 如果有详细的cache_creation数据，合并它们

@@ -30,6 +30,7 @@ class PricingService {
       'claude-opus-4-1-20250805': 0.00003,
       'claude-opus-4': 0.00003,
       'claude-opus-4-20250514': 0.00003,
+      'claude-opus-4-20250514[1M]': 0.00003, // 1M上下文版本
       'claude-3-opus': 0.00003,
       'claude-3-opus-latest': 0.00003,
       'claude-3-opus-20240229': 0.00003,
@@ -46,6 +47,7 @@ class PricingService {
       'claude-sonnet-3-7': 0.000006,
       'claude-sonnet-4': 0.000006,
       'claude-sonnet-4-20250514': 0.000006,
+      'claude-sonnet-4-20250514[1M]': 0.000006, // 1M上下文版本
 
       // Haiku 系列: $1.6/MTok
       'claude-3-5-haiku': 0.0000016,
@@ -252,6 +254,15 @@ class PricingService {
     if (this.pricingData[modelName]) {
       logger.debug(`💰 Found exact pricing match for ${modelName}`)
       return this.pricingData[modelName]
+    }
+
+    // 对于带有[1M]后缀的模型，尝试使用基础模型定价
+    if (modelName.endsWith('[1M]')) {
+      const baseModel = modelName.replace(/\[1M\]$/, '')
+      if (this.pricingData[baseModel]) {
+        logger.debug(`💰 Found pricing for ${modelName} using base model: ${baseModel}`)
+        return this.pricingData[baseModel]
+      }
     }
 
     // 对于Bedrock区域前缀模型（如 us.anthropic.claude-sonnet-4-20250514-v1:0），

@@ -807,16 +807,20 @@ module.exports = {
   getAccountCostStats: async (accountId, options = {}) => {
     const AccountCostService = require('./accountCostService')
     const { getAccount } = require('./openaiAccountService')
-    
+
     try {
-      if (!accountId) throw new Error('Account ID is required')
-      
+      if (!accountId) {
+        throw new Error('Account ID is required')
+      }
+
       const accountData = await getAccount(accountId)
-      if (!accountData) throw new Error('Account not found')
-      
+      if (!accountData) {
+        throw new Error('Account not found')
+      }
+
       const costStats = await AccountCostService.getAccountCostStats(accountId, 'openai', options)
       costStats.accountName = accountData.name
-      
+
       return costStats
     } catch (error) {
       const logger = require('../utils/logger')
