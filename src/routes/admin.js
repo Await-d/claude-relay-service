@@ -2178,6 +2178,47 @@ router.put(
   }
 )
 
+// 获取Claude Console账户费用统计
+router.get('/claude-console-accounts/:accountId/cost-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { period } = req.query
+
+    logger.debug(`📊 获取Claude Console账户费用统计: ${accountId}, period: ${period || 'all'}`)
+
+    // 验证账户是否存在
+    const account = await claudeConsoleAccountService.getAccount(accountId)
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found',
+        message: '指定的账户不存在'
+      })
+    }
+
+    // 获取费用统计
+    const costStats = await claudeConsoleAccountService.getAccountCostStats(accountId, {
+      period: period || 'all'
+    })
+
+    logger.success(
+      `📊 成功获取Claude Console账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
+    )
+
+    return res.json({
+      success: true,
+      data: costStats
+    })
+  } catch (error) {
+    logger.error(`❌ 获取Claude Console账户费用统计失败 (${req.params.accountId}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get account cost stats',
+      message: error.message
+    })
+  }
+})
+
 // ☁️ Bedrock 账户管理
 
 // 获取所有Bedrock账户
@@ -2850,6 +2891,47 @@ router.put(
     }
   }
 )
+
+// 获取Gemini账户费用统计
+router.get('/gemini-accounts/:accountId/cost-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { period } = req.query
+
+    logger.debug(`📊 获取Gemini账户费用统计: ${accountId}, period: ${period || 'all'}`)
+
+    // 验证账户是否存在
+    const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found',
+        message: '指定的账户不存在'
+      })
+    }
+
+    // 获取费用统计
+    const costStats = await geminiAccountService.getAccountCostStats(accountId, {
+      period: period || 'all'
+    })
+
+    logger.success(
+      `📊 成功获取Gemini账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
+    )
+
+    return res.json({
+      success: true,
+      data: costStats
+    })
+  } catch (error) {
+    logger.error(`❌ 获取Gemini账户费用统计失败 (${req.params.accountId}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get account cost stats',
+      message: error.message
+    })
+  }
+})
 
 // 📊 账户使用统计
 
@@ -5895,6 +5977,131 @@ router.post('/scheduling/config/reset', authenticateAdmin, async (req, res) => {
     logger.error('❌ Failed to reset system scheduling config:', error)
     return res.status(500).json({
       error: 'Failed to reset system scheduling config',
+      message: error.message
+    })
+  }
+})
+
+// ==================== 其他平台费用统计端点 ====================
+
+// 获取Bedrock账户费用统计
+router.get('/bedrock-accounts/:accountId/cost-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { period } = req.query
+
+    logger.debug(`📊 获取Bedrock账户费用统计: ${accountId}, period: ${period || 'all'}`)
+
+    // 验证账户是否存在
+    const accountResult = await bedrockAccountService.getAccount(accountId)
+    if (!accountResult.success) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found',
+        message: '指定的账户不存在'
+      })
+    }
+
+    // 获取费用统计
+    const costStats = await bedrockAccountService.getAccountCostStats(accountId, {
+      period: period || 'all'
+    })
+
+    logger.success(
+      `📊 成功获取Bedrock账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
+    )
+
+    return res.json({
+      success: true,
+      data: costStats
+    })
+  } catch (error) {
+    logger.error(`❌ 获取Bedrock账户费用统计失败 (${req.params.accountId}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get account cost stats',
+      message: error.message
+    })
+  }
+})
+
+// 获取OpenAI账户费用统计
+router.get('/openai-accounts/:accountId/cost-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { period } = req.query
+
+    logger.debug(`📊 获取OpenAI账户费用统计: ${accountId}, period: ${period || 'all'}`)
+
+    // 验证账户是否存在
+    const account = await openaiAccountService.getAccount(accountId)
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found',
+        message: '指定的账户不存在'
+      })
+    }
+
+    // 获取费用统计
+    const costStats = await openaiAccountService.getAccountCostStats(accountId, {
+      period: period || 'all'
+    })
+
+    logger.success(
+      `📊 成功获取OpenAI账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
+    )
+
+    return res.json({
+      success: true,
+      data: costStats
+    })
+  } catch (error) {
+    logger.error(`❌ 获取OpenAI账户费用统计失败 (${req.params.accountId}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get account cost stats',
+      message: error.message
+    })
+  }
+})
+
+// 获取Azure OpenAI账户费用统计
+router.get('/azure-openai-accounts/:accountId/cost-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { period } = req.query
+
+    logger.debug(`📊 获取Azure OpenAI账户费用统计: ${accountId}, period: ${period || 'all'}`)
+
+    // 验证账户是否存在
+    const account = await azureOpenaiAccountService.getAccount(accountId)
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found',
+        message: '指定的账户不存在'
+      })
+    }
+
+    // 获取费用统计
+    const costStats = await azureOpenaiAccountService.getAccountCostStats(accountId, {
+      period: period || 'all'
+    })
+
+    logger.success(
+      `📊 成功获取Azure OpenAI账户费用统计: ${accountId} - $${(costStats.totalCost || 0).toFixed(6)}`
+    )
+
+    return res.json({
+      success: true,
+      data: costStats
+    })
+  } catch (error) {
+    logger.error(`❌ 获取Azure OpenAI账户费用统计失败 (${req.params.accountId}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get account cost stats',
       message: error.message
     })
   }

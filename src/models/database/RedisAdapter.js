@@ -5407,10 +5407,12 @@ class RedisAdapter extends DatabaseAdapter {
 
   /**
    * 获取账户费用统计
-   * @param {string} accountId - Claude账户ID
+   * @param {string} accountId - 账户ID
+   * @param {string} period - 时间范围 ('today', 'week', 'month', 'all')
+   * @param {string} platform - 平台类型 ('claude', 'gemini', 'openai', 'bedrock', 'azure_openai', 'claude-console')
    * @returns {Promise<Object>} 账户费用统计数据
    */
-  async getAccountCostStats(accountId) {
+  async getAccountCostStats(accountId, period = 'all', platform = 'claude') {
     try {
       // 参数验证
       if (!accountId || typeof accountId !== 'string') {
@@ -5423,11 +5425,21 @@ class RedisAdapter extends DatabaseAdapter {
       const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(2, '0')}`
       const currentHour = `${dateString}:${String(tzDate.getUTCHours()).padStart(2, '0')}`
 
-      // Redis键
-      const dailyKey = `usage:cost:daily:account:${accountId}:${dateString}`
-      const monthlyKey = `usage:cost:monthly:account:${accountId}:${currentMonth}`
-      const hourlyKey = `usage:cost:hourly:account:${accountId}:${currentHour}`
-      const totalKey = `usage:cost:total:account:${accountId}`
+      // 生成基于平台的Redis键
+      // Claude保持向后兼容，其他平台使用平台前缀
+      let accountKeyPart
+      if (platform === 'claude') {
+        // Claude保持原有键格式（向后兼容）
+        accountKeyPart = `account:${accountId}`
+      } else {
+        // 其他平台使用平台前缀
+        accountKeyPart = `account:${platform}:${accountId}`
+      }
+
+      const dailyKey = `usage:cost:daily:${accountKeyPart}:${dateString}`
+      const monthlyKey = `usage:cost:monthly:${accountKeyPart}:${currentMonth}`
+      const hourlyKey = `usage:cost:hourly:${accountKeyPart}:${currentHour}`
+      const totalKey = `usage:cost:total:${accountKeyPart}`
 
       // 批量获取费用数据
       const [daily, monthly, hourly, total] = await Promise.all([
@@ -5438,8 +5450,8 @@ class RedisAdapter extends DatabaseAdapter {
       ])
 
       // 获取模型级别的费用统计
-      const modelDailyPattern = `usage:cost:daily:account:${accountId}:*:${dateString}`
-      const modelMonthlyPattern = `usage:cost:monthly:account:${accountId}:*:${currentMonth}`
+      const modelDailyPattern = `usage:cost:daily:${accountKeyPart}:*:${dateString}`
+      const modelMonthlyPattern = `usage:cost:monthly:${accountKeyPart}:*:${currentMonth}`
 
       const [modelDailyKeys, modelMonthlyKeys] = await Promise.all([
         this.client.keys(modelDailyPattern),

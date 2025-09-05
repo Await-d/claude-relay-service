@@ -210,6 +210,14 @@
                 </div>
               </th>
               <th
+                class="w-[10%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                <div class="flex items-center gap-1">
+                  <i class="fas fa-dollar-sign text-xs text-green-500" />
+                  费用统计
+                </div>
+              </th>
+              <th
                 class="w-[8%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
               >
                 最后使用
@@ -660,6 +668,44 @@
                   </div>
                 </div>
               </td>
+              <!-- 费用统计列 -->
+              <td class="whitespace-nowrap px-3 py-4 text-sm">
+                <div v-if="account.costStats && account.costStats.hasCostStats" class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <div class="h-2 w-2 rounded-full bg-green-500" />
+                    <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {{ account.costStats.formatted?.totalCost || '$0.00' }}
+                    </span>
+                  </div>
+                  <div
+                    v-if="account.costStats.formatted?.dailyCost"
+                    class="flex items-center gap-2"
+                  >
+                    <div class="h-2 w-2 rounded-full bg-blue-500" />
+                    <span class="text-xs text-gray-600 dark:text-gray-300">
+                      今日: {{ account.costStats.formatted.dailyCost }}
+                    </span>
+                  </div>
+                  <div class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ account.costStats.platformName || account.platform }}
+                  </div>
+                </div>
+                <div v-else-if="account.costStats && account.costStats.error" class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <div class="h-2 w-2 rounded-full bg-red-500" />
+                    <span class="text-xs text-red-600 dark:text-red-400"> 加载失败 </span>
+                  </div>
+                </div>
+                <div
+                  v-else
+                  class="flex items-center justify-center text-gray-400 dark:text-gray-500"
+                >
+                  <div class="text-center">
+                    <i class="fas fa-dollar-sign mb-1 text-lg opacity-50" />
+                    <div class="text-xs">暂无数据</div>
+                  </div>
+                </div>
+              </td>
               <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-300">
                 {{ formatLastUsed(account.lastUsedAt) }}
               </td>
@@ -969,6 +1015,32 @@
               </span>
             </div>
 
+            <!-- 费用统计 -->
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-gray-500 dark:text-gray-400">费用统计</span>
+              <div
+                v-if="account.costStats && account.costStats.hasCostStats"
+                class="flex flex-col items-end gap-1"
+              >
+                <span class="font-medium text-green-600 dark:text-green-400">
+                  {{ account.costStats.formatted?.totalCost || '$0.00' }}
+                </span>
+                <span
+                  v-if="account.costStats.formatted?.dailyCost"
+                  class="text-xs text-gray-600 dark:text-gray-400"
+                >
+                  今日: {{ account.costStats.formatted.dailyCost }}
+                </span>
+              </div>
+              <div
+                v-else-if="account.costStats && account.costStats.error"
+                class="text-red-500 dark:text-red-400"
+              >
+                加载失败
+              </div>
+              <div v-else class="text-gray-400 dark:text-gray-500">暂无数据</div>
+            </div>
+
             <!-- 代理配置 -->
             <div
               v-if="account.proxyConfig && account.proxyConfig.type !== 'none'"
@@ -1101,7 +1173,6 @@ const { showConfirmModal, confirmOptions, showConfirm, handleConfirm, handleCanc
 
 // 使用accounts store
 const accountsStore = useAccountsStore()
-const { getAccountCostStats } = accountsStore
 
 // 数据状态
 const accounts = ref([])
@@ -1211,36 +1282,6 @@ const sortedAccounts = computed(() => {
 
   return sorted
 })
-
-// 为账户加载费用统计信息
-const loadCostStatsForAccounts = async (accounts) => {
-  try {
-    // 只为Claude平台的账户加载费用统计
-    const claudeAccounts = accounts.filter(
-      (account) => account.platform === 'claude' || account.platform === 'claude-console'
-    )
-
-    if (claudeAccounts.length === 0) return
-
-    // 并行获取所有Claude账户的费用统计
-    const costStatsPromises = claudeAccounts.map(async (account) => {
-      try {
-        const costStats = await getAccountCostStats(account.id, 'all')
-        account.costStats = costStats
-        return costStats
-      } catch (error) {
-        console.warn(`获取账户 ${account.name || account.id} 的费用统计失败:`, error)
-        account.costStats = { totalCost: 0, formatted: { totalCost: '$0.00' } }
-        return null
-      }
-    })
-
-    await Promise.all(costStatsPromises)
-  } catch (error) {
-    console.error('加载账户费用统计失败:', error)
-    // 不要因为费用统计失败而影响账户列表的加载，所以只记录错误不抛出
-  }
-}
 
 // 加载账户列表
 const loadAccounts = async (forceReload = false) => {
@@ -2060,6 +2101,57 @@ const handleRateLimitUpdate = async () => {
 const handleClaudeResetUpdate = () => {
   // Claude 5小时重置倒计时更新，暂时无需特殊处理
   // 可以在这里添加日志或其他逻辑
+}
+
+// 为账户加载费用统计信息
+const loadCostStatsForAccounts = async (allAccounts) => {
+  try {
+    // 筛选支持费用统计的账户
+    const accountsWithCostStats = allAccounts.filter((account) => {
+      // 目前所有平台都支持费用统计
+      return ['claude', 'claude-console', 'gemini', 'openai', 'azure_openai', 'bedrock'].includes(
+        account.platform
+      )
+    })
+
+    if (accountsWithCostStats.length === 0) {
+      return
+    }
+
+    // 并行获取所有账户的费用统计
+    const costStatsPromises = accountsWithCostStats.map(async (account) => {
+      try {
+        const costStats = await accountsStore.getAccountCostStats(
+          account.id,
+          account.platform,
+          'all'
+        )
+        return { accountId: account.id, costStats }
+      } catch (error) {
+        console.warn(`获取账户 ${account.id} (${account.platform}) 的费用统计失败:`, error)
+        return {
+          accountId: account.id,
+          costStats: {
+            totalCost: 0,
+            hasCostStats: false,
+            error: error.message
+          }
+        }
+      }
+    })
+
+    const results = await Promise.all(costStatsPromises)
+
+    // 将费用统计数据附加到账户对象上
+    results.forEach(({ accountId, costStats }) => {
+      const account = allAccounts.find((acc) => acc.id === accountId)
+      if (account) {
+        account.costStats = costStats
+      }
+    })
+  } catch (error) {
+    console.error('加载账户费用统计失败:', error)
+  }
 }
 </script>
 

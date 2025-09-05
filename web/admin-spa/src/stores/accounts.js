@@ -650,20 +650,76 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
-  // 获取Claude账户费用统计
-  const getAccountCostStats = async (accountId, period = 'all') => {
+  // 获取账户费用统计（支持所有平台）
+  const getAccountCostStats = async (accountId, platform, period = 'all') => {
     try {
-      const response = await apiClient.get(`/admin/claude-accounts/${accountId}/cost-stats`, {
+      // 根据平台构建API端点
+      let endpoint
+      switch (platform) {
+        case 'claude':
+          endpoint = `/admin/claude-accounts/${accountId}/cost-stats`
+          break
+        case 'claude-console':
+          endpoint = `/admin/claude-console-accounts/${accountId}/cost-stats`
+          break
+        case 'gemini':
+          endpoint = `/admin/gemini-accounts/${accountId}/cost-stats`
+          break
+        case 'openai':
+          endpoint = `/admin/openai-accounts/${accountId}/cost-stats`
+          break
+        case 'azure_openai':
+          endpoint = `/admin/azure-openai-accounts/${accountId}/cost-stats`
+          break
+        case 'bedrock':
+          endpoint = `/admin/bedrock-accounts/${accountId}/cost-stats`
+          break
+        default:
+          throw new Error(`不支持的平台: ${platform}`)
+      }
+
+      const response = await apiClient.get(endpoint, {
         params: { period }
       })
+
       if (response.success) {
         return response.data
       } else {
         throw new Error(response.message || '获取账户费用统计失败')
       }
     } catch (err) {
-      console.error('获取账户费用统计失败:', err)
+      console.error(`获取${platform}账户费用统计失败:`, err)
       throw err
+    }
+  }
+
+  // 获取多个账户的费用统计
+  const getMultipleAccountsCostStats = async (accounts, period = 'all') => {
+    try {
+      const results = {}
+
+      // 并行获取所有账户的费用统计
+      const promises = accounts.map(async (account) => {
+        try {
+          const stats = await getAccountCostStats(account.id, account.platform, period)
+          results[account.id] = stats
+        } catch (error) {
+          console.warn(`获取账户 ${account.id} (${account.platform}) 的费用统计失败:`, error)
+          results[account.id] = {
+            accountId: account.id,
+            platform: account.platform,
+            totalCost: 0,
+            hasCostStats: false,
+            error: error.message
+          }
+        }
+      })
+
+      await Promise.all(promises)
+      return results
+    } catch (error) {
+      console.error('批量获取账户费用统计失败:', error)
+      return {}
     }
   }
 
@@ -726,6 +782,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     generateOpenAIAuthUrl,
     exchangeOpenAICode,
     getAccountCostStats,
+    getMultipleAccountsCostStats,
     sortAccounts,
     reset
   }

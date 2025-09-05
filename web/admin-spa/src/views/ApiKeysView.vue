@@ -572,6 +572,14 @@
                       <span class="ml-1 hidden xl:inline">统计</span>
                     </button>
                     <button
+                      class="rounded px-2 py-1 text-xs font-medium text-cyan-600 transition-colors hover:bg-cyan-50 hover:text-cyan-900"
+                      title="快速绑定"
+                      @click="openQuickBindModal(key)"
+                    >
+                      <i class="fas fa-link" />
+                      <span class="ml-1 hidden xl:inline">绑定</span>
+                    </button>
+                    <button
                       class="rounded px-2 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-900"
                       title="编辑"
                       @click="openEditApiKeyModal(key)"
@@ -1141,6 +1149,13 @@
               查看详情
             </button>
             <button
+              class="flex-1 rounded-lg bg-cyan-50 px-3 py-2 text-xs text-cyan-600 transition-colors hover:bg-cyan-100"
+              @click="openQuickBindModal(key)"
+            >
+              <i class="fas fa-link mr-1" />
+              绑定
+            </button>
+            <button
               class="flex-1 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 transition-colors hover:bg-gray-100"
               @click="openEditApiKeyModal(key)"
             >
@@ -1331,6 +1346,14 @@
       :show="showUsageDetailModal"
       @close="showUsageDetailModal = false"
     />
+
+    <QuickBindModal
+      v-if="showQuickBindModal"
+      :accounts="accounts"
+      :api-key="quickBindingApiKey"
+      @close="showQuickBindModal = false"
+      @success="handleQuickBindSuccess"
+    />
   </div>
 </template>
 
@@ -1349,6 +1372,7 @@ import ExpiryEditModal from '@/components/apikeys/ExpiryEditModal.vue'
 import UsageDetailModal from '@/components/apikeys/UsageDetailModal.vue'
 import WindowCountdown from '@/components/apikeys/WindowCountdown.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
+import QuickBindModal from '@/components/apikeys/QuickBindModal.vue'
 
 // 响应式数据
 const clientsStore = useClientsStore()
@@ -1379,6 +1403,8 @@ const editingExpiryKey = ref(null)
 const expiryEditModalRef = ref(null)
 const showUsageDetailModal = ref(false)
 const selectedApiKeyForDetail = ref(null)
+const showQuickBindModal = ref(false)
+const quickBindingApiKey = ref(null)
 
 // 标签相关
 const selectedTagFilter = ref('')
@@ -2337,6 +2363,20 @@ const getCostLimitTextColor = (key) => {
 const showUsageDetails = (apiKey) => {
   selectedApiKeyForDetail.value = apiKey
   showUsageDetailModal.value = true
+}
+
+// 打开快速绑定模态框
+const openQuickBindModal = async (apiKey) => {
+  await loadAccounts() // 确保账户数据是最新的
+  quickBindingApiKey.value = apiKey
+  showQuickBindModal.value = true
+}
+
+// 处理快速绑定成功
+const handleQuickBindSuccess = () => {
+  showQuickBindModal.value = false
+  showToast('账户绑定更新成功', 'success')
+  loadApiKeys() // 刷新列表
 }
 
 // 格式化Token数量（使用K/M单位）

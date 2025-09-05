@@ -803,6 +803,27 @@ module.exports = {
   // 新增调度相关方法
   updateAccountSchedulingFields,
   recordAccountUsage,
+  // 费用统计方法
+  getAccountCostStats: async (accountId, options = {}) => {
+    const AccountCostService = require('./accountCostService')
+    const { getAccount } = require('./openaiAccountService')
+    
+    try {
+      if (!accountId) throw new Error('Account ID is required')
+      
+      const accountData = await getAccount(accountId)
+      if (!accountData) throw new Error('Account not found')
+      
+      const costStats = await AccountCostService.getAccountCostStats(accountId, 'openai', options)
+      costStats.accountName = accountData.name
+      
+      return costStats
+    } catch (error) {
+      const logger = require('../utils/logger')
+      logger.error(`❌ Failed to get cost stats for OpenAI account ${accountId}:`, error)
+      throw error
+    }
+  },
   encrypt,
   decrypt,
   generateEncryptionKey,

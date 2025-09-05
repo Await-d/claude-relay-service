@@ -556,6 +556,28 @@ module.exports = {
   // 新增调度相关方法
   updateAccountSchedulingFields,
   recordAccountUsage,
+  // 费用统计方法
+  getAccountCostStats: async (accountId, options = {}) => {
+    const AccountCostService = require('./accountCostService')
+    const logger = require('../utils/logger')
+    
+    try {
+      if (!accountId) throw new Error('Account ID is required')
+      
+      const accountData = await require('./azureOpenaiAccountService').getAccount(accountId)
+      if (!accountData) throw new Error('Account not found')
+      
+      const costStats = await AccountCostService.getAccountCostStats(accountId, 'azure_openai', options)
+      costStats.accountName = accountData.name
+      
+      logger.debug(`📊 Retrieved cost stats for Azure OpenAI account ${accountId}: $${(costStats.totalCost || 0).toFixed(6)} (${options.period || 'all'})`)
+      
+      return costStats
+    } catch (error) {
+      logger.error(`❌ Failed to get cost stats for Azure OpenAI account ${accountId}:`, error)
+      throw error
+    }
+  },
   encrypt,
   decrypt
 }

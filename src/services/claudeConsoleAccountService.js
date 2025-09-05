@@ -747,6 +747,38 @@ class ClaudeConsoleAccountService {
       return { success: false, error: error.message }
     }
   }
+
+  // 📊 获取账户费用统计
+  async getAccountCostStats(accountId, options = {}) {
+    const AccountCostService = require('./accountCostService')
+    
+    try {
+      if (!accountId) {
+        throw new Error('Account ID is required')
+      }
+
+      // 获取账户基本信息
+      const accountData = await this.getAccount(accountId)
+      if (!accountData) {
+        throw new Error('Account not found')
+      }
+
+      // 使用通用费用统计服务
+      const costStats = await AccountCostService.getAccountCostStats(accountId, 'claude-console', options)
+
+      // 添加账户名称
+      costStats.accountName = accountData.name
+
+      logger.debug(
+        `📊 Retrieved cost stats for Claude Console account ${accountId}: $${(costStats.totalCost || 0).toFixed(6)} (${options.period || 'all'})`
+      )
+
+      return costStats
+    } catch (error) {
+      logger.error(`❌ Failed to get cost stats for Claude Console account ${accountId}:`, error)
+      throw error
+    }
+  }
 }
 
 module.exports = new ClaudeConsoleAccountService()
