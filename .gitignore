@@ -15,7 +15,6 @@ pnpm-debug.log*
 
 # MCP configuration (local only)
 .mcp.json
-.spec-workflow/
 
 # Data directory (contains sensitive information)
 data/
@@ -244,3 +243,22 @@ web/apiStats/
 web/admin-spa/dist/
 /package-lock.json
 /pnpm-lock.yaml
+
+# Logs
+logs
+dev-debug.log
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+
+/.taskmaster/**
+
+# Task files
+# tasks.json
+# tasks/
