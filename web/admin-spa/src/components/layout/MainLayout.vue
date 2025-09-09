@@ -1,5 +1,18 @@
 <template>
   <div class="min-h-screen p-3 sm:p-4 md:p-6">
+    <!-- Session Manager for authenticated pages -->
+    <SessionManager
+      :sessionToken="authStore.sessionToken"
+      :expiresAt="authStore.expiresAt"
+      :autoRefresh="true"
+      :showIndicator="true"
+      :showStatusText="false"
+      @sessionRefreshed="handleSessionRefresh"
+      @sessionExpired="handleSessionExpired"
+      @refreshFailed="handleRefreshFailed"
+      @logout="handleLogout"
+    />
+
     <!-- 顶部导航 -->
     <AppHeader />
 
@@ -22,11 +35,14 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 import AppHeader from './AppHeader.vue'
 import TabBar from './TabBar.vue'
+import SessionManager from '@/components/auth/SessionManager.vue'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 // 根据路由设置当前激活的标签
 const activeTab = ref('dashboard')
@@ -35,6 +51,9 @@ const tabRouteMap = {
   dashboard: '/dashboard',
   apiKeys: '/api-keys',
   accounts: '/accounts',
+  users: '/users',
+  groups: '/groups',
+  'user-groups': '/user-groups',
   requestLogs: '/request-logs',
   tutorial: '/tutorial',
   settings: '/settings'
@@ -54,6 +73,9 @@ const initActiveTab = () => {
       Dashboard: 'dashboard',
       ApiKeys: 'apiKeys',
       Accounts: 'accounts',
+      Users: 'users',
+      Groups: 'groups',
+      UserGroups: 'user-groups',
       DataManagement: 'data-management',
       Tutorial: 'tutorial',
       Settings: 'settings'
@@ -84,6 +106,9 @@ watch(
         Dashboard: 'dashboard',
         ApiKeys: 'apiKeys',
         Accounts: 'accounts',
+        Users: 'users',
+        Groups: 'groups',
+        UserGroups: 'user-groups',
         DataManagement: 'data-management',
         Tutorial: 'tutorial',
         Settings: 'settings'
@@ -118,6 +143,32 @@ const handleTabChange = async (tabKey) => {
       initActiveTab()
     }
   }
+}
+
+// Session management handlers
+const handleSessionRefresh = async () => {
+  try {
+    const success = await authStore.refreshSession()
+    if (!success) {
+      console.warn('Session refresh failed in MainLayout')
+    }
+  } catch (error) {
+    console.error('Session refresh error in MainLayout:', error)
+  }
+}
+
+const handleSessionExpired = () => {
+  console.warn('Session expired in MainLayout')
+  authStore.clearAuthState()
+}
+
+const handleRefreshFailed = (error) => {
+  console.error('Session refresh failed in MainLayout:', error)
+  authStore.clearAuthState()
+}
+
+const handleLogout = () => {
+  authStore.logout()
 }
 
 // OEM设置已在App.vue中加载，无需重复加载

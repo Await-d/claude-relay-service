@@ -1,4 +1,5 @@
 const apiKeyService = require('../services/apiKeyService')
+const userService = require('../services/userService')
 const logger = require('../utils/logger')
 const database = require('../models/database')
 const { RateLimiterRedis } = require('rate-limiter-flexible')
@@ -579,6 +580,308 @@ const authenticateAdmin = async (req, res, next) => {
   }
 }
 
+// 🔐 用户会话认证中间件
+const authenticateUserSession = async (req, res, next) => {
+  const startTime = Date.now()
+
+  try {
+    // 提取会话令牌，支持多种方式
+    const sessionToken = extractSessionToken(req)
+
+    if (!sessionToken) {
+      logger.security(`🔒 Missing session token attempt from ${req.ip || 'unknown'}`)
+      return res.status(401).json({
+        error: 'Missing session token',
+        message: 'Please provide a valid session token'
+      })
+    }
+
+    // 基本令牌格式验证
+    if (
+      typeof sessionToken !== 'string' ||
+      sessionToken.length < 32 ||
+      sessionToken.length > 1024
+    ) {
+      logger.security(`🔒 Invalid session token format from ${req.ip || 'unknown'}`)
+      return res.status(401).json({
+        error: 'Invalid session token format',
+        message: 'Session token format is invalid'
+      })
+    }
+
+    // 验证用户会话
+    const sessionData = await userService.validateUserSession(sessionToken)
+
+    if (!sessionData || !sessionData.valid) {
+      const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
+      logger.security(`🔒 Invalid user session attempt from ${clientIP}`)
+      return res.status(401).json({
+        error: 'Invalid session',
+        message: 'Session expired or invalid'
+      })
+    }
+
+    // 获取用户详细信息
+    const userInfo = await userService.getUserById(sessionData.userId)
+    if (!userInfo) {
+      logger.security(`🔒 User not found for session: ${sessionData.userId}`)
+      return res.status(401).json({
+        error: 'User not found',
+        message: 'Associated user account not found'
+      })
+    }
+
+    // 设置用户上下文到请求对象
+    req.user = {
+      id: userInfo.id,
+      username: userInfo.username,
+      email: userInfo.email,
+      fullName: userInfo.fullName,
+      role: userInfo.role,
+      status: userInfo.status,
+      authMethod: userInfo.authMethod,
+      groups: userInfo.groups || []
+    }
+    req.session = {
+      sessionId: sessionData.sessionId,
+      userId: sessionData.userId,
+      token: sessionToken
+    }
+
+    const authDuration = Date.now() - startTime
+    const userAgent = req.headers['user-agent'] || 'No User-Agent'
+
+    logger.security(
+      `🔐 User session authenticated: ${userInfo.username} (${userInfo.id}) in ${authDuration}ms`
+    )
+    logger.api(`   User-Agent: "${userAgent}"`)
+
+    return next()
+  } catch (error) {
+    const authDuration = Date.now() - startTime
+    logger.error(`❌ User session authentication error (${authDuration}ms):`, {
+      error: error.message,
+      stack: error.stack,
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
+      url: req.originalUrl
+    })
+
+    return res.status(500).json({
+      error: 'Authentication error',
+      message: 'Internal server error during authentication'
+    })
+  }
+}
+
+// 🔄 智能双重认证模式（增强版，API Key优先，智能回退）
+const authenticateDual = async (req, res, next) => {
+  const startTime = Date.now()
+
+  try {
+    // 使用增强的认证类型检测
+    const authInfo = detectAuthenticationType(req)
+
+    logger.debug(
+      `🔍 Smart authentication detection: ${authInfo.authType} (confidence: ${authInfo.confidence}%, sources: ${authInfo.detectedSources.join(', ')})`
+    )
+
+    // 优先使用API Key认证（最高优先级）
+    if (authInfo.hasApiKey) {
+      logger.debug(
+        `🔑 Using API Key authentication (sources: ${authInfo.detectedSources.filter((s) => s.includes('key')).join(', ')})`
+      )
+      return authenticateApiKey(req, res, next)
+    }
+
+    // 回退到用户会话认证
+    if (authInfo.hasSessionToken) {
+      logger.debug(
+        `🎫 Using User Session authentication (sources: ${authInfo.detectedSources.filter((s) => s.includes('session') || s.includes('bearer')).join(', ')})`
+      )
+      return authenticateUserSession(req, res, next)
+    }
+
+    // 管理员会话认证（如果没有其他认证方式）
+    if (authInfo.hasAdminToken) {
+      logger.debug(
+        `👑 Using Admin Session authentication (sources: ${authInfo.detectedSources.filter((s) => s.includes('admin')).join(', ')})`
+      )
+      return authenticateAdmin(req, res, next)
+    }
+
+    // 没有提供任何认证方式
+    logger.security(`🔒 No authentication provided from ${req.ip || 'unknown'}`)
+    return res.status(401).json({
+      error: 'Authentication required',
+      message: 'Please provide API key, session token, or admin token',
+      supportedMethods: [
+        'API Key (x-api-key, x-goog-api-key, api-key headers, or Authorization Bearer cr_*)',
+        'Session Token (Authorization Bearer, x-session-token header, or sessionToken cookie)',
+        'Admin Token (x-admin-token header or adminToken cookie)'
+      ],
+      detectedSources: authInfo.detectedSources.length > 0 ? authInfo.detectedSources : undefined
+    })
+  } catch (error) {
+    const authDuration = Date.now() - startTime
+    logger.error(`❌ Smart dual authentication error (${authDuration}ms):`, {
+      error: error.message,
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
+      url: req.originalUrl
+    })
+
+    return res.status(500).json({
+      error: 'Authentication error',
+      message: 'Internal server error during authentication'
+    })
+  }
+}
+
+// 🔍 会话令牌提取工具函数
+const extractSessionToken = (req) => {
+  // 从Authorization header提取Bearer token（排除API Key格式）
+  const authHeader = req.headers['authorization']
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.replace(/^Bearer\s+/i, '')
+    // 确保不是API Key格式（cr_前缀）
+    if (!token.startsWith('cr_')) {
+      return token
+    }
+  }
+
+  // 从专用session token header提取
+  const sessionHeader = req.headers['x-session-token']
+  if (sessionHeader) {
+    return sessionHeader
+  }
+
+  // 从Cookie提取
+  const cookieToken = req.cookies?.sessionToken
+  if (cookieToken) {
+    return cookieToken
+  }
+
+  // 从查询参数提取（开发调试使用，生产环境应禁用）
+  if (process.env.NODE_ENV === 'development') {
+    const queryToken = req.query.session_token
+    if (queryToken) {
+      return queryToken
+    }
+  }
+
+  return null
+}
+
+// 🕵️ 智能认证类型检测工具函数（增强版）
+const detectAuthenticationType = (req) => {
+  const authInfo = {
+    hasApiKey: false,
+    hasSessionToken: false,
+    hasAdminToken: false,
+    authType: 'none',
+    detectedSources: [],
+    confidence: 0
+  }
+
+  // 检测API Key的多种来源
+  const apiKeySources = [
+    { name: 'x-api-key', value: req.headers['x-api-key'] },
+    { name: 'x-goog-api-key', value: req.headers['x-goog-api-key'] },
+    { name: 'api-key', value: req.headers['api-key'] },
+    { name: 'query-key', value: req.query.key }
+  ]
+
+  // 特殊处理Authorization Bearer（需要区分API Key和Session Token）
+  const authHeader = req.headers['authorization']
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.replace(/^Bearer\s+/i, '')
+
+    if (token.startsWith('cr_')) {
+      // Claude Relay API Key格式
+      apiKeySources.push({ name: 'bearer-api-key', value: token })
+    } else if (token.length >= 64 && token.match(/^[a-zA-Z0-9+/=._-]+$/)) {
+      // JWT Session Token格式特征
+      authInfo.hasSessionToken = true
+      authInfo.detectedSources.push('authorization-bearer-jwt')
+    } else {
+      // 其他Bearer token格式
+      authInfo.hasSessionToken = true
+      authInfo.detectedSources.push('authorization-bearer-other')
+    }
+  }
+
+  // 检查API Key来源
+  for (const source of apiKeySources) {
+    if (source.value && typeof source.value === 'string' && source.value.length > 8) {
+      authInfo.hasApiKey = true
+      authInfo.detectedSources.push(source.name)
+    }
+  }
+
+  // 检测Session Token的其他来源
+  const sessionSources = [
+    { name: 'x-session-token', value: req.headers['x-session-token'] },
+    { name: 'cookie-session', value: req.cookies?.sessionToken }
+  ]
+
+  // 开发环境支持查询参数
+  if (process.env.NODE_ENV === 'development') {
+    sessionSources.push({ name: 'query-session', value: req.query.session_token })
+  }
+
+  for (const source of sessionSources) {
+    if (source.value && typeof source.value === 'string' && source.value.length > 16) {
+      authInfo.hasSessionToken = true
+      authInfo.detectedSources.push(source.name)
+    }
+  }
+
+  // 检测管理员Token
+  const adminSources = [
+    { name: 'x-admin-token', value: req.headers['x-admin-token'] },
+    { name: 'cookie-admin', value: req.cookies?.adminToken }
+  ]
+
+  for (const source of adminSources) {
+    if (source.value && typeof source.value === 'string' && source.value.length > 32) {
+      authInfo.hasAdminToken = true
+      authInfo.detectedSources.push(source.name)
+    }
+  }
+
+  // 确定主要认证类型和置信度
+  if (authInfo.hasApiKey) {
+    authInfo.authType = 'api_key'
+    authInfo.confidence = authInfo.detectedSources.filter((s) => s.includes('key')).length * 30
+  } else if (authInfo.hasAdminToken) {
+    authInfo.authType = 'admin_session'
+    authInfo.confidence = authInfo.detectedSources.filter((s) => s.includes('admin')).length * 40
+  } else if (authInfo.hasSessionToken) {
+    authInfo.authType = 'user_session'
+    authInfo.confidence =
+      authInfo.detectedSources.filter((s) => s.includes('session') || s.includes('bearer')).length *
+      25
+  }
+
+  // 提高多源检测的置信度
+  if (authInfo.detectedSources.length > 1) {
+    authInfo.confidence += 10
+  }
+
+  return authInfo
+}
+
+// 🕵️ 认证类型检测工具函数（保持向后兼容）
+const detectAuthType = (req) => {
+  const enhanced = detectAuthenticationType(req)
+  return {
+    hasApiKey: enhanced.hasApiKey,
+    hasSessionToken: enhanced.hasSessionToken,
+    authType: enhanced.authType
+  }
+}
+
 // 注意：使用统计现在直接在/api/v1/messages路由中处理，
 // 以便从Claude API响应中提取真实的usage数据
 // 动态配置支持：请求日志记录现在支持实时配置变更
@@ -610,8 +913,10 @@ const corsMiddleware = (req, res, next) => {
       'Accept',
       'Authorization',
       'x-api-key',
+      'x-goog-api-key',
       'api-key',
-      'x-admin-token'
+      'x-admin-token',
+      'x-session-token'
     ].join(', ')
   )
 
@@ -713,6 +1018,13 @@ const requestLogger = (req, res, next) => {
     if (req.apiKey) {
       logger.api(
         `📱 [${requestId}] Request from ${req.apiKey.name} (${req.apiKey.id}) | ${duration}ms`
+      )
+    }
+
+    // 用户会话相关日志
+    if (req.user && req.session) {
+      logger.api(
+        `👤 [${requestId}] Request from user ${req.user.username} (${req.user.id}) | ${duration}ms`
       )
     }
 
@@ -881,7 +1193,9 @@ const errorHandler = (error, req, res, _next) => {
     ip: req.ip || 'unknown',
     userAgent: req.get('User-Agent') || 'unknown',
     apiKey: req.apiKey ? req.apiKey.id : 'none',
-    admin: req.admin ? req.admin.username : 'none'
+    admin: req.admin ? req.admin.username : 'none',
+    user: req.user ? req.user.username : 'none',
+    session: req.session ? req.session.sessionId : 'none'
   })
 
   // 确定HTTP状态码
@@ -1045,9 +1359,337 @@ const requestSizeLimit = (req, res, next) => {
   return next()
 }
 
+// 🔧 可配置的增强认证中间件
+const authenticateEnhanced = (options = {}) => {
+  const authConfig = {
+    // 认证模式配置
+    requireApiKey: options.requireApiKey || false,
+    requireUserSession: options.requireUserSession || false,
+    requireAdminSession: options.requireAdminSession || false,
+    allowFallback: options.allowFallback !== false, // 默认允许fallback
+
+    // 组合认证配置
+    requireBoth: options.requireBoth || false, // 同时需要API Key和Session
+    strictMode: options.strictMode || false, // 严格模式，不允许任何fallback
+
+    // 优先级配置
+    priority: options.priority || ['api_key', 'admin_session', 'user_session'],
+
+    // 错误处理配置
+    customErrorHandler: options.customErrorHandler || null,
+    includeDebugInfo: options.includeDebugInfo || false
+  }
+
+  return async (req, res, next) => {
+    const startTime = Date.now()
+
+    try {
+      const authInfo = detectAuthenticationType(req)
+
+      logger.debug(
+        `🔧 Enhanced authentication: config=${JSON.stringify(authConfig)}, detected=${authInfo.authType}`
+      )
+
+      // 严格模式：只允许指定的认证类型
+      if (authConfig.strictMode) {
+        if (authConfig.requireApiKey && !authInfo.hasApiKey) {
+          return handleAuthFailure('API Key required in strict mode', req, res, authConfig)
+        }
+        if (authConfig.requireUserSession && !authInfo.hasSessionToken) {
+          return handleAuthFailure('User session required in strict mode', req, res, authConfig)
+        }
+        if (authConfig.requireAdminSession && !authInfo.hasAdminToken) {
+          return handleAuthFailure('Admin session required in strict mode', req, res, authConfig)
+        }
+      }
+
+      // 组合认证模式：同时需要多种认证
+      if (authConfig.requireBoth) {
+        const missingAuth = []
+        if (authConfig.requireApiKey && !authInfo.hasApiKey) {
+          missingAuth.push('API Key')
+        }
+        if (authConfig.requireUserSession && !authInfo.hasSessionToken) {
+          missingAuth.push('User Session')
+        }
+        if (authConfig.requireAdminSession && !authInfo.hasAdminToken) {
+          missingAuth.push('Admin Session')
+        }
+
+        if (missingAuth.length > 0) {
+          return handleAuthFailure(
+            `Missing required authentication: ${missingAuth.join(', ')}`,
+            req,
+            res,
+            authConfig
+          )
+        }
+
+        // 执行多重认证验证
+        return executeMultipleAuth(req, res, next, authInfo, authConfig)
+      }
+
+      // 单一认证模式：按优先级选择
+      for (const authType of authConfig.priority) {
+        if (authType === 'api_key' && authInfo.hasApiKey) {
+          logger.debug('🔑 Enhanced auth: Using API Key (priority match)')
+          return authenticateApiKey(req, res, next)
+        }
+        if (authType === 'admin_session' && authInfo.hasAdminToken) {
+          logger.debug('👑 Enhanced auth: Using Admin Session (priority match)')
+          return authenticateAdmin(req, res, next)
+        }
+        if (authType === 'user_session' && authInfo.hasSessionToken) {
+          logger.debug('🎫 Enhanced auth: Using User Session (priority match)')
+          return authenticateUserSession(req, res, next)
+        }
+      }
+
+      // 没有找到合适的认证方式
+      return handleAuthFailure('No valid authentication found', req, res, authConfig)
+    } catch (error) {
+      const authDuration = Date.now() - startTime
+      logger.error(`❌ Enhanced authentication error (${authDuration}ms):`, {
+        error: error.message,
+        config: authConfig,
+        ip: req.ip,
+        url: req.originalUrl
+      })
+
+      if (authConfig.customErrorHandler) {
+        return authConfig.customErrorHandler(error, req, res, next)
+      }
+
+      return res.status(500).json({
+        error: 'Authentication error',
+        message: 'Internal server error during enhanced authentication'
+      })
+    }
+  }
+}
+
+// 🎯 获取当前请求的认证上下文
+const getAuthenticationContext = (req) => {
+  const context = {
+    authenticated: false,
+    authType: 'none',
+    user: null,
+    admin: null,
+    apiKey: null,
+    session: null,
+    permissions: [],
+    metadata: {}
+  }
+
+  // API Key 认证上下文
+  if (req.apiKey) {
+    context.authenticated = true
+    context.authType = 'api_key'
+    context.apiKey = {
+      id: req.apiKey.id,
+      name: req.apiKey.name,
+      permissions: req.apiKey.permissions || [],
+      limits: {
+        tokenLimit: req.apiKey.tokenLimit,
+        concurrencyLimit: req.apiKey.concurrencyLimit,
+        rateLimitWindow: req.apiKey.rateLimitWindow,
+        rateLimitRequests: req.apiKey.rateLimitRequests
+      }
+    }
+    context.permissions = req.apiKey.permissions || []
+  }
+
+  // 用户会话认证上下文
+  if (req.user && req.session) {
+    context.authenticated = true
+    context.authType = context.authType === 'api_key' ? 'dual' : 'user_session'
+    context.user = {
+      id: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      fullName: req.user.fullName,
+      role: req.user.role,
+      status: req.user.status,
+      groups: req.user.groups || []
+    }
+    context.session = {
+      sessionId: req.session.sessionId,
+      token: req.session.token
+    }
+    context.permissions = [...context.permissions, ...getUserPermissions(req.user)]
+  }
+
+  // 管理员会话认证上下文
+  if (req.admin) {
+    context.authenticated = true
+    context.authType = context.authType !== 'none' ? 'multi_admin' : 'admin_session'
+    context.admin = {
+      id: req.admin.id,
+      username: req.admin.username,
+      sessionId: req.admin.sessionId,
+      loginTime: req.admin.loginTime
+    }
+    context.permissions = [...context.permissions, 'admin:*'] // 管理员拥有所有权限
+  }
+
+  // 添加请求元数据
+  context.metadata = {
+    ip: req.ip || 'unknown',
+    userAgent: req.get('User-Agent') || 'unknown',
+    requestId: req.requestId || 'unknown',
+    timestamp: new Date().toISOString()
+  }
+
+  return context
+}
+
+// 🔧 辅助函数：处理认证失败
+const handleAuthFailure = (message, req, res, authConfig) => {
+  logger.security(`🔒 Enhanced auth failure: ${message} from ${req.ip || 'unknown'}`)
+
+  const response = {
+    error: 'Authentication failed',
+    message
+  }
+
+  if (authConfig.includeDebugInfo) {
+    response.debugInfo = {
+      detectedAuth: detectAuthenticationType(req),
+      config: authConfig,
+      timestamp: new Date().toISOString()
+    }
+  }
+
+  return res.status(401).json(response)
+}
+
+// 🔧 辅助函数：执行多重认证
+const executeMultipleAuth = async (req, res, next, authInfo, authConfig) => {
+  const authResults = []
+
+  // 依次执行各种认证
+  if (authConfig.requireApiKey && authInfo.hasApiKey) {
+    try {
+      await new Promise((resolve, reject) => {
+        authenticateApiKey(req, res, (error) => {
+          if (error) {
+            reject(error)
+          } else {
+            resolve()
+          }
+        })
+      })
+      authResults.push({ type: 'api_key', success: true })
+    } catch (error) {
+      authResults.push({ type: 'api_key', success: false, error: error.message })
+    }
+  }
+
+  if (authConfig.requireUserSession && authInfo.hasSessionToken) {
+    try {
+      await new Promise((resolve, reject) => {
+        authenticateUserSession(req, res, (error) => {
+          if (error) {
+            reject(error)
+          } else {
+            resolve()
+          }
+        })
+      })
+      authResults.push({ type: 'user_session', success: true })
+    } catch (error) {
+      authResults.push({ type: 'user_session', success: false, error: error.message })
+    }
+  }
+
+  if (authConfig.requireAdminSession && authInfo.hasAdminToken) {
+    try {
+      await new Promise((resolve, reject) => {
+        authenticateAdmin(req, res, (error) => {
+          if (error) {
+            reject(error)
+          } else {
+            resolve()
+          }
+        })
+      })
+      authResults.push({ type: 'admin_session', success: true })
+    } catch (error) {
+      authResults.push({ type: 'admin_session', success: false, error: error.message })
+    }
+  }
+
+  // 检查所有必需的认证是否都成功
+  const failedAuth = authResults.filter((r) => !r.success)
+  if (failedAuth.length > 0) {
+    return handleAuthFailure(
+      `Multiple authentication failed: ${failedAuth.map((f) => f.type).join(', ')}`,
+      req,
+      res,
+      authConfig
+    )
+  }
+
+  logger.debug(
+    `✅ Multiple authentication successful: ${authResults.map((r) => r.type).join(', ')}`
+  )
+
+  return next()
+}
+
+// 🔧 辅助函数：获取用户权限
+const getUserPermissions = (user) => {
+  const permissions = []
+
+  // 基于角色的权限
+  if (user.role) {
+    switch (user.role) {
+      case 'admin':
+        permissions.push('user:read', 'user:write', 'user:delete', 'system:read')
+        break
+      case 'moderator':
+        permissions.push('user:read', 'user:write', 'system:read')
+        break
+      case 'user':
+        permissions.push('user:read')
+        break
+    }
+  }
+
+  // 基于组的权限
+  if (user.groups && Array.isArray(user.groups)) {
+    for (const group of user.groups) {
+      switch (group) {
+        case 'api_access':
+          permissions.push('api:access')
+          break
+        case 'advanced_features':
+          permissions.push('features:advanced')
+          break
+      }
+    }
+  }
+
+  return [...new Set(permissions)] // 去重
+}
+
 module.exports = {
+  // 现有的认证函数
   authenticateApiKey,
   authenticateAdmin,
+  authenticateUserSession,
+  authenticateDual,
+
+  // 新增的智能认证函数
+  detectAuthenticationType,
+  authenticateEnhanced,
+  getAuthenticationContext,
+
+  // 兼容性函数
+  extractSessionToken,
+  detectAuthType,
+
+  // 其他中间件
   corsMiddleware,
   requestLogger,
   securityMiddleware,

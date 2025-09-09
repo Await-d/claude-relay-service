@@ -16,6 +16,7 @@ const {
 const tokenRefreshService = require('./tokenRefreshService')
 const LRUCache = require('../utils/lruCache')
 const CostCalculator = require('../utils/costCalculator')
+const groupService = require('./groupService')
 
 class ClaudeAccountService {
   constructor() {
@@ -41,6 +42,13 @@ class ClaudeAccountService {
       },
       10 * 60 * 1000
     )
+
+    // 🎯 Group scheduling configuration
+    this.SCHEDULING_STRATEGIES = ['random', 'round_robin', 'weighted', 'priority', 'least_recent']
+
+    // 🗂️ Group session caches for round_robin and state tracking
+    this._groupRoundRobinCache = new LRUCache(100) // Group round robin state
+    this._groupSelectionCache = new LRUCache(1000) // Recent selections for least_recent strategy
   }
 
   // 🏢 创建Claude账户
@@ -822,6 +830,102 @@ class ClaudeAccountService {
     } catch (error) {
       logger.error(`❌ Failed to get cost stats for account ${accountId}:`, error)
       throw error
+    }
+  }
+
+  // 🎯 Group-based account selection with multiple scheduling strategies
+  async selectAccountByGroup(userId, options = {}) {
+    const { sessionHash = null, modelName = null, strategy = null } = options
+
+    try {
+      if (!userId) {
+        logger.debug('❌ No userId provided, falling back to global account selection')
+        return await this.selectAvailableAccount(sessionHash, modelName)
+      }
+
+      // Get user's groups
+      const userGroups = await groupService.getUserGroups(userId)
+      if (!userGroups || userGroups.length === 0) {
+        logger.debug(`📭 User ${userId} has no groups assigned, falling back to global selection`)
+        return await this.selectAvailableAccount(sessionHash, modelName)
+      }
+
+      logger.info(`👥 Found ${userGroups.length} groups for user ${userId}`)
+
+      // Collect all group accounts and their scheduling configurations
+      const groupAccounts = []
+      const groupConfigs = []
+
+      for (const group of userGroups) {
+        try {
+          const accounts = await groupService.getGroupAccounts(group.id)
+          const config = await groupService.getSchedulingConfig(group.id)
+
+          if (accounts.claudeAccounts && accounts.claudeAccounts.length > 0) {
+            groupAccounts.push(...accounts.claudeAccounts)
+            groupConfigs.push({ groupId: group.id, config, accounts: accounts.claudeAccounts })
+            logger.info(
+              `🔗 Group ${group.name} has ${accounts.claudeAccounts.length} Claude accounts`
+            )
+          }
+        } catch (error) {
+          logger.warn(`⚠️ Failed to get accounts for group ${group.id}: ${error.message}`)
+        }
+      }
+
+      // Remove duplicate accounts
+      const uniqueGroupAccounts = [...new Set(groupAccounts)]
+
+      if (uniqueGroupAccounts.length === 0) {
+        logger.info(
+          '📭 No Claude accounts assigned to user groups, falling back to global selection'
+        )
+        return await this.selectAvailableAccount(sessionHash, modelName)
+      }
+
+      logger.info(`🎯 Found ${uniqueGroupAccounts.length} unique accounts across user groups`)
+
+      // Filter healthy and active accounts
+      const healthyAccounts = await this.filterHealthyAccounts(uniqueGroupAccounts, modelName)
+
+      if (healthyAccounts.length === 0) {
+        logger.warn('⚠️ No healthy group accounts available, falling back to global selection')
+        return await this.selectAvailableAccount(sessionHash, modelName)
+      }
+
+      logger.info(`✅ ${healthyAccounts.length} healthy group accounts available`)
+
+      // Apply scheduling strategy - determine which strategy to use
+      const effectiveStrategy = strategy || this.determineEffectiveStrategy(groupConfigs)
+      const selectedAccountId = await this.applySchedulingStrategy(
+        healthyAccounts,
+        effectiveStrategy,
+        { userId, groupConfigs, sessionHash }
+      )
+
+      if (!selectedAccountId) {
+        logger.warn(
+          '⚠️ No account selected by scheduling strategy, falling back to global selection'
+        )
+        return await this.selectAvailableAccount(sessionHash, modelName)
+      }
+
+      // Create sticky session if needed
+      if (sessionHash) {
+        await database.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1 hour
+        const selectedAccount = healthyAccounts.find((acc) => acc.id === selectedAccountId)
+        logger.info(
+          `🎯 Created group-based sticky session: ${selectedAccount?.name} (${selectedAccountId}) for session ${sessionHash}`
+        )
+      }
+
+      logger.success(
+        `🎯 Selected group account: ${selectedAccountId} using strategy: ${effectiveStrategy}`
+      )
+      return selectedAccountId
+    } catch (error) {
+      logger.error('❌ Failed to select account by group, falling back to global selection:', error)
+      return await this.selectAvailableAccount(sessionHash, modelName)
     }
   }
 
@@ -1875,6 +1979,451 @@ class ClaudeAccountService {
     } catch (error) {
       logger.error(`❌ Failed to mark account ${accountId} as unauthorized:`, error)
       throw error
+    }
+  }
+
+  // ==================== Group Scheduling Helper Methods ====================
+
+  // 🔍 Filter healthy accounts from a given list
+  async filterHealthyAccounts(accountIds, modelName = null) {
+    try {
+      const accounts = []
+
+      for (const accountId of accountIds) {
+        try {
+          const accountData = await database.getClaudeAccount(accountId)
+          if (!accountData) {
+            logger.debug(`⚠️ Account ${accountId} not found, skipping`)
+            continue
+          }
+
+          // Check if account is active and not in error state
+          if (accountData.isActive !== 'true' || accountData.status === 'error') {
+            logger.debug(
+              `⚠️ Account ${accountData.name} (${accountId}) is inactive or in error state`
+            )
+            continue
+          }
+
+          // Check if account is schedulable
+          if (accountData.schedulable === 'false') {
+            logger.debug(`⚠️ Account ${accountData.name} (${accountId}) is not schedulable`)
+            continue
+          }
+
+          // Check rate limit status
+          const isRateLimited = await this.isAccountRateLimited(accountId)
+          if (isRateLimited) {
+            logger.debug(`⚠️ Account ${accountData.name} (${accountId}) is rate limited`)
+            continue
+          }
+
+          // Check model compatibility (Opus filtering)
+          if (modelName && modelName.toLowerCase().includes('opus')) {
+            if (accountData.subscriptionInfo) {
+              try {
+                const info = JSON.parse(accountData.subscriptionInfo)
+                if (info.hasClaudePro === true && info.hasClaudeMax !== true) {
+                  logger.debug(
+                    `⚠️ Account ${accountData.name} (${accountId}) is Claude Pro, cannot use Opus`
+                  )
+                  continue
+                }
+                if (info.accountType === 'claude_pro' || info.accountType === 'claude_free') {
+                  logger.debug(
+                    `⚠️ Account ${accountData.name} (${accountId}) is ${info.accountType}, cannot use Opus`
+                  )
+                  continue
+                }
+              } catch (e) {
+                // Parsing failed, assume compatible (old data)
+              }
+            }
+          }
+
+          accounts.push(accountData)
+        } catch (error) {
+          logger.warn(`⚠️ Error checking account ${accountId}: ${error.message}`)
+        }
+      }
+
+      logger.info(
+        `🔍 Filtered ${accounts.length} healthy accounts from ${accountIds.length} candidates`
+      )
+      return accounts
+    } catch (error) {
+      logger.error('❌ Failed to filter healthy accounts:', error)
+      return []
+    }
+  }
+
+  // 🎯 Determine effective scheduling strategy from group configurations
+  determineEffectiveStrategy(groupConfigs) {
+    if (!groupConfigs || groupConfigs.length === 0) {
+      return 'least_recent' // Default strategy
+    }
+
+    // Priority order for strategy selection
+    const strategyPriority = {
+      priority: 1,
+      weighted: 2,
+      round_robin: 3,
+      least_recent: 4,
+      random: 5
+    }
+
+    // Find the highest priority strategy
+    let effectiveStrategy = 'least_recent'
+    let highestPriority = 5
+
+    for (const { config } of groupConfigs) {
+      const strategy = config?.strategy || 'round_robin'
+      const priority = strategyPriority[strategy] || 5
+
+      if (priority < highestPriority) {
+        effectiveStrategy = strategy
+        highestPriority = priority
+      }
+    }
+
+    logger.info(`🎯 Determined effective scheduling strategy: ${effectiveStrategy}`)
+    return effectiveStrategy
+  }
+
+  // 🎯 Apply scheduling strategy to select an account
+  async applySchedulingStrategy(healthyAccounts, strategy, context) {
+    const { userId, groupConfigs, sessionHash } = context
+
+    if (!healthyAccounts || healthyAccounts.length === 0) {
+      return null
+    }
+
+    if (healthyAccounts.length === 1) {
+      logger.info(`🎯 Only one healthy account available: ${healthyAccounts[0].name}`)
+      await this.recordAccountUsage(healthyAccounts[0].id)
+      return healthyAccounts[0].id
+    }
+
+    logger.info(`🎯 Applying ${strategy} scheduling strategy to ${healthyAccounts.length} accounts`)
+
+    try {
+      let selectedAccount = null
+
+      switch (strategy) {
+        case 'random':
+          selectedAccount = await this._applyRandomStrategy(healthyAccounts)
+          break
+        case 'round_robin':
+          selectedAccount = await this._applyRoundRobinStrategy(
+            healthyAccounts,
+            userId,
+            groupConfigs
+          )
+          break
+        case 'weighted':
+          selectedAccount = await this._applyWeightedStrategy(healthyAccounts, groupConfigs)
+          break
+        case 'priority':
+          selectedAccount = await this._applyPriorityStrategy(healthyAccounts)
+          break
+        case 'least_recent':
+          selectedAccount = await this._applyLeastRecentStrategy(healthyAccounts)
+          break
+        default:
+          logger.warn(`⚠️ Unknown strategy ${strategy}, using least_recent`)
+          selectedAccount = await this._applyLeastRecentStrategy(healthyAccounts)
+          break
+      }
+
+      if (selectedAccount) {
+        // Record account usage
+        await this.recordAccountUsage(selectedAccount.id)
+        logger.info(`🎯 Selected account: ${selectedAccount.name} (${selectedAccount.id})`)
+        return selectedAccount.id
+      }
+
+      return null
+    } catch (error) {
+      logger.error(`❌ Failed to apply ${strategy} strategy:`, error)
+      // Fallback to random selection
+      const fallbackAccount = await this._applyRandomStrategy(healthyAccounts)
+      if (fallbackAccount) {
+        await this.recordAccountUsage(fallbackAccount.id)
+        return fallbackAccount.id
+      }
+      return null
+    }
+  }
+
+  // 🎲 Random strategy implementation
+  async _applyRandomStrategy(accounts) {
+    const randomIndex = Math.floor(Math.random() * accounts.length)
+    const selected = accounts[randomIndex]
+    logger.info(`🎲 Random strategy selected: ${selected.name} (${selected.id})`)
+    return selected
+  }
+
+  // 🔄 Round robin strategy implementation
+  async _applyRoundRobinStrategy(accounts, userId, groupConfigs) {
+    try {
+      // Create a cache key based on user and groups
+      const groupIds = groupConfigs.map((config) => config.groupId).sort()
+      const cacheKey = `${userId}:${groupIds.join(',')}`
+
+      // Get current round robin state
+      let currentIndex = this._groupRoundRobinCache.get(cacheKey) || 0
+
+      // Ensure index is within bounds
+      if (currentIndex >= accounts.length) {
+        currentIndex = 0
+      }
+
+      const selected = accounts[currentIndex]
+
+      // Update round robin state
+      const nextIndex = (currentIndex + 1) % accounts.length
+      this._groupRoundRobinCache.set(cacheKey, nextIndex, 60 * 60 * 1000) // 1 hour TTL
+
+      logger.info(
+        `🔄 Round robin strategy selected: ${selected.name} (${selected.id}), next index: ${nextIndex}`
+      )
+      return selected
+    } catch (error) {
+      logger.error('❌ Round robin strategy failed:', error)
+      return await this._applyRandomStrategy(accounts)
+    }
+  }
+
+  // ⚖️ Weighted strategy implementation
+  async _applyWeightedStrategy(accounts, groupConfigs) {
+    try {
+      // Collect weights from all group configurations
+      const weights = {}
+      for (const { config } of groupConfigs) {
+        if (config.weights) {
+          Object.assign(weights, config.weights)
+        }
+      }
+
+      // If no weights defined, fall back to random
+      if (Object.keys(weights).length === 0) {
+        logger.info('⚖️ No weights defined, falling back to random selection')
+        return await this._applyRandomStrategy(accounts)
+      }
+
+      // Build weighted selection pool
+      const weightedAccounts = []
+      for (const account of accounts) {
+        const weight = weights[account.id] || 0.1 // Default low weight
+        const normalizedWeight = Math.max(0.1, Math.min(1.0, weight)) // Clamp between 0.1-1.0
+        const copies = Math.ceil(normalizedWeight * 10) // Convert to discrete copies
+
+        for (let i = 0; i < copies; i++) {
+          weightedAccounts.push(account)
+        }
+      }
+
+      // Random selection from weighted pool
+      const randomIndex = Math.floor(Math.random() * weightedAccounts.length)
+      const selected = weightedAccounts[randomIndex]
+
+      logger.info(
+        `⚖️ Weighted strategy selected: ${selected.name} (${selected.id}) with weight: ${weights[selected.id] || 0.1}`
+      )
+      return selected
+    } catch (error) {
+      logger.error('❌ Weighted strategy failed:', error)
+      return await this._applyRandomStrategy(accounts)
+    }
+  }
+
+  // 🏆 Priority strategy implementation
+  async _applyPriorityStrategy(accounts) {
+    try {
+      // Sort by priority (lower number = higher priority) and last used time
+      const sortedAccounts = accounts.sort((a, b) => {
+        const priorityA = parseInt(a.priority) || 50
+        const priorityB = parseInt(b.priority) || 50
+
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB // Lower number wins
+        }
+
+        // Same priority, use least recently used
+        const lastUsedA = new Date(a.lastUsedAt || 0).getTime()
+        const lastUsedB = new Date(b.lastUsedAt || 0).getTime()
+        return lastUsedA - lastUsedB
+      })
+
+      const selected = sortedAccounts[0]
+      logger.info(
+        `🏆 Priority strategy selected: ${selected.name} (${selected.id}) with priority: ${selected.priority || 50}`
+      )
+      return selected
+    } catch (error) {
+      logger.error('❌ Priority strategy failed:', error)
+      return await this._applyRandomStrategy(accounts)
+    }
+  }
+
+  // ⏰ Least recent strategy implementation
+  async _applyLeastRecentStrategy(accounts) {
+    try {
+      // Sort by last used time and last scheduled time
+      const sortedAccounts = accounts.sort((a, b) => {
+        const lastUsedA = new Date(a.lastUsedAt || 0).getTime()
+        const lastUsedB = new Date(b.lastUsedAt || 0).getTime()
+
+        if (lastUsedA !== lastUsedB) {
+          return lastUsedA - lastUsedB // Earlier time wins
+        }
+
+        // If same last used time, check last scheduled time
+        const lastScheduledA = new Date(a.lastScheduledAt || 0).getTime()
+        const lastScheduledB = new Date(b.lastScheduledAt || 0).getTime()
+        return lastScheduledA - lastScheduledB
+      })
+
+      const selected = sortedAccounts[0]
+      const lastUsed = selected.lastUsedAt ? new Date(selected.lastUsedAt).toISOString() : 'never'
+
+      logger.info(
+        `⏰ Least recent strategy selected: ${selected.name} (${selected.id}), last used: ${lastUsed}`
+      )
+      return selected
+    } catch (error) {
+      logger.error('❌ Least recent strategy failed:', error)
+      return await this._applyRandomStrategy(accounts)
+    }
+  }
+
+  // ==================== Integration and Convenience Methods ====================
+
+  // 🎯 Enhanced account selection with group support (main integration point)
+  async selectAccountForApiKeyWithGroups(apiKeyData, sessionHash = null, modelName = null) {
+    try {
+      // Check if the API key has an associated user ID for group-based selection
+      if (apiKeyData.userId) {
+        logger.info(`🎯 Attempting group-based selection for user ${apiKeyData.userId}`)
+
+        try {
+          const groupAccountId = await this.selectAccountByGroup(apiKeyData.userId, {
+            sessionHash,
+            modelName
+          })
+
+          if (groupAccountId) {
+            logger.success(`🎯 Selected group-based account: ${groupAccountId}`)
+            return groupAccountId
+          }
+        } catch (groupError) {
+          logger.warn(`⚠️ Group-based selection failed: ${groupError.message}`)
+        }
+      }
+
+      // Fallback to existing logic
+      logger.info('🎯 Using fallback account selection (existing logic)')
+      return await this.selectAccountForApiKey(apiKeyData, sessionHash, modelName)
+    } catch (error) {
+      logger.error('❌ Enhanced account selection failed:', error)
+      throw error
+    }
+  }
+
+  // 📊 Get group scheduling statistics
+  async getGroupSchedulingStats() {
+    try {
+      const stats = {
+        groupRoundRobinCache: {
+          size: this._groupRoundRobinCache.size,
+          hits: this._groupRoundRobinCache.hits || 0,
+          misses: this._groupRoundRobinCache.misses || 0,
+          hitRate:
+            this._groupRoundRobinCache.hits + this._groupRoundRobinCache.misses > 0
+              ? (
+                  (this._groupRoundRobinCache.hits || 0) /
+                  ((this._groupRoundRobinCache.hits || 0) +
+                    (this._groupRoundRobinCache.misses || 0))
+                ).toFixed(2)
+              : '0.00'
+        },
+        groupSelectionCache: {
+          size: this._groupSelectionCache.size,
+          hits: this._groupSelectionCache.hits || 0,
+          misses: this._groupSelectionCache.misses || 0,
+          hitRate:
+            this._groupSelectionCache.hits + this._groupSelectionCache.misses > 0
+              ? (
+                  (this._groupSelectionCache.hits || 0) /
+                  ((this._groupSelectionCache.hits || 0) + (this._groupSelectionCache.misses || 0))
+                ).toFixed(2)
+              : '0.00'
+        },
+        supportedStrategies: [...this.SCHEDULING_STRATEGIES],
+        timestamp: new Date().toISOString()
+      }
+
+      logger.debug('📊 Group scheduling statistics:', stats)
+      return stats
+    } catch (error) {
+      logger.error('❌ Failed to get group scheduling stats:', error)
+      return null
+    }
+  }
+
+  // 🧹 Clear group scheduling caches
+  clearGroupSchedulingCaches() {
+    try {
+      this._groupRoundRobinCache.clear()
+      this._groupSelectionCache.clear()
+      logger.info('🧹 Cleared group scheduling caches')
+      return { success: true }
+    } catch (error) {
+      logger.error('❌ Failed to clear group scheduling caches:', error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  // 🔧 Validate group scheduling configuration
+  validateGroupSchedulingConfig(config) {
+    try {
+      if (!config || typeof config !== 'object') {
+        throw new Error('Config must be an object')
+      }
+
+      if (config.strategy && !this.SCHEDULING_STRATEGIES.includes(config.strategy)) {
+        throw new Error(
+          `Invalid strategy: ${config.strategy}. Must be one of: ${this.SCHEDULING_STRATEGIES.join(', ')}`
+        )
+      }
+
+      if (config.weights && typeof config.weights !== 'object') {
+        throw new Error('Weights must be an object')
+      }
+
+      if (config.weights) {
+        for (const [accountId, weight] of Object.entries(config.weights)) {
+          if (typeof weight !== 'number' || weight < 0 || weight > 1) {
+            throw new Error(`Invalid weight for ${accountId}: must be number between 0 and 1`)
+          }
+        }
+      }
+
+      if (config.fallbackToGlobal !== undefined && typeof config.fallbackToGlobal !== 'boolean') {
+        throw new Error('fallbackToGlobal must be boolean')
+      }
+
+      if (
+        config.healthCheckEnabled !== undefined &&
+        typeof config.healthCheckEnabled !== 'boolean'
+      ) {
+        throw new Error('healthCheckEnabled must be boolean')
+      }
+
+      return { valid: true }
+    } catch (error) {
+      logger.error('❌ Invalid group scheduling config:', error)
+      return { valid: false, error: error.message }
     }
   }
 

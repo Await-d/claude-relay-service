@@ -56,6 +56,9 @@
           >
             <i class="fas fa-user-circle text-sm sm:text-base" />
             <span class="hidden sm:inline">{{ currentUser.username || 'Admin' }}</span>
+            <span v-if="currentUser.role" class="hidden lg:inline text-xs opacity-75">
+              ({{ currentUser.role === 'admin' ? '管理员' : '用户' }})
+            </span>
             <i
               class="fas fa-chevron-down ml-1 text-xs transition-transform duration-200"
               :class="{ 'rotate-180': userMenuOpen }"
@@ -69,6 +72,26 @@
             style="z-index: 999999"
             @click.stop
           >
+            <!-- 用户信息 -->
+            <div class="border-b border-gray-100 px-4 py-3 dark:border-gray-700">
+              <div class="flex items-center gap-3 mb-3">
+                <div
+                  class="flex h-10 w-10 items-center justify-center rounded-full"
+                  :class="currentUser.role === 'admin' ? 'bg-gradient-to-br from-purple-500 to-pink-500' : 'bg-gradient-to-br from-blue-500 to-indigo-500'"
+                >
+                  <i class="fas fa-user text-white text-sm" />
+                </div>
+                <div>
+                  <div class="font-semibold text-gray-900 dark:text-gray-100">
+                    {{ currentUser.username || 'Admin' }}
+                  </div>
+                  <div class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ currentUser.role === 'admin' ? '系统管理员' : '普通用户' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- 版本信息 -->
             <div class="border-b border-gray-100 px-4 py-3 dark:border-gray-700">
               <div class="flex items-center justify-between text-sm">
@@ -121,6 +144,36 @@
                     <i class="fas fa-sync-alt mr-1" />检查更新
                   </button>
                 </transition>
+              </div>
+            </div>
+
+            <!-- 快捷导航菜单（仅管理员可见） -->
+            <div v-if="currentUser.role === 'admin'" class="border-b border-gray-200 dark:border-gray-700">
+              <div class="px-4 py-2">
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">管理功能</p>
+                <div class="space-y-1">
+                  <button
+                    class="flex w-full items-center gap-3 px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 rounded-lg"
+                    @click="navigateToUsers"
+                  >
+                    <i class="fas fa-user-friends text-blue-500 text-xs w-4" />
+                    <span>用户管理</span>
+                  </button>
+                  <button
+                    class="flex w-full items-center gap-3 px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 rounded-lg"
+                    @click="navigateToUserGroups"
+                  >
+                    <i class="fas fa-users-cog text-purple-500 text-xs w-4" />
+                    <span>用户组管理</span>
+                  </button>
+                  <button
+                    class="flex w-full items-center gap-3 px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 rounded-lg"
+                    @click="navigateToSettings"
+                  >
+                    <i class="fas fa-cogs text-gray-500 text-xs w-4" />
+                    <span>系统设置</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -432,6 +485,24 @@ const logout = () => {
     router.push('/login')
     showToast('已安全退出', 'success')
   }
+  userMenuOpen.value = false
+}
+
+// 导航到用户管理
+const navigateToUsers = () => {
+  router.push('/users')
+  userMenuOpen.value = false
+}
+
+// 导航到用户组管理
+const navigateToUserGroups = () => {
+  router.push('/user-groups')
+  userMenuOpen.value = false
+}
+
+// 导航到系统设置
+const navigateToSettings = () => {
+  router.push('/settings')
   userMenuOpen.value = false
 }
 

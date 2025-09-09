@@ -1,5 +1,54 @@
 const pricingService = require('../services/pricingService')
 
+// Azure OpenAI 专用定价数据 (USD per 1K tokens)
+const AZURE_OPENAI_PRICING = {
+  // GPT-4o 系列
+  'gpt-4o': { input: 2.5, output: 10.0, cacheRead: 1.25 },
+  'gpt-4o-2024-11-20': { input: 2.5, output: 10.0, cacheRead: 1.25 },
+  'gpt-4o-2024-08-06': { input: 2.5, output: 10.0, cacheRead: 1.25 },
+  'gpt-4o-2024-05-13': { input: 2.5, output: 10.0, cacheRead: 1.25 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6, cacheRead: 0.075 },
+  'gpt-4o-mini-2024-07-18': { input: 0.15, output: 0.6, cacheRead: 0.075 },
+
+  // GPT-4 Turbo 系列
+  'gpt-4-turbo': { input: 10.0, output: 30.0, cacheRead: 5.0 },
+  'gpt-4-turbo-2024-04-09': { input: 10.0, output: 30.0, cacheRead: 5.0 },
+  'gpt-4-0125-preview': { input: 10.0, output: 30.0, cacheRead: 5.0 },
+  'gpt-4-1106-preview': { input: 10.0, output: 30.0, cacheRead: 5.0 },
+
+  // GPT-4 经典版本
+  'gpt-4': { input: 30.0, output: 60.0, cacheRead: 15.0 },
+  'gpt-4-0613': { input: 30.0, output: 60.0, cacheRead: 15.0 },
+  'gpt-4-32k': { input: 60.0, output: 120.0, cacheRead: 30.0 },
+  'gpt-4-32k-0613': { input: 60.0, output: 120.0, cacheRead: 30.0 },
+
+  // GPT-3.5 Turbo 系列
+  'gpt-35-turbo': { input: 0.5, output: 1.5, cacheRead: 0.25 },
+  'gpt-35-turbo-0125': { input: 0.5, output: 1.5, cacheRead: 0.25 },
+  'gpt-35-turbo-1106': { input: 1.0, output: 2.0, cacheRead: 0.5 },
+  'gpt-35-turbo-16k': { input: 3.0, output: 4.0, cacheRead: 1.5 },
+  'gpt-35-turbo-16k-0613': { input: 3.0, output: 4.0, cacheRead: 1.5 },
+
+  // O1 系列 (推理模型 - 更高定价)
+  'o1-preview': { input: 15.0, output: 60.0, cacheRead: 7.5 },
+  'o1-preview-2024-09-12': { input: 15.0, output: 60.0, cacheRead: 7.5 },
+  'o1-mini': { input: 3.0, output: 12.0, cacheRead: 1.5 },
+  'o1-mini-2024-09-12': { input: 3.0, output: 12.0, cacheRead: 1.5 },
+
+  // O3 系列 (最新推理模型)
+  'o3-mini': { input: 3.5, output: 14.0, cacheRead: 1.75 },
+  'o3-mini-2025-01-31': { input: 3.5, output: 14.0, cacheRead: 1.75 },
+
+  // 嵌入模型
+  'text-embedding-ada-002': { input: 0.1, output: 0, cacheRead: 0 },
+  'text-embedding-3-small': { input: 0.02, output: 0, cacheRead: 0 },
+  'text-embedding-3-large': { input: 0.13, output: 0, cacheRead: 0 },
+
+  // DALL-E 模型 (按图像计费)
+  'dall-e-2': { input: 0, output: 0, cacheRead: 0, imagePrice: 20.0 }, // $0.02/image = $20/1K images
+  'dall-e-3': { input: 0, output: 0, cacheRead: 0, imagePrice: 40.0 } // $0.04/image = $40/1K images
+}
+
 // Claude模型价格配置 (USD per 1M tokens) - 备用定价
 const MODEL_PRICING = {
   // Claude 3.5 Sonnet
@@ -76,7 +125,18 @@ class CostCalculator {
    * @param {string} model - 模型名称
    * @returns {Object} 费用详情
    */
-  static calculateCost(usage, model = 'unknown') {
+  /**
+   * 计算单次请求的费用
+   * @param {Object} usage - 使用量数据
+   * @param {number} usage.input_tokens - 输入token数量
+   * @param {number} usage.output_tokens - 输出token数量
+   * @param {number} usage.cache_creation_input_tokens - 缓存创建token数量
+   * @param {number} usage.cache_read_input_tokens - 缓存读取token数量
+   * @param {string} model - 模型名称
+   * @param {string} platform - 平台类型 (optional: 'azure_openai', 'openai', 'claude')
+   * @returns {Object} 费用详情
+   */
+  static calculateCost(usage, model = 'unknown', platform = null) {
     // 输入参数验证
     if (!usage || typeof usage !== 'object') {
       usage = {}
@@ -93,6 +153,63 @@ class CostCalculator {
     const outputTokens = Math.max(0, usage.output_tokens || 0)
     const cacheCreateTokens = Math.max(0, usage.cache_creation_input_tokens || 0)
     const cacheReadTokens = Math.max(0, usage.cache_read_input_tokens || 0)
+
+    // 处理Azure OpenAI平台的特殊定价
+    if (platform === 'azure_openai' || platform === 'azure-openai') {
+      const azurePricing = AZURE_OPENAI_PRICING[model]
+      if (azurePricing) {
+        const pricing = {
+          input: azurePricing.input,
+          output: azurePricing.output,
+          cacheWrite: azurePricing.input * 1.25, // Azure OpenAI 缓存写入通常是输入价格的1.25倍
+          cacheRead: azurePricing.cacheRead || azurePricing.input * 0.1
+        }
+
+        // 计算各类型token的费用 (USD)
+        const inputCost = (inputTokens / 1000) * pricing.input
+        const outputCost = (outputTokens / 1000) * pricing.output
+        const cacheWriteCost = (cacheCreateTokens / 1000) * pricing.cacheWrite
+        const cacheReadCost = (cacheReadTokens / 1000) * pricing.cacheRead
+
+        const totalCost = inputCost + outputCost + cacheWriteCost + cacheReadCost
+
+        return {
+          model,
+          platform: 'azure_openai',
+          pricing,
+          usingDynamicPricing: false,
+          usage: {
+            inputTokens,
+            outputTokens,
+            cacheCreateTokens,
+            cacheReadTokens,
+            totalTokens: inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+          },
+          costs: {
+            input: inputCost,
+            output: outputCost,
+            cacheWrite: cacheWriteCost,
+            cacheRead: cacheReadCost,
+            total: totalCost
+          },
+          // 格式化的费用字符串
+          formatted: {
+            input: this.formatCost(inputCost),
+            output: this.formatCost(outputCost),
+            cacheWrite: this.formatCost(cacheWriteCost),
+            cacheRead: this.formatCost(cacheReadCost),
+            total: this.formatCost(totalCost)
+          },
+          // 添加调试信息
+          debug: {
+            isAzureOpenAI: true,
+            hasCacheCreatePrice: true,
+            cacheCreateTokens,
+            cacheWritePriceUsed: pricing.cacheWrite
+          }
+        }
+      }
+    }
 
     // 优先使用动态价格服务
     const pricingData = pricingService.getModelPricing(model)
@@ -237,13 +354,65 @@ class CostCalculator {
   }
 
   /**
+   * 专门为Azure OpenAI计算费用
+   * @param {Object} usage - 使用量数据
+   * @param {string} model - 模型名称
+   * @returns {Object} 费用详情
+   */
+  static calculateAzureOpenAICost(usage, model = 'unknown') {
+    return this.calculateCost(usage, model, 'azure_openai')
+  }
+
+  /**
+   * 获取Azure OpenAI模型定价
+   * @param {string} model - 模型名称
+   * @returns {Object|null} 定价信息
+   */
+  static getAzureOpenAIModelPricing(model) {
+    return AZURE_OPENAI_PRICING[model] || null
+  }
+
+  /**
+   * 获取Azure OpenAI所有支持的模型和定价
+   * @returns {Object} 所有Azure OpenAI模型定价
+   */
+  static getAllAzureOpenAIModelPricing() {
+    return { ...AZURE_OPENAI_PRICING }
+  }
+
+  /**
+   * 验证Azure OpenAI模型是否支持
+   * @param {string} model - 模型名称
+   * @returns {boolean} 是否支持
+   */
+  static isAzureOpenAIModelSupported(model) {
+    return !!AZURE_OPENAI_PRICING[model]
+  }
+
+  /**
    * 计算费用节省（使用缓存的节省）
    * @param {Object} usage - 使用量数据
    * @param {string} model - 模型名称
+   * @param {string} platform - 平台类型
    * @returns {Object} 节省信息
    */
-  static calculateCacheSavings(usage, model = 'unknown') {
-    const pricing = this.getModelPricing(model)
+  static calculateCacheSavings(usage, model = 'unknown', platform = null) {
+    let pricing
+
+    // 根据平台获取不同的定价
+    if (platform === 'azure_openai' || platform === 'azure-openai') {
+      const azurePricing = AZURE_OPENAI_PRICING[model]
+      if (azurePricing) {
+        pricing = {
+          input: azurePricing.input,
+          cacheRead: azurePricing.cacheRead || azurePricing.input * 0.1
+        }
+      } else {
+        pricing = this.getModelPricing(model)
+      }
+    } else {
+      pricing = this.getModelPricing(model)
+    }
     const cacheReadTokens = usage.cache_read_input_tokens || 0
 
     // 如果这些token不使用缓存，需要按正常input价格计费

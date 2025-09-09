@@ -5568,6 +5568,623 @@ class RedisAdapter extends DatabaseAdapter {
       }
     }
   }
+
+  // ==================== 用户管理 (8个方法) ====================
+
+  /**
+   * 创建用户
+   * @param {Object} userData - 用户数据
+   * @param {string} userData.username - 用户名
+   * @param {string} userData.email - 邮箱
+   * @param {string} userData.passwordHash - 密码哈希
+   * @param {string} [userData.role='user'] - 用户角色
+   * @param {Array} [userData.permissions=[]] - 用户权限
+   * @param {Array} [userData.groups=[]] - 用户分组
+   * @returns {Promise<string>} 用户ID
+   */
+  async createUser(userData) {
+    try {
+      const client = this.getClientSafe()
+      const userId = require('crypto').randomUUID()
+      const now = new Date().toISOString()
+
+      // 验证必需字段
+      if (!userData.username || !userData.passwordHash) {
+        throw new Error('Username and passwordHash are required')
+      }
+
+      // 检查用户名唯一性
+      const existingUser = await client.get(`user_username:${userData.username}`)
+      if (existingUser) {
+        throw new Error('Username already exists')
+      }
+
+      // 检查邮箱唯一性（如果提供）
+      if (userData.email) {
+        const existingEmail = await client.get(`user_email:${userData.email}`)
+        if (existingEmail) {
+          throw new Error('Email already exists')
+        }
+      }
+
+      const user = {
+        id: userId,
+        username: userData.username,
+        email: userData.email || '',
+        passwordHash: userData.passwordHash,
+        role: userData.role || 'user',
+        permissions: JSON.stringify(userData.permissions || []),
+        groups: JSON.stringify(userData.groups || []),
+        isActive: 'true',
+        lastLogin: '',
+        createdAt: now,
+        updatedAt: now,
+        ldapDN: userData.ldapDN || '',
+        preferences: JSON.stringify(userData.preferences || {})
+      }
+
+      // 使用事务保证数据一致性
+      const pipeline = client.pipeline()
+      pipeline.hset(`user:${userId}`, user)
+      pipeline.set(`user_username:${userData.username}`, userId)
+      if (userData.email) {
+        pipeline.set(`user_email:${userData.email}`, userId)
+      }
+      await pipeline.exec()
+
+      logger.info(`👤 Created user: ${userData.username} (${userId})`)
+      return userId
+    } catch (error) {
+      logger.error('❌ Failed to create user:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 根据用户名获取用户
+   * @param {string} username - 用户名
+   * @returns {Promise<Object|null>} 用户数据
+   */
+  async getUserByUsername(username) {
+    try {
+      if (!username) {
+        return null
+      }
+
+      const client = this.getClientSafe()
+      const userId = await client.get(`user_username:${username}`)
+
+      if (!userId) {
+        return null
+      }
+
+      return await this.getUserById(userId)
+    } catch (error) {
+      logger.error(`❌ Failed to get user by username ${username}:`, error)
+      return null
+    }
+  }
+
+  /**
+   * 根据用户ID获取用户
+   * @param {string} userId - 用户ID
+   * @returns {Promise<Object|null>} 用户数据
+   */
+  async getUserById(userId) {
+    try {
+      if (!userId) {
+        return null
+      }
+
+      const client = this.getClientSafe()
+      const userData = await client.hgetall(`user:${userId}`)
+
+      if (!userData || Object.keys(userData).length === 0) {
+        return null
+      }
+
+      // 解析JSON字段
+      return {
+        ...userData,
+        permissions: JSON.parse(userData.permissions || '[]'),
+        groups: JSON.parse(userData.groups || '[]'),
+        preferences: JSON.parse(userData.preferences || '{}'),
+        isActive: userData.isActive === 'true'
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to get user by ID ${userId}:`, error)
+      return null
+    }
+  }
+
+  /**
+   * 更新用户信息
+   * @param {string} userId - 用户ID
+   * @param {Object} updateData - 更新数据
+   * @returns {Promise<boolean>} 更新是否成功
+   */
+  async updateUser(userId, updateData) {
+    try {
+      const client = this.getClientSafe()
+      const existingUser = await this.getUserById(userId)
+
+      if (!existingUser) {
+        throw new Error('User not found')
+      }
+
+      const now = new Date().toISOString()
+      const pipeline = client.pipeline()
+
+      // 准备更新数据
+      const updates = {
+        updatedAt: now
+      }
+
+      // 处理各字段的更新
+      const allowedFields = [
+        'email',
+        'passwordHash',
+        'role',
+        'permissions',
+        'groups',
+        'isActive',
+        'ldapDN',
+        'preferences'
+      ]
+
+      for (const [field, value] of Object.entries(updateData)) {
+        if (allowedFields.includes(field)) {
+          if (field === 'permissions' || field === 'groups' || field === 'preferences') {
+            updates[field] = JSON.stringify(value)
+          } else if (field === 'isActive') {
+            updates[field] = value ? 'true' : 'false'
+          } else {
+            updates[field] = value
+          }
+        }
+      }
+
+      // 检查邮箱唯一性（如果更新邮箱）
+      if (updateData.email && updateData.email !== existingUser.email) {
+        const existingEmail = await client.get(`user_email:${updateData.email}`)
+        if (existingEmail && existingEmail !== userId) {
+          throw new Error('Email already exists')
+        }
+
+        // 更新邮箱映射
+        if (existingUser.email) {
+          pipeline.del(`user_email:${existingUser.email}`)
+        }
+        pipeline.set(`user_email:${updateData.email}`, userId)
+      }
+
+      pipeline.hset(`user:${userId}`, updates)
+      await pipeline.exec()
+
+      logger.info(`👤 Updated user: ${existingUser.username} (${userId})`)
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to update user ${userId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 删除用户（软删除）
+   * @param {string} userId - 用户ID
+   * @returns {Promise<boolean>} 删除是否成功
+   */
+  async deleteUser(userId) {
+    try {
+      const client = this.getClientSafe()
+      const existingUser = await this.getUserById(userId)
+
+      if (!existingUser) {
+        return false
+      }
+
+      const now = new Date().toISOString()
+      const pipeline = client.pipeline()
+
+      // 软删除：标记为非活跃并添加删除标记
+      pipeline.hset(`user:${userId}`, {
+        isActive: 'false',
+        deletedAt: now,
+        updatedAt: now
+      })
+
+      // 清理映射（防止用户名/邮箱被重用）
+      pipeline.del(`user_username:${existingUser.username}`)
+      if (existingUser.email) {
+        pipeline.del(`user_email:${existingUser.email}`)
+      }
+
+      // 清理用户会话
+      const sessionKeys = await client.keys(`session:*`)
+      for (const sessionKey of sessionKeys) {
+        const sessionData = await client.hgetall(sessionKey)
+        if (sessionData.userId === userId) {
+          pipeline.del(sessionKey)
+        }
+      }
+
+      await pipeline.exec()
+
+      logger.info(`👤 Deleted user: ${existingUser.username} (${userId})`)
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to delete user ${userId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 创建用户会话
+   * @param {string} userId - 用户ID
+   * @param {Object} sessionData - 会话数据
+   * @param {number} [expiresIn=86400] - 过期时间（秒）
+   * @returns {Promise<string>} 会话令牌
+   */
+  async createSession(userId, sessionData, expiresIn = 86400) {
+    try {
+      const client = this.getClientSafe()
+      const sessionToken = require('crypto').randomBytes(32).toString('hex')
+      const now = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString()
+
+      const session = {
+        token: sessionToken,
+        userId,
+        createdAt: now,
+        lastActivity: now,
+        expiresAt,
+        ipAddress: sessionData.ipAddress || '',
+        userAgent: sessionData.userAgent || '',
+        isActive: 'true'
+      }
+
+      await client.hset(`session:${sessionToken}`, session)
+      await client.expire(`session:${sessionToken}`, expiresIn)
+
+      // 更新用户最后登录时间
+      await client.hset(`user:${userId}`, { lastLogin: now })
+
+      logger.info(`🔑 Created session for user ${userId}: ${sessionToken.substring(0, 8)}...`)
+      return sessionToken
+    } catch (error) {
+      logger.error(`❌ Failed to create session for user ${userId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 验证用户会话
+   * @param {string} sessionToken - 会话令牌
+   * @returns {Promise<Object|null>} 会话数据
+   */
+  async validateSession(sessionToken) {
+    try {
+      if (!sessionToken) {
+        return null
+      }
+
+      const client = this.getClientSafe()
+      const sessionData = await client.hgetall(`session:${sessionToken}`)
+
+      if (!sessionData || Object.keys(sessionData).length === 0) {
+        return null
+      }
+
+      // 检查会话是否过期
+      const now = new Date()
+      const expiresAt = new Date(sessionData.expiresAt)
+
+      if (now > expiresAt || sessionData.isActive !== 'true') {
+        await this.destroySession(sessionToken)
+        return null
+      }
+
+      // 获取用户信息
+      const user = await this.getUserById(sessionData.userId)
+      if (!user || !user.isActive) {
+        await this.destroySession(sessionToken)
+        return null
+      }
+
+      // 更新最后活动时间
+      await client.hset(`session:${sessionToken}`, { lastActivity: now.toISOString() })
+
+      return {
+        ...sessionData,
+        user
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to validate session ${sessionToken}:`, error)
+      return null
+    }
+  }
+
+  /**
+   * 销毁用户会话
+   * @param {string} sessionToken - 会话令牌
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async destroySession(sessionToken) {
+    try {
+      if (!sessionToken) {
+        return false
+      }
+
+      const client = this.getClientSafe()
+      const result = await client.del(`session:${sessionToken}`)
+
+      if (result > 0) {
+        logger.info(`🔑 Destroyed session: ${sessionToken.substring(0, 8)}...`)
+      }
+
+      return result > 0
+    } catch (error) {
+      logger.error(`❌ Failed to destroy session ${sessionToken}:`, error)
+      return false
+    }
+  }
+
+  // ==================== 分组管理 (6个方法) ====================
+
+  /**
+   * 创建分组
+   * @param {Object} groupData - 分组数据
+   * @returns {Promise<string>} 分组ID
+   */
+  async createGroup(groupData) {
+    try {
+      const client = this.getClientSafe()
+      const groupId = require('crypto').randomUUID()
+      const now = new Date().toISOString()
+
+      // 验证必需字段
+      if (!groupData.name) {
+        throw new Error('Group name is required')
+      }
+
+      // 检查分组名唯一性
+      const existingGroup = await client.get(`group_name:${groupData.name}`)
+      if (existingGroup) {
+        throw new Error('Group name already exists')
+      }
+
+      const group = {
+        id: groupId,
+        name: groupData.name,
+        description: groupData.description || '',
+        permissions: JSON.stringify(groupData.permissions || []),
+        assignedAccounts: JSON.stringify(
+          groupData.assignedAccounts || {
+            claudeAccounts: [],
+            geminiAccounts: [],
+            openaiAccounts: []
+          }
+        ),
+        scheduling: JSON.stringify(
+          groupData.scheduling || {
+            strategy: 'random',
+            weights: {}
+          }
+        ),
+        isActive: 'true',
+        createdAt: now,
+        updatedAt: now
+      }
+
+      // 使用事务保证数据一致性
+      const pipeline = client.pipeline()
+      pipeline.hset(`group:${groupId}`, group)
+      pipeline.set(`group_name:${groupData.name}`, groupId)
+      await pipeline.exec()
+
+      logger.info(`👥 Created group: ${groupData.name} (${groupId})`)
+      return groupId
+    } catch (error) {
+      logger.error('❌ Failed to create group:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 将用户分配到分组
+   * @param {string} userId - 用户ID
+   * @param {string} groupId - 分组ID
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async assignUserToGroup(userId, groupId) {
+    try {
+      const client = this.getClientSafe()
+
+      // 验证用户和分组存在
+      const user = await this.getUserById(userId)
+      const group = await client.hgetall(`group:${groupId}`)
+
+      if (!user) {
+        throw new Error('User not found')
+      }
+
+      if (!group || Object.keys(group).length === 0) {
+        throw new Error('Group not found')
+      }
+
+      // 检查用户是否已在分组中
+      if (user.groups.includes(groupId)) {
+        return true // 已经在分组中
+      }
+
+      // 更新用户的分组列表
+      const updatedGroups = [...user.groups, groupId]
+      await this.updateUser(userId, { groups: updatedGroups })
+
+      logger.info(`👥 Assigned user ${user.username} to group ${group.name}`)
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to assign user ${userId} to group ${groupId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 获取用户的分组
+   * @param {string} userId - 用户ID
+   * @returns {Promise<Array>} 用户分组列表
+   */
+  async getUserGroups(userId) {
+    try {
+      const user = await this.getUserById(userId)
+
+      if (!user || !user.groups.length) {
+        return []
+      }
+
+      const client = this.getClientSafe()
+      const groupDetails = []
+
+      for (const groupId of user.groups) {
+        const groupData = await client.hgetall(`group:${groupId}`)
+        if (groupData && Object.keys(groupData).length > 0) {
+          groupDetails.push({
+            ...groupData,
+            permissions: JSON.parse(groupData.permissions || '[]'),
+            assignedAccounts: JSON.parse(groupData.assignedAccounts || '{}'),
+            scheduling: JSON.parse(groupData.scheduling || '{}'),
+            isActive: groupData.isActive === 'true'
+          })
+        }
+      }
+
+      return groupDetails
+    } catch (error) {
+      logger.error(`❌ Failed to get user groups for ${userId}:`, error)
+      return []
+    }
+  }
+
+  /**
+   * 获取分组的分配账户
+   * @param {string} groupId - 分组ID
+   * @returns {Promise<Object>} 分配的账户
+   */
+  async getGroupAccounts(groupId) {
+    try {
+      const client = this.getClientSafe()
+      const groupData = await client.hgetall(`group:${groupId}`)
+
+      if (!groupData || Object.keys(groupData).length === 0) {
+        return {}
+      }
+
+      return JSON.parse(groupData.assignedAccounts || '{}')
+    } catch (error) {
+      logger.error(`❌ Failed to get group accounts for ${groupId}:`, error)
+      return {}
+    }
+  }
+
+  /**
+   * 更新分组信息
+   * @param {string} groupId - 分组ID
+   * @param {Object} updateData - 更新数据
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async updateGroup(groupId, updateData) {
+    try {
+      const client = this.getClientSafe()
+      const existingGroup = await client.hgetall(`group:${groupId}`)
+
+      if (!existingGroup || Object.keys(existingGroup).length === 0) {
+        throw new Error('Group not found')
+      }
+
+      const now = new Date().toISOString()
+      const pipeline = client.pipeline()
+
+      // 准备更新数据
+      const updates = {
+        updatedAt: now
+      }
+
+      const allowedFields = [
+        'description',
+        'permissions',
+        'assignedAccounts',
+        'scheduling',
+        'isActive'
+      ]
+
+      for (const [field, value] of Object.entries(updateData)) {
+        if (allowedFields.includes(field)) {
+          if (field === 'permissions' || field === 'assignedAccounts' || field === 'scheduling') {
+            updates[field] = JSON.stringify(value)
+          } else if (field === 'isActive') {
+            updates[field] = value ? 'true' : 'false'
+          } else {
+            updates[field] = value
+          }
+        }
+      }
+
+      pipeline.hset(`group:${groupId}`, updates)
+      await pipeline.exec()
+
+      logger.info(`👥 Updated group: ${existingGroup.name} (${groupId})`)
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to update group ${groupId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 删除分组
+   * @param {string} groupId - 分组ID
+   * @returns {Promise<boolean>} 是否成功
+   */
+  async deleteGroup(groupId) {
+    try {
+      const client = this.getClientSafe()
+      const existingGroup = await client.hgetall(`group:${groupId}`)
+
+      if (!existingGroup || Object.keys(existingGroup).length === 0) {
+        return false
+      }
+
+      const pipeline = client.pipeline()
+
+      // 从所有用户中移除此分组
+      const userKeys = await client.keys('user:*')
+      for (const userKey of userKeys) {
+        const userData = await client.hgetall(userKey)
+        if (userData.groups) {
+          const groups = JSON.parse(userData.groups)
+          const updatedGroups = groups.filter((id) => id !== groupId)
+          if (groups.length !== updatedGroups.length) {
+            pipeline.hset(userKey, {
+              groups: JSON.stringify(updatedGroups),
+              updatedAt: new Date().toISOString()
+            })
+          }
+        }
+      }
+
+      // 删除分组数据
+      pipeline.del(`group:${groupId}`)
+      pipeline.del(`group_name:${existingGroup.name}`)
+
+      await pipeline.exec()
+
+      logger.info(`👥 Deleted group: ${existingGroup.name} (${groupId})`)
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to delete group ${groupId}:`, error)
+      throw error
+    }
+  }
 }
 
 // 导出时区辅助函数

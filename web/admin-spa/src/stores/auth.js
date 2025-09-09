@@ -7,9 +7,13 @@ export const useAuthStore = defineStore('auth', () => {
   // 状态
   const isLoggedIn = ref(false)
   const authToken = ref(localStorage.getItem('authToken') || '')
-  const username = ref('')
+  const sessionToken = ref(localStorage.getItem('sessionToken') || '')
+  const sessionId = ref('')
+  const expiresAt = ref(null)
+  const user = ref(null)
   const loginError = ref('')
   const loginLoading = ref(false)
+  const refreshing = ref(false)
   const oemSettings = ref({
     siteName: 'Claude Relay Service',
     siteIcon: '',
@@ -17,11 +21,14 @@ export const useAuthStore = defineStore('auth', () => {
     faviconData: ''
   })
   const oemLoading = ref(true)
+  
+  // 向后兼容
+  const username = computed(() => user.value?.username || '')
 
   // 计算属性
-  const isAuthenticated = computed(() => !!authToken.value && isLoggedIn.value)
-  const token = computed(() => authToken.value)
-  const user = computed(() => ({ username: username.value }))
+  const isAuthenticated = computed(() => !!sessionToken.value && !!user.value)
+  const token = computed(() => sessionToken.value) // 主要使用sessionToken
+  const legacyToken = computed(() => authToken.value) // 向后兼容旧的authToken
 
   // 方法
   async function login(credentials) {
@@ -29,13 +36,29 @@ export const useAuthStore = defineStore('auth', () => {
     loginError.value = ''
 
     try {
-      const result = await apiClient.post('/web/auth/login', credentials)
+      // 使用新的认证API端点
+      const result = await apiClient.post('/auth/login', credentials)
 
-      if (result.success) {
-        authToken.value = result.token
-        username.value = result.username || credentials.username
+      if (result.success && result.data) {
+        const { sessionToken: token, sessionId: id, expiresAt: expiry, user: userData } = result.data
+        
+        // 更新状态
+        sessionToken.value = token
+        sessionId.value = id
+        expiresAt.value = expiry
+        user.value = userData
         isLoggedIn.value = true
-        localStorage.setItem('authToken', result.token)
+        
+        // 保存到localStorage
+        localStorage.setItem('sessionToken', token)
+        localStorage.setItem('sessionId', id)
+        if (expiry) {
+          localStorage.setItem('expiresAt', expiry)
+        }
+        
+        // 向后兼容：同时保存到authToken
+        authToken.value = token
+        localStorage.setItem('authToken', token)
 
         await router.push('/dashboard')
       } else {
@@ -48,39 +71,148 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      // 调用后端登出API
+      if (sessionToken.value) {
+        await apiClient.post('/auth/logout')
+      }
+    } catch (error) {
+      console.warn('Logout API call failed:', error.message)
+    }
+    
+    // 清理本地状态
+    clearAuthState()
+    
+    // 跳转到登录页
+    router.push('/login')
+  }
+  
+  function clearAuthState() {
     isLoggedIn.value = false
     authToken.value = ''
-    username.value = ''
+    sessionToken.value = ''
+    sessionId.value = ''
+    expiresAt.value = null
+    user.value = null
+    
+    // 清理localStorage
     localStorage.removeItem('authToken')
-    router.push('/login')
+    localStorage.removeItem('sessionToken')
+    localStorage.removeItem('sessionId')
+    localStorage.removeItem('expiresAt')
   }
 
   function checkAuth() {
-    if (authToken.value) {
+    // 从localStorage恢复会话状态
+    const storedSessionToken = localStorage.getItem('sessionToken')
+    const storedSessionId = localStorage.getItem('sessionId')
+    const storedExpiresAt = localStorage.getItem('expiresAt')
+    
+    if (storedSessionToken) {
+      sessionToken.value = storedSessionToken
+      sessionId.value = storedSessionId || ''
+      expiresAt.value = storedExpiresAt
+      
+      // 向后兼容
+      authToken.value = storedSessionToken
+      
+      // 检查会话是否过期
+      if (storedExpiresAt && new Date(storedExpiresAt) <= new Date()) {
+        clearAuthState()
+        return
+      }
+      
       isLoggedIn.value = true
       // 验证token有效性
-      verifyToken()
+      verifySession()
+    } else if (authToken.value) {
+      // 向后兼容旧的authToken
+      sessionToken.value = authToken.value
+      isLoggedIn.value = true
+      verifySession()
     }
   }
 
-  async function verifyToken() {
+  async function verifySession() {
     try {
-      // 获取当前用户信息
-      const userResult = await apiClient.get('/web/auth/user')
-      if (userResult.success && userResult.user) {
-        username.value = userResult.user.username
-      }
-
-      // 使用 dashboard 端点来验证 token
-      // 如果 token 无效，会抛出错误
-      const result = await apiClient.get('/admin/dashboard')
-      if (!result.success) {
-        logout()
+      // 使用新的会话验证端点
+      const result = await apiClient.get('/auth/validate')
+      
+      if (result.success && result.data) {
+        user.value = result.data.user
+        // 会话有效，更新状态
+        isLoggedIn.value = true
+      } else {
+        throw new Error('Session validation failed')
       }
     } catch (error) {
-      // token 无效，需要重新登录
-      logout()
+      console.warn('Session validation failed:', error.message)
+      clearAuthState()
+      router.push('/login')
+    }
+  }
+
+  // 刷新会话
+  async function refreshSession() {
+    if (refreshing.value || !sessionToken.value) {
+      return false
+    }
+    
+    refreshing.value = true
+    
+    try {
+      const result = await apiClient.post('/auth/refresh')
+      
+      if (result.success && result.data) {
+        const { sessionToken: newToken, sessionId: newId, expiresAt: newExpiry, user: userData } = result.data
+        
+        // 更新状态
+        sessionToken.value = newToken
+        sessionId.value = newId
+        expiresAt.value = newExpiry
+        user.value = userData
+        
+        // 更新localStorage
+        localStorage.setItem('sessionToken', newToken)
+        localStorage.setItem('sessionId', newId)
+        if (newExpiry) {
+          localStorage.setItem('expiresAt', newExpiry)
+        }
+        
+        // 向后兼容
+        authToken.value = newToken
+        localStorage.setItem('authToken', newToken)
+        
+        return true
+      } else {
+        throw new Error(result.message || 'Session refresh failed')
+      }
+    } catch (error) {
+      console.error('Session refresh failed:', error.message)
+      clearAuthState()
+      router.push('/login')
+      return false
+    } finally {
+      refreshing.value = false
+    }
+  }
+  
+  // 修改密码
+  async function changePassword(oldPassword, newPassword) {
+    try {
+      const result = await apiClient.post('/auth/change-password', {
+        oldPassword,
+        newPassword
+      })
+      
+      if (result.success) {
+        return { success: true, message: result.message }
+      } else {
+        throw new Error(result.message || 'Password change failed')
+      }
+    } catch (error) {
+      throw new Error(error.message || 'Password change failed')
     }
   }
 
@@ -111,26 +243,35 @@ export const useAuthStore = defineStore('auth', () => {
       oemLoading.value = false
     }
   }
-
+  
   return {
     // 状态
     isLoggedIn,
     authToken,
-    username,
+    sessionToken,
+    sessionId,
+    expiresAt,
+    user,
+    username, // 计算属性
     loginError,
     loginLoading,
+    refreshing,
     oemSettings,
     oemLoading,
 
     // 计算属性
     isAuthenticated,
     token,
-    user,
+    legacyToken,
 
     // 方法
     login,
     logout,
     checkAuth,
+    verifySession,
+    refreshSession,
+    changePassword,
+    clearAuthState,
     loadOemSettings
   }
 })

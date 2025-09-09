@@ -6,7 +6,7 @@ const bedrockAccountService = require('../services/bedrockAccountService')
 const unifiedClaudeScheduler = require('../services/unifiedClaudeScheduler')
 const apiKeyService = require('../services/apiKeyService')
 const claudeAccountService = require('../services/claudeAccountService')
-const { authenticateApiKey } = require('../middleware/auth')
+const { authenticateApiKey, authenticateDual } = require('../middleware/auth')
 const logger = require('../utils/logger')
 const database = require('../models/database')
 const sessionHelper = require('../utils/sessionHelper')
@@ -88,8 +88,9 @@ const logRequestWithUnifiedService = async (req, res, usageData, startTime, acco
       timestamp: Date.now()
     }
 
-    // 记录日志
-    const logId = await logService.logRequest(req.apiKey.id, logData)
+    // 记录日志 - 处理双重认证场景
+    const keyId = req.apiKey?.id || 'user_session'
+    const logId = await logService.logRequest(keyId, logData)
     logger.debug(`✅ Request logged with UnifiedLogService: ${logId}`)
 
     return logId
@@ -131,8 +132,15 @@ async function handleMessagesRequest(req, res) {
     const isStream = req.body.stream === true
     const requestedModel = req.body.model || 'unknown'
 
+    // 获取认证信息描述
+    const authInfo = req.apiKey
+      ? `API Key: ${req.apiKey.name}`
+      : req.user
+        ? `User: ${req.user.username} (${req.user.id})`
+        : 'unknown'
+
     logger.api(
-      `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for key: ${req.apiKey.name}, model: ${requestedModel}`
+      `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for ${authInfo}, model: ${requestedModel}`
     )
 
     // 💰 费用预估和限制检查（P1.2 核心功能）
@@ -148,30 +156,32 @@ async function handleMessagesRequest(req, res) {
         `💰 Request cost estimation: $${estimatedCost.toFixed(4)} (confidence: ${costEstimation.confidence})`
       )
 
-      // 2. 执行API Key级别的费用限制检查（包含预估费用）
-      const apiKeyCostCheck = await costLimitService.checkApiKeyCostLimit(
-        req.apiKey.id,
-        estimatedCost
-      )
-
-      if (!apiKeyCostCheck.allowed) {
-        const violationResponse = costLimitService.formatViolationResponse(
-          apiKeyCostCheck.violations
+      // 2. 执行API Key级别的费用限制检查（包含预估费用） - 仅适用于API Key认证
+      if (req.apiKey) {
+        const apiKeyCostCheck = await costLimitService.checkApiKeyCostLimit(
+          req.apiKey.id,
+          estimatedCost
         )
 
-        logger.security(
-          `💰 API Key cost limit exceeded before request: ${req.apiKey.id} (${req.apiKey.name}), estimated: $${estimatedCost.toFixed(4)}`
-        )
+        if (!apiKeyCostCheck.allowed) {
+          const violationResponse = costLimitService.formatViolationResponse(
+            apiKeyCostCheck.violations
+          )
 
-        return res.status(429).json({
-          ...violationResponse,
-          type: 'api_key_cost_limit',
-          estimatedCost,
-          estimation: {
-            breakdown: costEstimation.breakdown,
-            confidence: costEstimation.confidence
-          }
-        })
+          logger.security(
+            `💰 API Key cost limit exceeded before request: ${req.apiKey.id} (${req.apiKey.name}), estimated: $${estimatedCost.toFixed(4)}`
+          )
+
+          return res.status(429).json({
+            ...violationResponse,
+            type: 'api_key_cost_limit',
+            estimatedCost,
+            estimation: {
+              breakdown: costEstimation.breakdown,
+              confidence: costEstimation.confidence
+            }
+          })
+        }
       }
 
       // 3. 添加预估费用信息到请求对象（供后续使用）
@@ -215,12 +225,63 @@ async function handleMessagesRequest(req, res) {
       // 生成会话哈希用于sticky会话
       const sessionHash = sessionHelper.generateSessionHash(req.body)
 
-      // 使用统一调度选择账号（传递请求的模型）
-      const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
-        req.apiKey,
-        sessionHash,
-        requestedModel
-      )
+      // 🎯 智能账户选择：优先使用用户组调度，否则使用API Key调度
+      let accountId, accountType
+
+      // 检查是否有用户上下文（用户会话认证）
+      if (req.user && req.user.id) {
+        logger.info(
+          `👤 Using user-based account selection for user: ${req.user.username} (${req.user.id})`
+        )
+        try {
+          // 使用claudeAccountService的组调度功能
+          const claudeAccountService = require('../services/claudeAccountService')
+          const groupAccountId = await claudeAccountService.selectAccountByGroup(req.user.id, {
+            sessionHash,
+            modelName: requestedModel
+          })
+
+          if (groupAccountId) {
+            logger.success(`🎯 Selected group-based Claude account: ${groupAccountId}`)
+            accountId = groupAccountId
+            accountType = 'claude-official'
+          } else {
+            logger.info(
+              `⚠️ No group-based account found for user ${req.user.username}, using API Key fallback`
+            )
+            // 回退到API Key调度
+            const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+              req.apiKey,
+              sessionHash,
+              requestedModel
+            )
+            accountId = result.accountId
+            accountType = result.accountType
+          }
+        } catch (groupError) {
+          logger.warn(
+            `⚠️ Group-based account selection failed: ${groupError.message}, using API Key fallback`
+          )
+          // 回退到API Key调度
+          const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+            req.apiKey,
+            sessionHash,
+            requestedModel
+          )
+          accountId = result.accountId
+          accountType = result.accountType
+        }
+      } else {
+        // API Key认证模式：使用传统的统一调度选择账号
+        logger.info(`🔑 Using API Key-based account selection for key: ${req.apiKey.name}`)
+        const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+          req.apiKey,
+          sessionHash,
+          requestedModel
+        )
+        accountId = result.accountId
+        accountType = result.accountType
+      }
 
       // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 流式请求）
       if (accountId && (accountType === 'claude-official' || accountType === 'claude-console')) {
@@ -321,11 +382,18 @@ async function handleMessagesRequest(req, res) {
                 }
               }
 
-              apiKeyService
-                .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId)
-                .catch((error) => {
-                  logger.error('❌ Failed to record stream usage:', error)
-                })
+              // 记录使用统计 - 仅在有API Key时记录
+              if (req.apiKey) {
+                apiKeyService
+                  .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId)
+                  .catch((error) => {
+                    logger.error('❌ Failed to record stream usage (Claude Official):', error)
+                  })
+              } else if (req.user) {
+                logger.info(
+                  `👤 User session stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens (Claude Official)`
+                )
+              }
 
               // 更新时间窗口内的token计数
               if (req.rateLimitInfo) {
@@ -423,11 +491,18 @@ async function handleMessagesRequest(req, res) {
                 }
               }
 
-              apiKeyService
-                .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId)
-                .catch((error) => {
-                  logger.error('❌ Failed to record stream usage:', error)
-                })
+              // 记录使用统计 - 仅在有API Key时记录
+              if (req.apiKey) {
+                apiKeyService
+                  .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId)
+                  .catch((error) => {
+                    logger.error('❌ Failed to record stream usage (Claude Console):', error)
+                  })
+              } else if (req.user) {
+                logger.info(
+                  `👤 User session stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens (Claude Console)`
+                )
+              }
 
               // 更新时间窗口内的token计数
               if (req.rateLimitInfo) {
@@ -490,11 +565,26 @@ async function handleMessagesRequest(req, res) {
             const inputTokens = result.usage.input_tokens || 0
             const outputTokens = result.usage.output_tokens || 0
 
-            apiKeyService
-              .recordUsage(req.apiKey.id, inputTokens, outputTokens, 0, 0, result.model, accountId)
-              .catch((error) => {
-                logger.error('❌ Failed to record Bedrock stream usage:', error)
-              })
+            // 记录Bedrock使用统计 - 仅在有API Key时记录
+            if (req.apiKey) {
+              apiKeyService
+                .recordUsage(
+                  req.apiKey.id,
+                  inputTokens,
+                  outputTokens,
+                  0,
+                  0,
+                  result.model,
+                  accountId
+                )
+                .catch((error) => {
+                  logger.error('❌ Failed to record Bedrock stream usage:', error)
+                })
+            } else if (req.user) {
+              logger.info(
+                `👤 User session Bedrock stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens} tokens`
+              )
+            }
 
             // 更新时间窗口内的token计数
             if (req.rateLimitInfo) {
@@ -540,12 +630,63 @@ async function handleMessagesRequest(req, res) {
       // 生成会话哈希用于sticky会话
       const sessionHash = sessionHelper.generateSessionHash(req.body)
 
-      // 使用统一调度选择账号（传递请求的模型）
-      const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
-        req.apiKey,
-        sessionHash,
-        requestedModel
-      )
+      // 🎯 智能账户选择：优先使用用户组调度，否则使用API Key调度
+      let accountId, accountType
+
+      // 检查是否有用户上下文（用户会话认证）
+      if (req.user && req.user.id) {
+        logger.info(
+          `👤 Using user-based account selection for user: ${req.user.username} (${req.user.id})`
+        )
+        try {
+          // 使用claudeAccountService的组调度功能
+          const claudeAccountService = require('../services/claudeAccountService')
+          const groupAccountId = await claudeAccountService.selectAccountByGroup(req.user.id, {
+            sessionHash,
+            modelName: requestedModel
+          })
+
+          if (groupAccountId) {
+            logger.success(`🎯 Selected group-based Claude account: ${groupAccountId}`)
+            accountId = groupAccountId
+            accountType = 'claude-official'
+          } else {
+            logger.info(
+              `⚠️ No group-based account found for user ${req.user.username}, using API Key fallback`
+            )
+            // 回退到API Key调度
+            const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+              req.apiKey,
+              sessionHash,
+              requestedModel
+            )
+            accountId = result.accountId
+            accountType = result.accountType
+          }
+        } catch (groupError) {
+          logger.warn(
+            `⚠️ Group-based account selection failed: ${groupError.message}, using API Key fallback`
+          )
+          // 回退到API Key调度
+          const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+            req.apiKey,
+            sessionHash,
+            requestedModel
+          )
+          accountId = result.accountId
+          accountType = result.accountType
+        }
+      } else {
+        // API Key认证模式：使用传统的统一调度选择账号
+        logger.info(`🔑 Using API Key-based account selection for key: ${req.apiKey.name}`)
+        const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+          req.apiKey,
+          sessionHash,
+          requestedModel
+        )
+        accountId = result.accountId
+        accountType = result.accountType
+      }
 
       // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 非流式请求）
       if (accountId && (accountType === 'claude-official' || accountType === 'claude-console')) {
@@ -687,15 +828,23 @@ async function handleMessagesRequest(req, res) {
 
           // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
           const { accountId: responseAccountId } = response
-          await apiKeyService.recordUsage(
-            req.apiKey.id,
-            inputTokens,
-            outputTokens,
-            cacheCreateTokens,
-            cacheReadTokens,
-            model,
-            responseAccountId
-          )
+
+          // 记录使用统计 - 仅在有API Key时记录
+          if (req.apiKey) {
+            await apiKeyService.recordUsage(
+              req.apiKey.id,
+              inputTokens,
+              outputTokens,
+              cacheCreateTokens,
+              cacheReadTokens,
+              model,
+              responseAccountId
+            )
+          } else if (req.user) {
+            logger.info(
+              `👤 User session non-stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
+            )
+          }
 
           // 更新时间窗口内的token计数
           if (req.rateLimitInfo) {
@@ -738,13 +887,13 @@ async function handleMessagesRequest(req, res) {
     }
 
     const duration = Date.now() - startTime
-    logger.api(`✅ Request completed in ${duration}ms for key: ${req.apiKey.name}`)
+    logger.api(`✅ Request completed in ${duration}ms for ${authInfo}`)
 
     // 请求完成后的日志记录
     if (shouldLogRequest) {
       try {
         const logEntry = {
-          keyId: req.apiKey.id,
+          keyId: req.apiKey?.id || 'user_session',
           method: req.method,
           path: req.path,
           statusCode: res.statusCode || 200,
@@ -761,13 +910,11 @@ async function handleMessagesRequest(req, res) {
         // 🔧 使用统一日志服务记录完成的请求
         try {
           const logService = await getUnifiedLogService()
-          await logService.logRequest(req.apiKey.id, logEntry)
-          logger.debug(`📝 Request completed and logged successfully for key: ${req.apiKey.name}`)
+          const keyId = req.apiKey?.id || 'user_session'
+          await logService.logRequest(keyId, logEntry)
+          logger.debug(`📝 Request completed and logged successfully for ${authInfo}`)
         } catch (logError) {
-          logger.warn(
-            `⚠️ UnifiedLogService logging failed for key: ${req.apiKey.name}:`,
-            logError.message
-          )
+          logger.warn(`⚠️ UnifiedLogService logging failed for ${authInfo}:`, logError.message)
         }
       } catch (loggingError) {
         logger.warn('⚠️ Request logging failed:', loggingError.message)
@@ -790,7 +937,7 @@ async function handleMessagesRequest(req, res) {
     if (shouldLogError) {
       try {
         const logEntry = {
-          keyId: req.apiKey.id,
+          keyId: req.apiKey?.id || 'user_session',
           method: req.method,
           path: req.path,
           statusCode: 500, // 错误状态码
@@ -807,11 +954,22 @@ async function handleMessagesRequest(req, res) {
         // 🔧 使用统一日志服务记录错误请求
         try {
           const logService = await getUnifiedLogService()
-          await logService.logRequest(req.apiKey.id, logEntry)
-          logger.debug(`📝 Error request logged successfully for key: ${req.apiKey.name}`)
+          const keyId = req.apiKey?.id || 'user_session'
+          await logService.logRequest(keyId, logEntry)
+          const errorAuthInfo = req.apiKey
+            ? `key: ${req.apiKey.name}`
+            : req.user
+              ? `user: ${req.user.username}`
+              : 'unknown'
+          logger.debug(`📝 Error request logged successfully for ${errorAuthInfo}`)
         } catch (logError) {
+          const errorAuthInfo = req.apiKey
+            ? `key: ${req.apiKey.name}`
+            : req.user
+              ? `user: ${req.user.username}`
+              : 'unknown'
           logger.warn(
-            `⚠️ UnifiedLogService error logging failed for key: ${req.apiKey.name}:`,
+            `⚠️ UnifiedLogService error logging failed for ${errorAuthInfo}:`,
             logError.message
           )
         }
@@ -855,14 +1013,14 @@ async function handleMessagesRequest(req, res) {
   }
 }
 
-// 🚀 Claude API messages 端点 - /api/v1/messages
-router.post('/v1/messages', authenticateApiKey, handleMessagesRequest)
+// 🚀 Claude API messages 端点 - /api/v1/messages (支持智能双重认证)
+router.post('/v1/messages', authenticateDual, handleMessagesRequest)
 
 // 🚀 Claude API messages 端点 - /claude/v1/messages (别名)
-router.post('/claude/v1/messages', authenticateApiKey, handleMessagesRequest)
+router.post('/claude/v1/messages', authenticateDual, handleMessagesRequest)
 
-// 📋 模型列表端点 - Claude Code 客户端需要
-router.get('/v1/models', authenticateApiKey, async (req, res) => {
+// 📋 模型列表端点 - Claude Code 客户端需要 (支持智能双重认证)
+router.get('/v1/models', authenticateDual, async (req, res) => {
   try {
     // 返回支持的模型列表
     const models = [
@@ -927,42 +1085,85 @@ router.get('/health', async (req, res) => {
   }
 })
 
-// 📊 API Key状态检查端点 - /api/v1/key-info
-router.get('/v1/key-info', authenticateApiKey, async (req, res) => {
+// 📊 API Key状态检查端点 - /api/v1/key-info (支持智能双重认证)
+router.get('/v1/key-info', authenticateDual, async (req, res) => {
   try {
-    const usage = await apiKeyService.getUsageStats(req.apiKey.id)
+    if (req.apiKey) {
+      // API Key认证模式
+      const usage = await apiKeyService.getUsageStats(req.apiKey.id)
 
-    res.json({
-      keyInfo: {
-        id: req.apiKey.id,
-        name: req.apiKey.name,
-        tokenLimit: req.apiKey.tokenLimit,
-        usage
-      },
-      timestamp: new Date().toISOString()
-    })
+      res.json({
+        keyInfo: {
+          id: req.apiKey.id,
+          name: req.apiKey.name,
+          tokenLimit: req.apiKey.tokenLimit,
+          usage
+        },
+        timestamp: new Date().toISOString()
+      })
+    } else if (req.user) {
+      // 用户会话认证模式
+      res.json({
+        userInfo: {
+          id: req.user.id,
+          username: req.user.username,
+          fullName: req.user.fullName,
+          role: req.user.role,
+          groups: req.user.groups || []
+        },
+        timestamp: new Date().toISOString()
+      })
+    } else {
+      res.status(401).json({
+        error: 'Authentication required',
+        message: 'No valid authentication method found'
+      })
+    }
   } catch (error) {
-    logger.error('❌ Key info error:', error)
+    logger.error('❌ Key/User info error:', error)
     res.status(500).json({
-      error: 'Failed to get key info',
+      error: 'Failed to get authentication info',
       message: error.message
     })
   }
 })
 
-// 📈 使用统计端点 - /api/v1/usage
-router.get('/v1/usage', authenticateApiKey, async (req, res) => {
+// 📈 使用统计端点 - /api/v1/usage (支持智能双重认证)
+router.get('/v1/usage', authenticateDual, async (req, res) => {
   try {
-    const usage = await apiKeyService.getUsageStats(req.apiKey.id)
+    if (req.apiKey) {
+      // API Key认证模式
+      const usage = await apiKeyService.getUsageStats(req.apiKey.id)
 
-    res.json({
-      usage,
-      limits: {
-        tokens: req.apiKey.tokenLimit,
-        requests: 0 // 请求限制已移除
-      },
-      timestamp: new Date().toISOString()
-    })
+      res.json({
+        usage,
+        limits: {
+          tokens: req.apiKey.tokenLimit,
+          requests: 0 // 请求限制已移除
+        },
+        timestamp: new Date().toISOString()
+      })
+    } else if (req.user) {
+      // 用户会话认证模式 - 返回用户级别的使用统计
+      res.json({
+        usage: {
+          totalTokens: 0, // TODO: 实现用户级别的token统计
+          totalRequests: 0,
+          lastUsed: null
+        },
+        userInfo: {
+          id: req.user.id,
+          username: req.user.username,
+          role: req.user.role
+        },
+        timestamp: new Date().toISOString()
+      })
+    } else {
+      res.status(401).json({
+        error: 'Authentication required',
+        message: 'No valid authentication method found'
+      })
+    }
   } catch (error) {
     logger.error('❌ Usage stats error:', error)
     res.status(500).json({
@@ -972,16 +1173,34 @@ router.get('/v1/usage', authenticateApiKey, async (req, res) => {
   }
 })
 
-// 👤 用户信息端点 - Claude Code 客户端需要
-router.get('/v1/me', authenticateApiKey, async (req, res) => {
+// 👤 用户信息端点 - Claude Code 客户端需要 (支持智能双重认证)
+router.get('/v1/me', authenticateDual, async (req, res) => {
   try {
-    // 返回基础用户信息
-    res.json({
-      id: `user_${req.apiKey.id}`,
-      type: 'user',
-      display_name: req.apiKey.name || 'API User',
-      created_at: new Date().toISOString()
-    })
+    if (req.apiKey) {
+      // API Key认证模式 - 返回模拟用户信息
+      res.json({
+        id: `user_${req.apiKey.id}`,
+        type: 'user',
+        display_name: req.apiKey.name || 'API User',
+        created_at: new Date().toISOString()
+      })
+    } else if (req.user) {
+      // 用户会话认证模式 - 返回真实用户信息
+      res.json({
+        id: req.user.id,
+        type: 'user',
+        display_name: req.user.fullName || req.user.username,
+        username: req.user.username,
+        email: req.user.email,
+        role: req.user.role,
+        created_at: new Date().toISOString()
+      })
+    } else {
+      res.status(401).json({
+        error: 'Authentication required',
+        message: 'No valid authentication method found'
+      })
+    }
   } catch (error) {
     logger.error('❌ User info error:', error)
     res.status(500).json({
@@ -991,20 +1210,39 @@ router.get('/v1/me', authenticateApiKey, async (req, res) => {
   }
 })
 
-// 💰 余额/限制端点 - Claude Code 客户端需要
-router.get('/v1/organizations/:org_id/usage', authenticateApiKey, async (req, res) => {
+// 💰 余额/限制端点 - Claude Code 客户端需要 (支持智能双重认证)
+router.get('/v1/organizations/:org_id/usage', authenticateDual, async (req, res) => {
   try {
-    const usage = await apiKeyService.getUsageStats(req.apiKey.id)
+    if (req.apiKey) {
+      // API Key认证模式
+      const usage = await apiKeyService.getUsageStats(req.apiKey.id)
 
-    res.json({
-      object: 'usage',
-      data: [
-        {
-          type: 'credit_balance',
-          credit_balance: req.apiKey.tokenLimit - (usage.totalTokens || 0)
-        }
-      ]
-    })
+      res.json({
+        object: 'usage',
+        data: [
+          {
+            type: 'credit_balance',
+            credit_balance: req.apiKey.tokenLimit - (usage.totalTokens || 0)
+          }
+        ]
+      })
+    } else if (req.user) {
+      // 用户会话认证模式 - 返回无限制的信用
+      res.json({
+        object: 'usage',
+        data: [
+          {
+            type: 'credit_balance',
+            credit_balance: 999999999 // 用户会话模式下提供充足的信用额度
+          }
+        ]
+      })
+    } else {
+      res.status(401).json({
+        error: 'Authentication required',
+        message: 'No valid authentication method found'
+      })
+    }
   } catch (error) {
     logger.error('❌ Organization usage error:', error)
     res.status(500).json({
@@ -1014,35 +1252,105 @@ router.get('/v1/organizations/:org_id/usage', authenticateApiKey, async (req, re
   }
 })
 
-// 🔢 Token计数端点 - count_tokens beta API
-router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) => {
+// 🔢 Token计数端点 - count_tokens beta API (支持智能双重认证)
+router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
   try {
-    // 检查权限
-    if (
-      req.apiKey.permissions &&
-      req.apiKey.permissions !== 'all' &&
-      req.apiKey.permissions !== 'claude'
-    ) {
-      return res.status(403).json({
+    // 检查权限 - 仅对API Key认证进行权限检查
+    if (req.apiKey) {
+      if (
+        req.apiKey.permissions &&
+        req.apiKey.permissions !== 'all' &&
+        req.apiKey.permissions !== 'claude'
+      ) {
+        return res.status(403).json({
+          error: {
+            type: 'permission_error',
+            message: 'This API key does not have permission to access Claude'
+          }
+        })
+      }
+      logger.info(`🔢 Processing token count request for key: ${req.apiKey.name}`)
+    } else if (req.user) {
+      logger.info(`🔢 Processing token count request for user: ${req.user.username}`)
+    } else {
+      return res.status(401).json({
         error: {
-          type: 'permission_error',
-          message: 'This API key does not have permission to access Claude'
+          type: 'authentication_error',
+          message: 'Authentication required'
         }
       })
     }
 
-    logger.info(`🔢 Processing token count request for key: ${req.apiKey.name}`)
-
     // 生成会话哈希用于sticky会话
     const sessionHash = sessionHelper.generateSessionHash(req.body)
 
-    // 选择可用的Claude账户
+    // 智能账户选择：优先使用用户组调度，否则使用API Key调度
     const requestedModel = req.body.model
-    const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
-      req.apiKey,
-      sessionHash,
-      requestedModel
-    )
+    let accountId, accountType
+
+    // 检查是否有用户上下文（用户会话认证）
+    if (req.user && req.user.id) {
+      logger.info(
+        `👤 Using user-based account selection for count_tokens, user: ${req.user.username}`
+      )
+      try {
+        const claudeAccountService = require('../services/claudeAccountService')
+        const groupAccountId = await claudeAccountService.selectAccountByGroup(req.user.id, {
+          sessionHash,
+          modelName: requestedModel
+        })
+
+        if (groupAccountId) {
+          logger.success(`🎯 Selected group-based account for count_tokens: ${groupAccountId}`)
+          accountId = groupAccountId
+          accountType = 'claude-official'
+        } else {
+          logger.info(
+            `⚠️ No group-based account found for user ${req.user.username}, using API Key fallback`
+          )
+          // 回退到API Key调度（如果有API Key）
+          if (req.apiKey) {
+            const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+              req.apiKey,
+              sessionHash,
+              requestedModel
+            )
+            accountId = result.accountId
+            accountType = result.accountType
+          } else {
+            throw new Error('No available accounts for count_tokens request')
+          }
+        }
+      } catch (groupError) {
+        logger.warn(
+          `⚠️ Group-based account selection failed for count_tokens: ${groupError.message}`
+        )
+        // 回退到API Key调度（如果有API Key）
+        if (req.apiKey) {
+          const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+            req.apiKey,
+            sessionHash,
+            requestedModel
+          )
+          accountId = result.accountId
+          accountType = result.accountType
+        } else {
+          throw new Error('No available accounts for count_tokens request')
+        }
+      }
+    } else if (req.apiKey) {
+      // API Key认证模式：使用传统的统一调度选择账号
+      logger.info(`🔑 Using API Key-based account selection for count_tokens: ${req.apiKey.name}`)
+      const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+        req.apiKey,
+        sessionHash,
+        requestedModel
+      )
+      accountId = result.accountId
+      accountType = result.accountType
+    } else {
+      throw new Error('No authentication method available for count_tokens request')
+    }
 
     let response
     if (accountType === 'claude-official') {
@@ -1101,7 +1409,12 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
       res.send(response.body)
     }
 
-    logger.info(`✅ Token count request completed for key: ${req.apiKey.name}`)
+    const authInfo = req.apiKey
+      ? `key: ${req.apiKey.name}`
+      : req.user
+        ? `user: ${req.user.username}`
+        : 'unknown'
+    logger.info(`✅ Token count request completed for ${authInfo}`)
   } catch (error) {
     logger.error('❌ Token count error:', error)
     res.status(500).json({

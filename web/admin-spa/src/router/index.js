@@ -8,6 +8,9 @@ const MainLayout = () => import('@/components/layout/MainLayout.vue')
 const DashboardView = () => import('@/views/DashboardView.vue')
 const ApiKeysView = () => import('@/views/ApiKeysView.vue')
 const AccountsView = () => import('@/views/AccountsView.vue')
+const GroupListView = () => import('@/views/groups/GroupList.vue')
+const UserListView = () => import('@/views/users/UserList.vue')
+const UserGroupsView = () => import('@/views/users/UserGroups.vue')
 const TutorialView = () => import('@/views/TutorialView.vue')
 const SettingsView = () => import('@/views/SettingsView.vue')
 const ApiStatsView = () => import('@/views/ApiStatsView.vue')
@@ -79,6 +82,42 @@ const routes = [
     ]
   },
   {
+    path: '/groups',
+    component: MainLayout,
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'Groups',
+        component: GroupListView
+      }
+    ]
+  },
+  {
+    path: '/users',
+    component: MainLayout,
+    meta: { requiresAuth: true, requiresRole: 'admin' },
+    children: [
+      {
+        path: '',
+        name: 'Users',
+        component: UserListView
+      }
+    ]
+  },
+  {
+    path: '/user-groups',
+    component: MainLayout,
+    meta: { requiresAuth: true, requiresRole: 'admin' },
+    children: [
+      {
+        path: '',
+        name: 'UserGroups',
+        component: UserGroupsView
+      }
+    ]
+  },
+  {
     path: '/tutorial',
     component: MainLayout,
     meta: { requiresAuth: true },
@@ -135,7 +174,9 @@ router.beforeEach((to, from, next) => {
     from: from.path,
     fullPath: to.fullPath,
     requiresAuth: to.meta.requiresAuth,
-    isAuthenticated: authStore.isAuthenticated
+    requiresRole: to.meta.requiresRole,
+    isAuthenticated: authStore.isAuthenticated,
+    userRole: authStore.user?.role
   })
 
   // 防止重定向循环：如果已经在目标路径，直接放行
@@ -150,6 +191,15 @@ router.beforeEach((to, from, next) => {
     next('/login')
   } else if (to.path === '/login' && authStore.isAuthenticated) {
     next('/dashboard')
+  } else if (to.meta.requiresRole) {
+    // 检查角色权限
+    const userRole = authStore.user?.role || 'user'
+    if (userRole !== to.meta.requiresRole) {
+      // 权限不足，重定向到仪表板
+      next('/dashboard')
+      return
+    }
+    next()
   } else {
     next()
   }

@@ -7,6 +7,8 @@ const geminiAccountService = require('../services/geminiAccountService')
 const openaiAccountService = require('../services/openaiAccountService')
 const azureOpenaiAccountService = require('../services/azureOpenaiAccountService')
 const accountGroupService = require('../services/accountGroupService')
+const groupService = require('../services/groupService')
+const userService = require('../services/userService')
 const database = require('../models/database')
 const { authenticateAdmin } = require('../middleware/auth')
 const logger = require('../utils/logger')
@@ -6106,6 +6108,1787 @@ router.get('/azure-openai-accounts/:accountId/cost-stats', authenticateAdmin, as
     return res.status(500).json({
       success: false,
       error: 'Failed to get account cost stats',
+      message: error.message
+    })
+  }
+})
+
+// 👥 用户管理系统
+// ====================================
+
+// 获取用户列表（分页、搜索、过滤）
+router.get('/users', authenticateAdmin, async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      search = '',
+      status = '',
+      role = '',
+      authMethod = '',
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query
+
+    // 参数验证
+    const pageNum = Math.max(1, parseInt(page))
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)))
+    const offset = (pageNum - 1) * limitNum
+
+    // 构建搜索和过滤条件
+    const filters = {
+      search: search.trim(),
+      status: status || undefined,
+      role: role || undefined,
+      authMethod: authMethod || undefined
+    }
+
+    // 获取用户列表
+    const result = await userService.getUserList({
+      offset,
+      limit: limitNum,
+      filters,
+      sortBy,
+      sortOrder
+    })
+
+    logger.info(
+      `👥 管理员 ${req.user?.id} 查看用户列表: page=${pageNum}, limit=${limitNum}, total=${result.total}`
+    )
+
+    return res.json({
+      success: true,
+      data: {
+        users: result.users,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: result.total,
+          pages: Math.ceil(result.total / limitNum)
+        },
+        filters: {
+          applied: Object.keys(filters).filter((k) => filters[k] !== undefined),
+          available: {
+            status: ['active', 'inactive', 'locked', 'suspended'],
+            role: ['admin', 'user', 'viewer'],
+            authMethod: ['local', 'ldap']
+          }
+        }
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取用户列表失败:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get users list',
+      message: error.message
+    })
+  }
+})
+
+// 获取用户详情
+router.get('/users/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    const user = await userService.getUserById(id)
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    // 获取用户会话信息
+    const sessions = await userService.getUserSessions(id)
+    const stats = await userService.getUserStats(id)
+
+    logger.info(`👤 管理员 ${req.user?.id} 查看用户详情: ${id}`)
+
+    return res.json({
+      success: true,
+      data: {
+        user,
+        sessions: {
+          active: sessions.filter((s) => s.isActive).length,
+          total: sessions.length,
+          lastActivity: sessions.length > 0 ? sessions[0].lastActivity : null
+        },
+        stats
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ 获取用户详情失败 (${req.params.id}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get user details',
+      message: error.message
+    })
+  }
+})
+
+// 创建新用户
+router.post('/users', authenticateAdmin, async (req, res) => {
+  try {
+    const {
+      username,
+      password,
+      email,
+      fullName,
+      role = 'user',
+      authMethod = 'local',
+      status = 'active',
+      metadata = {}
+    } = req.body
+
+    // 输入验证
+    if (!username || typeof username !== 'string' || username.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username is required and must be a non-empty string'
+      })
+    }
+
+    if (username.length < 3 || username.length > 50) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username must be between 3 and 50 characters'
+      })
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username can only contain letters, numbers, underscores, and hyphens'
+      })
+    }
+
+    if (authMethod === 'local' && (!password || password.length < 6)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password is required for local authentication and must be at least 6 characters'
+      })
+    }
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format'
+      })
+    }
+
+    if (!['admin', 'user', 'viewer'].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid role. Must be admin, user, or viewer'
+      })
+    }
+
+    if (!['local', 'ldap'].includes(authMethod)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid auth method. Must be local or ldap'
+      })
+    }
+
+    if (!['active', 'inactive', 'locked', 'suspended'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid status. Must be active, inactive, locked, or suspended'
+      })
+    }
+
+    // 创建用户
+    const userData = {
+      username: username.trim(),
+      password,
+      email: email?.trim(),
+      fullName: fullName?.trim(),
+      role,
+      authMethod,
+      status,
+      metadata
+    }
+
+    const newUser = await userService.createUser(userData)
+
+    logger.info(`✅ 管理员 ${req.user?.id} 创建用户: ${newUser.username} (${newUser.id})`)
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        user: newUser,
+        message: 'User created successfully'
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 创建用户失败:', error)
+
+    if (error.message.includes('already exists')) {
+      return res.status(409).json({
+        success: false,
+        error: 'User already exists',
+        message: error.message
+      })
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to create user',
+      message: error.message
+    })
+  }
+})
+
+// 更新用户信息
+router.put('/users/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { username, email, fullName, role, status, authMethod, metadata } = req.body
+
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    // 检查用户是否存在
+    const existingUser = await userService.getUserById(id)
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    // 输入验证
+    const updates = {}
+
+    if (username !== undefined) {
+      if (!username || typeof username !== 'string' || username.trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username must be a non-empty string'
+        })
+      }
+      if (username.length < 3 || username.length > 50) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username must be between 3 and 50 characters'
+        })
+      }
+      if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username can only contain letters, numbers, underscores, and hyphens'
+        })
+      }
+      updates.username = username.trim()
+    }
+
+    if (email !== undefined) {
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid email format'
+        })
+      }
+      updates.email = email?.trim() || null
+    }
+
+    if (fullName !== undefined) {
+      updates.fullName = fullName?.trim() || null
+    }
+
+    if (role !== undefined) {
+      if (!['admin', 'user', 'viewer'].includes(role)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid role. Must be admin, user, or viewer'
+        })
+      }
+      updates.role = role
+    }
+
+    if (status !== undefined) {
+      if (!['active', 'inactive', 'locked', 'suspended'].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid status. Must be active, inactive, locked, or suspended'
+        })
+      }
+      updates.status = status
+    }
+
+    if (authMethod !== undefined) {
+      if (!['local', 'ldap'].includes(authMethod)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid auth method. Must be local or ldap'
+        })
+      }
+      updates.authMethod = authMethod
+    }
+
+    if (metadata !== undefined) {
+      updates.metadata = metadata || {}
+    }
+
+    // 防止自己修改自己的角色和状态（安全措施）
+    if (req.user?.id === id) {
+      if (updates.role && updates.role !== existingUser.role) {
+        return res.status(403).json({
+          success: false,
+          error: 'Cannot change your own role'
+        })
+      }
+      if (updates.status && updates.status !== existingUser.status) {
+        return res.status(403).json({
+          success: false,
+          error: 'Cannot change your own status'
+        })
+      }
+    }
+
+    const updatedUser = await userService.updateUser(id, updates)
+
+    logger.info(`📝 管理员 ${req.user?.id} 更新用户: ${id} (${Object.keys(updates).join(', ')})`)
+
+    return res.json({
+      success: true,
+      data: {
+        user: updatedUser,
+        message: 'User updated successfully'
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ 更新用户失败 (${req.params.id}):`, error)
+
+    if (error.message.includes('already exists')) {
+      return res.status(409).json({
+        success: false,
+        error: 'Username already exists',
+        message: error.message
+      })
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to update user',
+      message: error.message
+    })
+  }
+})
+
+// 删除用户
+router.delete('/users/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    // 检查用户是否存在
+    const existingUser = await userService.getUserById(id)
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    // 防止删除自己
+    if (req.user?.id === id) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot delete your own account'
+      })
+    }
+
+    // 软删除用户（保留数据但标记为已删除）
+    await userService.deleteUser(id, { soft: true })
+
+    logger.warn(`🗑️ 管理员 ${req.user?.id} 删除用户: ${existingUser.username} (${id})`)
+
+    return res.json({
+      success: true,
+      data: {
+        message: 'User deleted successfully',
+        deletedUser: {
+          id: existingUser.id,
+          username: existingUser.username
+        }
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ 删除用户失败 (${req.params.id}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to delete user',
+      message: error.message
+    })
+  }
+})
+
+// 重置用户密码
+router.post('/users/:id/reset-password', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { newPassword, forceChange = true } = req.body
+
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    // 检查用户是否存在
+    const existingUser = await userService.getUserById(id)
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    // 验证用户认证方式
+    if (existingUser.authMethod !== 'local') {
+      return res.status(400).json({
+        success: false,
+        error: 'Password reset is only available for local authentication users'
+      })
+    }
+
+    // 密码验证
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password must be at least 6 characters long'
+      })
+    }
+
+    if (newPassword.length > 128) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password cannot exceed 128 characters'
+      })
+    }
+
+    // 重置密码
+    const result = await userService.resetPassword(id, {
+      newPassword,
+      forceChange: Boolean(forceChange),
+      adminReset: true,
+      adminId: req.user?.id
+    })
+
+    logger.security(`🔑 管理员 ${req.user?.id} 重置用户密码: ${existingUser.username} (${id})`)
+
+    return res.json({
+      success: true,
+      data: {
+        message: 'Password reset successfully',
+        forceChange: result.forceChange,
+        expiresAt: result.expiresAt
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ 重置用户密码失败 (${req.params.id}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to reset password',
+      message: error.message
+    })
+  }
+})
+
+// 解锁用户账户
+router.post('/users/:id/unlock', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    // 检查用户是否存在
+    const existingUser = await userService.getUserById(id)
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    // 解锁账户
+    const result = await userService.unlockUser(id, {
+      adminId: req.user?.id,
+      reason: 'Admin unlock'
+    })
+
+    logger.security(`🔓 管理员 ${req.user?.id} 解锁用户账户: ${existingUser.username} (${id})`)
+
+    return res.json({
+      success: true,
+      data: {
+        message: 'User account unlocked successfully',
+        user: {
+          id: result.user.id,
+          username: result.user.username,
+          status: result.user.status,
+          failedLoginAttempts: result.user.failedLoginAttempts,
+          lockedUntil: result.user.lockedUntil
+        }
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ 解锁用户账户失败 (${req.params.id}):`, error)
+
+    if (error.message.includes('not locked')) {
+      return res.status(400).json({
+        success: false,
+        error: 'User account is not locked',
+        message: error.message
+      })
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to unlock user account',
+      message: error.message
+    })
+  }
+})
+
+// 获取用户会话列表
+router.get('/users/:id/sessions', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { includeExpired = 'false', limit = 50 } = req.query
+
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    // 检查用户是否存在
+    const existingUser = await userService.getUserById(id)
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50))
+
+    const sessions = await userService.getUserSessions(id, {
+      includeExpired: includeExpired === 'true',
+      limit: limitNum
+    })
+
+    logger.info(`🎫 管理员 ${req.user?.id} 查看用户会话: ${existingUser.username} (${id})`)
+
+    return res.json({
+      success: true,
+      data: {
+        user: {
+          id: existingUser.id,
+          username: existingUser.username
+        },
+        sessions,
+        summary: {
+          total: sessions.length,
+          active: sessions.filter((s) => s.isActive).length,
+          expired: sessions.filter((s) => !s.isActive).length
+        }
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ 获取用户会话失败 (${req.params.id}):`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get user sessions',
+      message: error.message
+    })
+  }
+})
+
+// 删除特定会话
+router.delete('/users/:id/sessions/:sessionId', authenticateAdmin, async (req, res) => {
+  try {
+    const { id, sessionId } = req.params
+
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      })
+    }
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Session ID is required'
+      })
+    }
+
+    // 检查用户是否存在
+    const existingUser = await userService.getUserById(id)
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    // 防止管理员删除自己的当前会话
+    if (req.user?.id === id && req.user?.sessionId === sessionId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot delete your own current session'
+      })
+    }
+
+    // 删除会话
+    const result = await userService.invalidateSession(sessionId, {
+      adminAction: true,
+      adminId: req.user?.id,
+      userId: id
+    })
+
+    if (!result.found) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found or already expired'
+      })
+    }
+
+    logger.security(
+      `🎫❌ 管理员 ${req.user?.id} 删除用户会话: ${existingUser.username} (session: ${sessionId})`
+    )
+
+    return res.json({
+      success: true,
+      data: {
+        message: 'Session deleted successfully',
+        sessionId,
+        user: {
+          id: existingUser.id,
+          username: existingUser.username
+        }
+      }
+    })
+  } catch (error) {
+    logger.error(
+      `❌ 删除用户会话失败 (user: ${req.params.id}, session: ${req.params.sessionId}):`,
+      error
+    )
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to delete session',
+      message: error.message
+    })
+  }
+})
+
+// ==================== 👥 Group Management Routes ====================
+
+// 获取所有组列表（支持分页和搜索）
+router.get('/groups', authenticateAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, parentId, includeInactive = false } = req.query
+
+    logger.debug('📋 Getting groups list', {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      search,
+      parentId,
+      includeInactive: includeInactive === 'true'
+    })
+
+    // 获取所有组
+    const allGroups = await groupService.getAllGroups({
+      includeInactive: includeInactive === 'true',
+      parentId: parentId || undefined
+    })
+
+    // 应用搜索过滤
+    let filteredGroups = allGroups
+    if (search) {
+      const searchLower = search.toLowerCase()
+      filteredGroups = allGroups.filter(
+        (group) =>
+          group.name.toLowerCase().includes(searchLower) ||
+          (group.description && group.description.toLowerCase().includes(searchLower))
+      )
+    }
+
+    // 分页
+    const pageInt = parseInt(page)
+    const limitInt = parseInt(limit)
+    const startIndex = (pageInt - 1) * limitInt
+    const endIndex = startIndex + limitInt
+
+    const paginatedGroups = filteredGroups.slice(startIndex, endIndex)
+
+    // 为每个组添加额外的统计信息
+    const groupsWithStats = await Promise.all(
+      paginatedGroups.map(async (group) => {
+        try {
+          const members = await groupService.getGroupMembers(group.id)
+          const accounts = await groupService.getGroupAccounts(group.id)
+
+          const accountCount =
+            (accounts.claudeAccounts?.length || 0) +
+            (accounts.geminiAccounts?.length || 0) +
+            (accounts.openaiAccounts?.length || 0)
+
+          return {
+            ...group,
+            memberCount: members.length,
+            accountCount,
+            hasParent: !!group.parentId,
+            childCount: allGroups.filter((g) => g.parentId === group.id).length
+          }
+        } catch (error) {
+          logger.warn(`⚠️ Failed to get stats for group ${group.id}:`, error.message)
+          return {
+            ...group,
+            memberCount: 0,
+            accountCount: 0,
+            hasParent: !!group.parentId,
+            childCount: 0
+          }
+        }
+      })
+    )
+
+    const response = {
+      success: true,
+      data: {
+        groups: groupsWithStats,
+        pagination: {
+          page: pageInt,
+          limit: limitInt,
+          total: filteredGroups.length,
+          totalPages: Math.ceil(filteredGroups.length / limitInt),
+          hasNext: endIndex < filteredGroups.length,
+          hasPrev: pageInt > 1
+        }
+      }
+    }
+
+    logger.success(`📋 Successfully retrieved ${groupsWithStats.length} groups`)
+    return res.json(response)
+  } catch (error) {
+    logger.error('❌ Failed to get groups:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get groups',
+      message: error.message
+    })
+  }
+})
+
+// 获取单个组详情
+router.get('/groups/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    logger.debug(`📄 Getting group details for: ${id}`)
+
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 获取组的详细信息
+    const [members, accounts, parentGroup, childGroups] = await Promise.all([
+      groupService.getGroupMembers(id),
+      groupService.getGroupAccounts(id),
+      group.parentId ? groupService.getGroupById(group.parentId) : null,
+      groupService.getAllGroups().then((allGroups) => allGroups.filter((g) => g.parentId === id))
+    ])
+
+    // 构建详细响应
+    const detailedGroup = {
+      ...group,
+      members,
+      accounts,
+      parentGroup: parentGroup
+        ? {
+            id: parentGroup.id,
+            name: parentGroup.name,
+            description: parentGroup.description
+          }
+        : null,
+      childGroups: childGroups.map((child) => ({
+        id: child.id,
+        name: child.name,
+        description: child.description,
+        isActive: child.isActive
+      })),
+      statistics: {
+        memberCount: members.length,
+        accountCount:
+          (accounts.claudeAccounts?.length || 0) +
+          (accounts.geminiAccounts?.length || 0) +
+          (accounts.openaiAccounts?.length || 0),
+        childCount: childGroups.length
+      }
+    }
+
+    logger.success(`📄 Successfully retrieved group details: ${group.name}`)
+    return res.json({
+      success: true,
+      data: detailedGroup
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to get group ${req.params.id}:`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get group details',
+      message: error.message
+    })
+  }
+})
+
+// 创建新组
+router.post('/groups', authenticateAdmin, async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      parentId,
+      permissions,
+      accounts,
+      schedulingConfig,
+      isActive = true
+    } = req.body
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group name is required'
+      })
+    }
+
+    logger.debug('🏢 Creating new group', {
+      name,
+      parentId,
+      hasPermissions: !!permissions,
+      hasAccounts: !!accounts,
+      hasSchedulingConfig: !!schedulingConfig
+    })
+
+    // 准备组数据
+    const groupData = {
+      name: name.trim(),
+      description: description?.trim() || '',
+      parentId: parentId || null,
+      permissions: permissions || {},
+      accounts: accounts || {},
+      schedulingConfig: schedulingConfig || {},
+      isActive,
+      createdBy: req.user?.id || 'admin'
+    }
+
+    // 创建组
+    const result = await groupService.createGroup(groupData)
+
+    logger.success(`🏢 Successfully created group: ${result.name} (${result.id})`)
+    return res.status(201).json({
+      success: true,
+      data: result,
+      message: `Group '${result.name}' created successfully`
+    })
+  } catch (error) {
+    logger.error('❌ Failed to create group:', error)
+
+    // 提供更具体的错误信息
+    let statusCode = 500
+    let errorMessage = error.message
+
+    if (error.message.includes('already exists')) {
+      statusCode = 409
+    } else if (error.message.includes('not found')) {
+      statusCode = 404
+    } else if (error.message.includes('Invalid') || error.message.includes('required')) {
+      statusCode = 400
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      error: 'Failed to create group',
+      message: errorMessage
+    })
+  }
+})
+
+// 更新组信息
+router.put('/groups/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const updateData = req.body
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    // 移除不允许直接更新的字段
+    const restrictedFields = ['id', 'createdAt', 'createdBy', 'members']
+    for (const field of restrictedFields) {
+      delete updateData[field]
+    }
+
+    logger.debug(`📝 Updating group: ${id}`, {
+      hasName: !!updateData.name,
+      hasDescription: !!updateData.description,
+      hasPermissions: !!updateData.permissions,
+      hasAccounts: !!updateData.accounts,
+      hasSchedulingConfig: !!updateData.schedulingConfig
+    })
+
+    // 验证组是否存在
+    const existingGroup = await groupService.getGroupById(id)
+    if (!existingGroup) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 更新组
+    await groupService.updateGroup(id, updateData)
+
+    // 获取更新后的组信息
+    const updatedGroup = await groupService.getGroupById(id)
+
+    logger.success(`📝 Successfully updated group: ${updatedGroup.name} (${id})`)
+    return res.json({
+      success: true,
+      data: updatedGroup,
+      message: `Group '${updatedGroup.name}' updated successfully`
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to update group ${req.params.id}:`, error)
+
+    let statusCode = 500
+    let errorMessage = error.message
+
+    if (error.message.includes('not found')) {
+      statusCode = 404
+    } else if (error.message.includes('already exists')) {
+      statusCode = 409
+    } else if (error.message.includes('Invalid') || error.message.includes('circular')) {
+      statusCode = 400
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      error: 'Failed to update group',
+      message: errorMessage
+    })
+  }
+})
+
+// 删除组
+router.delete('/groups/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { force = false } = req.query
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    logger.debug(`🗑️ Deleting group: ${id}`, { force: force === 'true' })
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 删除组
+    await groupService.deleteGroup(id, force === 'true')
+
+    logger.success(`🗑️ Successfully deleted group: ${group.name} (${id})`)
+    return res.json({
+      success: true,
+      message: `Group '${group.name}' deleted successfully`
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to delete group ${req.params.id}:`, error)
+
+    let statusCode = 500
+    let errorMessage = error.message
+
+    if (error.message.includes('not found')) {
+      statusCode = 404
+    } else if (
+      error.message.includes('has') &&
+      (error.message.includes('members') || error.message.includes('child'))
+    ) {
+      statusCode = 409
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      error: 'Failed to delete group',
+      message: errorMessage
+    })
+  }
+})
+
+// ==================== 👥 Group Member Management ====================
+
+// 获取组成员列表
+router.get('/groups/:id/members', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { includeUserDetails = false } = req.query
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    logger.debug(`👥 Getting members for group: ${id}`)
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 获取成员列表
+    const memberIds = await groupService.getGroupMembers(id)
+
+    let members = memberIds
+
+    // 如果需要详细信息，获取用户详情
+    if (includeUserDetails === 'true' && memberIds.length > 0) {
+      try {
+        const memberDetails = await Promise.all(
+          memberIds.map(async (userId) => {
+            try {
+              const user = await userService.getUserById(userId)
+              return user
+                ? {
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    displayName: user.displayName,
+                    role: user.role,
+                    status: user.status,
+                    lastLoginAt: user.lastLoginAt
+                  }
+                : {
+                    id: userId,
+                    username: 'Unknown',
+                    status: 'not_found'
+                  }
+            } catch (error) {
+              logger.warn(`⚠️ Failed to get user details for ${userId}:`, error.message)
+              return {
+                id: userId,
+                username: 'Unknown',
+                status: 'error'
+              }
+            }
+          })
+        )
+        members = memberDetails
+      } catch (error) {
+        logger.warn('⚠️ Failed to get member details, returning IDs only:', error.message)
+      }
+    }
+
+    logger.success(`👥 Successfully retrieved ${members.length} members for group: ${group.name}`)
+    return res.json({
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        memberCount: members.length,
+        members
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to get group members ${req.params.id}:`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get group members',
+      message: error.message
+    })
+  }
+})
+
+// 添加用户到组
+router.post('/groups/:id/members', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { userIds } = req.body
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'userIds array is required and must not be empty'
+      })
+    }
+
+    logger.debug(`👥 Adding ${userIds.length} users to group: ${id}`)
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 批量添加用户到组
+    const results = []
+    const errors = []
+
+    for (const userId of userIds) {
+      try {
+        // 验证用户是否存在
+        const user = await userService.getUserById(userId)
+        if (!user) {
+          errors.push({
+            userId,
+            error: 'User not found'
+          })
+          continue
+        }
+
+        // 添加用户到组
+        await groupService.assignUserToGroup(userId, id)
+        results.push({
+          userId,
+          username: user.username,
+          success: true
+        })
+      } catch (error) {
+        errors.push({
+          userId,
+          error: error.message
+        })
+      }
+    }
+
+    const successCount = results.length
+    const errorCount = errors.length
+
+    if (successCount > 0) {
+      logger.success(`👥 Successfully added ${successCount} users to group: ${group.name}`)
+    }
+
+    if (errorCount > 0) {
+      logger.warn(`⚠️ Failed to add ${errorCount} users to group: ${group.name}`)
+    }
+
+    return res.status(successCount > 0 ? 200 : 400).json({
+      success: successCount > 0,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        totalRequested: userIds.length,
+        successCount,
+        errorCount,
+        results,
+        errors
+      },
+      message:
+        successCount > 0
+          ? `Successfully added ${successCount} users to group${errorCount > 0 ? ` (${errorCount} failed)` : ''}`
+          : 'Failed to add any users to group'
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to add members to group ${req.params.id}:`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to add members to group',
+      message: error.message
+    })
+  }
+})
+
+// 从组中移除用户
+router.delete('/groups/:id/members/:userId', authenticateAdmin, async (req, res) => {
+  try {
+    const { id, userId } = req.params
+
+    if (!id || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID and User ID are required'
+      })
+    }
+
+    logger.debug(`👥 Removing user ${userId} from group: ${id}`)
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 验证用户是否存在
+    const user = await userService.getUserById(userId)
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    // 从组中移除用户
+    await groupService.removeUserFromGroup(userId, id)
+
+    logger.success(`👥 Successfully removed user ${user.username} from group: ${group.name}`)
+    return res.json({
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        userId,
+        username: user.username
+      },
+      message: `Successfully removed user '${user.username}' from group '${group.name}'`
+    })
+  } catch (error) {
+    logger.error(
+      `❌ Failed to remove user ${req.params.userId} from group ${req.params.id}:`,
+      error
+    )
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to remove user from group',
+      message: error.message
+    })
+  }
+})
+
+// ==================== 🔗 Group Account Assignment ====================
+
+// 获取组关联的账户
+router.get('/groups/:id/accounts', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { includeAccountDetails = false } = req.query
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    logger.debug(`🔗 Getting accounts for group: ${id}`)
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 获取账户分配
+    const accounts = await groupService.getGroupAccounts(id)
+
+    let response = {
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        accounts: {
+          claudeAccounts: accounts.claudeAccounts || [],
+          geminiAccounts: accounts.geminiAccounts || [],
+          openaiAccounts: accounts.openaiAccounts || []
+        },
+        totalAccountCount:
+          (accounts.claudeAccounts?.length || 0) +
+          (accounts.geminiAccounts?.length || 0) +
+          (accounts.openaiAccounts?.length || 0)
+      }
+    }
+
+    // 如果需要详细信息，获取账户详情
+    if (includeAccountDetails === 'true') {
+      try {
+        const [claudeDetails, geminiDetails] = await Promise.all([
+          Promise.all(
+            (accounts.claudeAccounts || []).map(async (accountId) => {
+              try {
+                const account = await database.getClaudeAccount(accountId)
+                return account
+                  ? {
+                      id: account.id,
+                      name: account.name,
+                      email: account.email,
+                      status: account.status,
+                      accountType: account.accountType,
+                      platform: 'claude'
+                    }
+                  : {
+                      id: accountId,
+                      name: 'Unknown',
+                      status: 'not_found',
+                      platform: 'claude'
+                    }
+              } catch (error) {
+                return {
+                  id: accountId,
+                  name: 'Error',
+                  status: 'error',
+                  platform: 'claude'
+                }
+              }
+            })
+          ),
+          Promise.all(
+            (accounts.geminiAccounts || []).map(async (accountId) => {
+              try {
+                const account = await database.getGeminiAccount(accountId)
+                return account
+                  ? {
+                      id: account.id,
+                      name: account.name,
+                      email: account.email,
+                      status: account.status,
+                      accountType: account.accountType,
+                      platform: 'gemini'
+                    }
+                  : {
+                      id: accountId,
+                      name: 'Unknown',
+                      status: 'not_found',
+                      platform: 'gemini'
+                    }
+              } catch (error) {
+                return {
+                  id: accountId,
+                  name: 'Error',
+                  status: 'error',
+                  platform: 'gemini'
+                }
+              }
+            })
+          )
+        ])
+
+        response.data.accountDetails = {
+          claudeAccounts: claudeDetails,
+          geminiAccounts: geminiDetails,
+          openaiAccounts: [] // Will be implemented when OpenAI support is added
+        }
+      } catch (error) {
+        logger.warn('⚠️ Failed to get account details:', error.message)
+      }
+    }
+
+    logger.success(
+      `🔗 Successfully retrieved ${response.data.totalAccountCount} accounts for group: ${group.name}`
+    )
+    return res.json(response)
+  } catch (error) {
+    logger.error(`❌ Failed to get group accounts ${req.params.id}:`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get group accounts',
+      message: error.message
+    })
+  }
+})
+
+// 为组分配账户
+router.post('/groups/:id/accounts', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { claudeAccounts, geminiAccounts, openaiAccounts } = req.body
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    if (!claudeAccounts && !geminiAccounts && !openaiAccounts) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one account type must be provided'
+      })
+    }
+
+    logger.debug(`🔗 Assigning accounts to group: ${id}`, {
+      claudeCount: claudeAccounts?.length || 0,
+      geminiCount: geminiAccounts?.length || 0,
+      openaiCount: openaiAccounts?.length || 0
+    })
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 准备账户数据
+    const accounts = {}
+    if (claudeAccounts && Array.isArray(claudeAccounts)) {
+      accounts.claudeAccounts = claudeAccounts
+    }
+    if (geminiAccounts && Array.isArray(geminiAccounts)) {
+      accounts.geminiAccounts = geminiAccounts
+    }
+    if (openaiAccounts && Array.isArray(openaiAccounts)) {
+      accounts.openaiAccounts = openaiAccounts
+    }
+
+    // 分配账户到组
+    await groupService.assignAccountsToGroup(id, accounts)
+
+    // 获取更新后的账户信息
+    const updatedAccounts = await groupService.getGroupAccounts(id)
+    const totalCount =
+      (updatedAccounts.claudeAccounts?.length || 0) +
+      (updatedAccounts.geminiAccounts?.length || 0) +
+      (updatedAccounts.openaiAccounts?.length || 0)
+
+    logger.success(`🔗 Successfully assigned accounts to group: ${group.name}`)
+    return res.json({
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        accounts: updatedAccounts,
+        totalAccountCount: totalCount
+      },
+      message: `Successfully assigned accounts to group '${group.name}'`
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to assign accounts to group ${req.params.id}:`, error)
+
+    let statusCode = 500
+    if (error.message.includes('not found')) {
+      statusCode = 404
+    } else if (error.message.includes('Invalid')) {
+      statusCode = 400
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      error: 'Failed to assign accounts to group',
+      message: error.message
+    })
+  }
+})
+
+// 移除组的账户分配
+router.delete('/groups/:id/accounts/:accountId', authenticateAdmin, async (req, res) => {
+  try {
+    const { id, accountId } = req.params
+    const { accountType } = req.query
+
+    if (!id || !accountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID and Account ID are required'
+      })
+    }
+
+    if (!accountType || !['claude', 'gemini', 'openai'].includes(accountType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Valid account type is required (claude, gemini, or openai)'
+      })
+    }
+
+    logger.debug(`🔗 Removing ${accountType} account ${accountId} from group: ${id}`)
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 准备移除数据
+    const accountsToRemove = {}
+    accountsToRemove[`${accountType}Accounts`] = [accountId]
+
+    // 从组中移除账户
+    await groupService.removeAccountsFromGroup(id, accountsToRemove)
+
+    logger.success(
+      `🔗 Successfully removed ${accountType} account ${accountId} from group: ${group.name}`
+    )
+    return res.json({
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        removedAccountId: accountId,
+        accountType
+      },
+      message: `Successfully removed ${accountType} account from group '${group.name}'`
+    })
+  } catch (error) {
+    logger.error(
+      `❌ Failed to remove account ${req.params.accountId} from group ${req.params.id}:`,
+      error
+    )
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to remove account from group',
+      message: error.message
+    })
+  }
+})
+
+// ==================== 🔐 Group Permissions Management ====================
+
+// 更新组权限配置
+router.put('/groups/:id/permissions', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { permissions } = req.body
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    if (!permissions || typeof permissions !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Permissions object is required'
+      })
+    }
+
+    logger.debug(`🔐 Updating permissions for group: ${id}`)
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 更新权限
+    await groupService.updateGroupPermissions(id, permissions)
+
+    // 获取更新后的组信息
+    const updatedGroup = await groupService.getGroupById(id)
+
+    logger.success(`🔐 Successfully updated permissions for group: ${group.name}`)
+    return res.json({
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        permissions: updatedGroup.permissions
+      },
+      message: `Successfully updated permissions for group '${group.name}'`
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to update permissions for group ${req.params.id}:`, error)
+
+    let statusCode = 500
+    if (error.message.includes('not found')) {
+      statusCode = 404
+    } else if (error.message.includes('Invalid')) {
+      statusCode = 400
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      error: 'Failed to update group permissions',
+      message: error.message
+    })
+  }
+})
+
+// ==================== ⚙️ Group Scheduling Configuration ====================
+
+// 获取组调度配置
+router.get('/groups/:id/scheduling', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    logger.debug(`⚙️ Getting scheduling config for group: ${id}`)
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 获取调度配置
+    const schedulingConfig = await groupService.getSchedulingConfig(id)
+
+    logger.success(`⚙️ Successfully retrieved scheduling config for group: ${group.name}`)
+    return res.json({
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        schedulingConfig
+      }
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to get scheduling config for group ${req.params.id}:`, error)
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to get scheduling configuration',
+      message: error.message
+    })
+  }
+})
+
+// 更新组调度策略配置
+router.put('/groups/:id/scheduling', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { schedulingConfig } = req.body
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Group ID is required'
+      })
+    }
+
+    if (!schedulingConfig || typeof schedulingConfig !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Scheduling configuration object is required'
+      })
+    }
+
+    logger.debug(`⚙️ Updating scheduling config for group: ${id}`, {
+      strategy: schedulingConfig.strategy,
+      hasWeights: !!schedulingConfig.weights,
+      fallbackToGlobal: schedulingConfig.fallbackToGlobal,
+      healthCheckEnabled: schedulingConfig.healthCheckEnabled
+    })
+
+    // 验证组是否存在
+    const group = await groupService.getGroupById(id)
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      })
+    }
+
+    // 更新调度配置
+    await groupService.updateSchedulingConfig(id, schedulingConfig)
+
+    // 获取更新后的配置
+    const updatedConfig = await groupService.getSchedulingConfig(id)
+
+    logger.success(`⚙️ Successfully updated scheduling config for group: ${group.name}`)
+    return res.json({
+      success: true,
+      data: {
+        groupId: id,
+        groupName: group.name,
+        schedulingConfig: updatedConfig
+      },
+      message: `Successfully updated scheduling configuration for group '${group.name}'`
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to update scheduling config for group ${req.params.id}:`, error)
+
+    let statusCode = 500
+    if (error.message.includes('not found')) {
+      statusCode = 404
+    } else if (error.message.includes('Invalid')) {
+      statusCode = 400
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      error: 'Failed to update scheduling configuration',
       message: error.message
     })
   }

@@ -16,6 +16,9 @@ const {
 const tokenRefreshService = require('./tokenRefreshService')
 const LRUCache = require('../utils/lruCache')
 
+// Group Service for group-based account selection
+const groupService = require('./groupService')
+
 // Gemini CLI OAuth 配置 - 这些是公开的 Gemini CLI 凭据
 const OAUTH_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com'
 const OAUTH_CLIENT_SECRET = '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'
@@ -32,6 +35,13 @@ let _encryptionKeyCache = null
 
 // 🔄 解密结果缓存，提高解密性能
 const decryptCache = new LRUCache(500)
+
+// 🎯 Group scheduling configuration (consistent with ClaudeAccountService)
+const SCHEDULING_STRATEGIES = ['random', 'round_robin', 'weighted', 'priority', 'least_recent']
+
+// 🗂️ Group session caches for round_robin and state tracking
+const groupRoundRobinCache = new LRUCache(100) // Group round robin state
+const groupSelectionCache = new LRUCache(1000) // Recent selections for least_recent strategy
 
 // 生成加密密钥（使用与 claudeAccountService 相同的方法）
 function generateEncryptionKey() {
@@ -780,6 +790,310 @@ async function selectAvailableAccount(apiKeyId, sessionHash = null) {
   return selectedAccount
 }
 
+// 🎯 Group-based account selection (consistent with ClaudeAccountService)
+async function selectAccountByGroup(userId, options = {}) {
+  try {
+    logger.info(`🎯 Starting group-based Gemini account selection for user: ${userId}`)
+
+    // Get user's groups from GroupService
+    const userGroups = await groupService.getUserGroups(userId)
+
+    if (!userGroups || userGroups.length === 0) {
+      logger.info(`👤 User ${userId} has no groups, falling back to global account selection`)
+      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
+    }
+
+    logger.info(`🏢 User ${userId} belongs to ${userGroups.length} groups`)
+
+    // Collect all Gemini accounts from user's groups
+    const allGroupGeminiAccounts = []
+    const groupAccountMap = new Map() // Track which group each account belongs to
+
+    for (const group of userGroups) {
+      try {
+        const groupAccounts = await groupService.getGroupAccounts(group.id)
+        const geminiAccounts = groupAccounts.geminiAccounts || []
+
+        logger.debug(
+          `📊 Group ${group.name} (${group.id}) has ${geminiAccounts.length} Gemini accounts`
+        )
+
+        for (const accountId of geminiAccounts) {
+          allGroupGeminiAccounts.push(accountId)
+          groupAccountMap.set(accountId, group)
+        }
+      } catch (error) {
+        logger.warn(`⚠️ Failed to get accounts for group ${group.id}: ${error.message}`)
+      }
+    }
+
+    if (allGroupGeminiAccounts.length === 0) {
+      logger.info(`📭 No Gemini accounts found in user's groups, falling back to global selection`)
+      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
+    }
+
+    logger.info(
+      `🔍 Found ${allGroupGeminiAccounts.length} total Gemini accounts across user's groups`
+    )
+
+    // Remove duplicates while preserving group mapping
+    const uniqueAccountIds = [...new Set(allGroupGeminiAccounts)]
+    logger.info(`🎯 ${uniqueAccountIds.length} unique Gemini accounts to evaluate`)
+
+    // Get and filter healthy accounts
+    const healthyAccounts = []
+    for (const accountId of uniqueAccountIds) {
+      try {
+        const account = await getAccount(accountId)
+        if (account && account.isActive === 'true' && !isRateLimited(account)) {
+          // Add group information to account
+          const associatedGroup = groupAccountMap.get(accountId)
+          account._associatedGroup = associatedGroup
+          healthyAccounts.push(account)
+        } else {
+          logger.debug(
+            `⚠️ Gemini account ${accountId} filtered out: ${!account ? 'not found' : account.isActive !== 'true' ? 'inactive' : 'rate limited'}`
+          )
+        }
+      } catch (error) {
+        logger.warn(`⚠️ Error checking Gemini account ${accountId}: ${error.message}`)
+      }
+    }
+
+    if (healthyAccounts.length === 0) {
+      logger.warn(`⚠️ No healthy Gemini accounts found in groups, falling back to global selection`)
+      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
+    }
+
+    logger.info(`✅ ${healthyAccounts.length} healthy Gemini accounts available for selection`)
+
+    // Select account using configured scheduling strategy
+    const selectedAccount = await selectAccountFromGroupPool(healthyAccounts, userId, options)
+
+    if (!selectedAccount) {
+      logger.warn(`⚠️ Group account selection failed, falling back to global selection`)
+      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
+    }
+
+    // Check and refresh token if needed
+    const isExpired = isTokenExpired(selectedAccount)
+
+    // Record token usage
+    logTokenUsage(
+      selectedAccount.id,
+      selectedAccount.name,
+      'gemini',
+      selectedAccount.expiresAt,
+      isExpired
+    )
+
+    if (isExpired) {
+      await refreshAccountToken(selectedAccount.id)
+      const refreshedAccount = await getAccount(selectedAccount.id)
+      logger.info(
+        `🔄 Refreshed token for selected Gemini account: ${selectedAccount.name} (${selectedAccount.id})`
+      )
+      return refreshedAccount
+    }
+
+    // Create sticky session mapping if requested
+    if (options.sessionHash) {
+      const client = database.getClientSafe()
+      await client.setex(
+        `${ACCOUNT_SESSION_MAPPING_PREFIX}${options.sessionHash}`,
+        3600, // 1 hour expiration
+        selectedAccount.id
+      )
+    }
+
+    // Record account usage
+    await recordAccountUsage(selectedAccount.id)
+
+    const associatedGroup = selectedAccount._associatedGroup
+    logger.success(
+      `🎯 Selected Gemini account: ${selectedAccount.name} (${selectedAccount.id}) from group: ${associatedGroup?.name || 'Unknown'}`
+    )
+
+    // Remove group metadata before returning
+    delete selectedAccount._associatedGroup
+
+    return selectedAccount
+  } catch (error) {
+    logger.error(`❌ Group-based Gemini account selection failed for user ${userId}:`, error)
+
+    // Fallback to global selection
+    logger.info(`🔄 Falling back to global Gemini account selection`)
+    return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
+  }
+}
+
+// 🎲 Select account from group pool using scheduling strategy
+async function selectAccountFromGroupPool(accounts, userId, options = {}) {
+  if (!accounts || accounts.length === 0) {
+    return null
+  }
+
+  if (accounts.length === 1) {
+    return accounts[0]
+  }
+
+  // Get scheduling configuration from user's groups
+  const strategy = await getEffectiveSchedulingStrategy(userId, options)
+  logger.debug(`📋 Using scheduling strategy: ${strategy}`)
+
+  switch (strategy) {
+    case 'random':
+      return selectAccountRandom(accounts)
+
+    case 'round_robin':
+      return await selectAccountRoundRobin(accounts, userId)
+
+    case 'weighted':
+      return selectAccountWeighted(accounts)
+
+    case 'priority':
+      return selectAccountPriority(accounts)
+
+    case 'least_recent':
+    default:
+      return selectAccountLeastRecent(accounts)
+  }
+}
+
+// 🎯 Get effective scheduling strategy for user
+async function getEffectiveSchedulingStrategy(userId, options = {}) {
+  try {
+    // Use explicit strategy if provided
+    if (options.strategy && SCHEDULING_STRATEGIES.includes(options.strategy)) {
+      return options.strategy
+    }
+
+    // Get from user's groups (first group wins, or use default)
+    const userGroups = await groupService.getUserGroups(userId)
+    if (userGroups && userGroups.length > 0) {
+      const schedulingConfig = await groupService.getSchedulingConfig(userGroups[0].id)
+      if (schedulingConfig && schedulingConfig.strategy) {
+        return schedulingConfig.strategy
+      }
+    }
+
+    // Default strategy
+    return 'least_recent'
+  } catch (error) {
+    logger.warn(`⚠️ Failed to get scheduling strategy for user ${userId}: ${error.message}`)
+    return 'least_recent'
+  }
+}
+
+// 🎲 Random selection
+function selectAccountRandom(accounts) {
+  const randomIndex = Math.floor(Math.random() * accounts.length)
+  const selected = accounts[randomIndex]
+  logger.debug(`🎲 Random selection: ${selected.name} (${selected.id})`)
+  return selected
+}
+
+// 🔄 Round robin selection
+async function selectAccountRoundRobin(accounts, userId) {
+  try {
+    const cacheKey = `user_${userId}_gemini`
+    let currentIndex = groupRoundRobinCache.get(cacheKey) || 0
+
+    // Ensure index is within bounds
+    if (currentIndex >= accounts.length) {
+      currentIndex = 0
+    }
+
+    const selected = accounts[currentIndex]
+
+    // Update index for next selection
+    const nextIndex = (currentIndex + 1) % accounts.length
+    groupRoundRobinCache.set(cacheKey, nextIndex)
+
+    logger.debug(
+      `🔄 Round robin selection: ${selected.name} (${selected.id}), next index: ${nextIndex}`
+    )
+    return selected
+  } catch (error) {
+    logger.warn(`⚠️ Round robin selection failed: ${error.message}, falling back to random`)
+    return selectAccountRandom(accounts)
+  }
+}
+
+// ⚖️ Weighted selection
+function selectAccountWeighted(accounts) {
+  try {
+    // Calculate weights (higher schedulingWeight = higher chance)
+    const weightedAccounts = accounts.map((account) => ({
+      account,
+      weight: parseInt(account.schedulingWeight) || 1
+    }))
+
+    const totalWeight = weightedAccounts.reduce((sum, item) => sum + item.weight, 0)
+    let random = Math.random() * totalWeight
+
+    for (const item of weightedAccounts) {
+      random -= item.weight
+      if (random <= 0) {
+        logger.debug(
+          `⚖️ Weighted selection: ${item.account.name} (${item.account.id}), weight: ${item.weight}`
+        )
+        return item.account
+      }
+    }
+
+    // Fallback to last account
+    const fallback = weightedAccounts[weightedAccounts.length - 1].account
+    logger.debug(`⚖️ Weighted selection fallback: ${fallback.name} (${fallback.id})`)
+    return fallback
+  } catch (error) {
+    logger.warn(`⚠️ Weighted selection failed: ${error.message}, falling back to random`)
+    return selectAccountRandom(accounts)
+  }
+}
+
+// 🔝 Priority-based selection
+function selectAccountPriority(accounts) {
+  try {
+    // Sort by priority (lower number = higher priority)
+    const sorted = [...accounts].sort((a, b) => {
+      const priorityA = parseInt(a.priority) || 50
+      const priorityB = parseInt(b.priority) || 50
+      return priorityA - priorityB
+    })
+
+    const selected = sorted[0]
+    logger.debug(
+      `🔝 Priority selection: ${selected.name} (${selected.id}), priority: ${selected.priority || 50}`
+    )
+    return selected
+  } catch (error) {
+    logger.warn(`⚠️ Priority selection failed: ${error.message}, falling back to random`)
+    return selectAccountRandom(accounts)
+  }
+}
+
+// 📅 Least recently used selection
+function selectAccountLeastRecent(accounts) {
+  try {
+    // Sort by lastScheduledAt (oldest first)
+    const sorted = [...accounts].sort((a, b) => {
+      const timeA = a.lastScheduledAt ? new Date(a.lastScheduledAt).getTime() : 0
+      const timeB = b.lastScheduledAt ? new Date(b.lastScheduledAt).getTime() : 0
+      return timeA - timeB
+    })
+
+    const selected = sorted[0]
+    logger.debug(
+      `📅 Least recent selection: ${selected.name} (${selected.id}), last used: ${selected.lastScheduledAt || 'never'}`
+    )
+    return selected
+  } catch (error) {
+    logger.warn(`⚠️ Least recent selection failed: ${error.message}, falling back to random`)
+    return selectAccountRandom(accounts)
+  }
+}
+
 // 检查 token 是否过期
 function isTokenExpired(account) {
   if (!account.expiresAt) {
@@ -1467,6 +1781,7 @@ module.exports = {
   deleteAccount,
   getAllAccounts,
   selectAvailableAccount,
+  selectAccountByGroup,
   refreshAccountToken,
   markAccountUsed,
   setAccountRateLimited,
@@ -1481,6 +1796,10 @@ module.exports = {
   decrypt,
   generateEncryptionKey,
   decryptCache, // 暴露缓存对象以便测试和监控
+  // Group scheduling exports
+  SCHEDULING_STRATEGIES,
+  groupRoundRobinCache,
+  groupSelectionCache,
   countTokens,
   generateContent,
   generateContentStream,
