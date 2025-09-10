@@ -1,4 +1,5 @@
 <template>
+<!-- eslint-disable no-unused-vars -->
   <Teleport to="body">
     <div class="modal fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div class="modal-content mx-auto flex max-h-[90vh] w-full max-w-2xl flex-col p-4 sm:p-6">
@@ -24,14 +25,15 @@
 
         <div class="modal-scroll-content custom-scrollbar flex-1 space-y-6">
           <!-- 导出进度 -->
-          <div v-if="exporting" class="rounded-lg border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 dark:border-blue-700 dark:from-blue-900/20 dark:to-indigo-900/20">
+          <div
+            v-if="exporting"
+            class="rounded-lg border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 dark:border-blue-700 dark:from-blue-900/20 dark:to-indigo-900/20"
+          >
             <div class="mb-3 flex items-center justify-between">
               <span class="text-sm font-medium text-blue-700 dark:text-blue-300">
                 {{ exportStatus }}
               </span>
-              <span class="text-sm text-blue-600 dark:text-blue-400">
-                {{ exportProgress }}%
-              </span>
+              <span class="text-sm text-blue-600 dark:text-blue-400"> {{ exportProgress }}% </span>
             </div>
             <div class="h-2 w-full overflow-hidden rounded-full bg-blue-200 dark:bg-blue-800">
               <div
@@ -43,9 +45,7 @@
 
           <!-- 文件格式选择 -->
           <div class="space-y-3">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              文件格式
-            </label>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300"> 文件格式 </label>
             <div class="grid grid-cols-2 gap-3">
               <label
                 v-for="format in fileFormats"
@@ -54,13 +54,13 @@
               >
                 <input
                   v-model="exportConfig.format"
+                  class="peer sr-only"
+                  :disabled="exporting"
                   type="radio"
                   :value="format.value"
-                  :disabled="exporting"
-                  class="peer sr-only"
                 />
                 <div
-                  class="flex items-center gap-3 rounded-lg border-2 border-gray-200 bg-white p-3 transition-all duration-200 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 hover:border-gray-300 peer-checked:hover:border-emerald-600 dark:border-gray-600 dark:bg-gray-800 dark:peer-checked:border-emerald-400 dark:peer-checked:bg-emerald-900/20 dark:hover:border-gray-500"
+                  class="flex items-center gap-3 rounded-lg border-2 border-gray-200 bg-white p-3 transition-all duration-200 hover:border-gray-300 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 peer-checked:hover:border-emerald-600 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500 dark:peer-checked:border-emerald-400 dark:peer-checked:bg-emerald-900/20"
                 >
                   <i :class="[format.icon, 'text-lg', format.color]" />
                   <div class="flex-1">
@@ -81,26 +81,24 @@
 
           <!-- 时间范围筛选 -->
           <div class="space-y-3">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              时间范围
-            </label>
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300"> 时间范围 </label>
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div class="space-y-2">
                 <label class="text-xs text-gray-600 dark:text-gray-400">开始时间</label>
                 <input
                   v-model="exportConfig.startDate"
-                  type="date"
-                  :disabled="exporting"
                   class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500"
+                  :disabled="exporting"
+                  type="date"
                 />
               </div>
               <div class="space-y-2">
                 <label class="text-xs text-gray-600 dark:text-gray-400">结束时间</label>
                 <input
                   v-model="exportConfig.endDate"
-                  type="date"
-                  :disabled="exporting"
                   class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500"
+                  :disabled="exporting"
+                  type="date"
                 />
               </div>
             </div>
@@ -108,9 +106,9 @@
               <button
                 v-for="range in quickRanges"
                 :key="range.value"
-                type="button"
-                :disabled="exporting"
                 class="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:bg-gray-700"
+                :disabled="exporting"
+                type="button"
                 @click="setQuickRange(range.value)"
               >
                 {{ range.label }}
@@ -125,8 +123,8 @@
             </label>
             <select
               v-model="exportConfig.status"
-              :disabled="exporting"
               class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500"
+              :disabled="exporting"
             >
               <option value="">全部状态</option>
               <option value="active">活跃</option>
@@ -145,22 +143,22 @@
                 <label class="text-xs text-gray-600 dark:text-gray-400">最小使用量 (Tokens)</label>
                 <input
                   v-model="exportConfig.minUsage"
-                  type="number"
-                  min="0"
-                  :disabled="exporting"
-                  placeholder="例如: 1000"
                   class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500"
+                  :disabled="exporting"
+                  min="0"
+                  placeholder="例如: 1000"
+                  type="number"
                 />
               </div>
               <div class="space-y-2">
                 <label class="text-xs text-gray-600 dark:text-gray-400">最大使用量 (Tokens)</label>
                 <input
                   v-model="exportConfig.maxUsage"
-                  type="number"
-                  min="0"
-                  :disabled="exporting"
-                  placeholder="例如: 100000"
                   class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500"
+                  :disabled="exporting"
+                  min="0"
+                  placeholder="例如: 100000"
+                  type="number"
                 />
               </div>
             </div>
@@ -173,10 +171,10 @@
             </label>
             <input
               v-model="exportConfig.search"
-              type="text"
+              class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500"
               :disabled="exporting"
               placeholder="搜索API Key名称或描述..."
-              class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500"
+              type="text"
             />
           </div>
         </div>
@@ -184,29 +182,24 @@
         <!-- 底部按钮 -->
         <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
           <button
-            type="button"
-            :disabled="exporting"
             class="order-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-gray-500 dark:hover:bg-gray-700 sm:order-1"
+            :disabled="exporting"
+            type="button"
             @click="$emit('close')"
           >
             取消
           </button>
           <button
-            type="button"
-            :disabled="exporting"
             class="group relative order-1 overflow-hidden rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:from-emerald-600 hover:to-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:order-2"
+            :disabled="exporting"
+            type="button"
             @click="startExport"
           >
             <div
               class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-emerald-400 to-emerald-500 opacity-0 blur transition duration-300 group-hover:opacity-30 group-disabled:opacity-0"
             ></div>
             <span class="relative flex items-center gap-2">
-              <i
-                :class="[
-                  'fas text-sm',
-                  exporting ? 'fa-spinner fa-spin' : 'fa-download'
-                ]"
-              />
+              <i :class="['fas text-sm', exporting ? 'fa-spinner fa-spin' : 'fa-download']" />
               {{ exporting ? '导出中...' : '开始导出' }}
             </span>
           </button>
@@ -223,7 +216,7 @@ import dayjs from 'dayjs'
 import axios from 'axios'
 
 // Props & Emits
-const props = defineProps({
+const _props = defineProps({
   apiKeys: {
     type: Array,
     default: () => []
@@ -275,10 +268,12 @@ const quickRanges = [
 ]
 
 // 计算属性
-const canExport = computed(() => {
-  return exportConfig.value.startDate &&
-         exportConfig.value.endDate &&
-         dayjs(exportConfig.value.startDate).isBefore(dayjs(exportConfig.value.endDate))
+const _canExport = computed(() => {
+  return (
+    exportConfig.value.startDate &&
+    exportConfig.value.endDate &&
+    dayjs(exportConfig.value.startDate).isBefore(dayjs(exportConfig.value.endDate))
+  )
 })
 
 // 方法
@@ -292,7 +287,6 @@ const setQuickRange = (days) => {
     exportConfig.value.endDate = dayjs().format('YYYY-MM-DD')
   }
 }
-
 
 const startExport = async () => {
   try {
@@ -343,7 +337,7 @@ const startExport = async () => {
     // 获取文件名（从Content-Disposition header或使用默认值）
     const contentDisposition = response.headers['content-disposition']
     let filename = `api_keys_export_${Date.now()}.${exportConfig.value.format}`
-    
+
     if (contentDisposition) {
       const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
       if (filenameMatch) {
@@ -358,27 +352,26 @@ const startExport = async () => {
     link.href = url
     link.download = filename
     link.style.display = 'none'
-    
+
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-    
+
     // 清理URL对象
     window.URL.revokeObjectURL(url)
-    
+
     ElMessage.success('数据导出完成！')
-    
+
     // 通知父组件导出完成
     emit('export-complete')
-    
+
     // 延迟关闭模态框以显示完成状态
     setTimeout(() => {
       emit('close')
     }, 1500)
-
   } catch (error) {
     console.error('导出失败:', error)
-    
+
     let errorMessage = '导出失败，请重试'
     if (error.response) {
       // 服务器响应错误
@@ -392,7 +385,7 @@ const startExport = async () => {
     } else if (error.code === 'ECONNABORTED') {
       errorMessage = '导出超时，请尝试缩小导出范围'
     }
-    
+
     ElMessage.error(errorMessage)
     exporting.value = false
     exportProgress.value = 0

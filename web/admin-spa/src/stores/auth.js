@@ -21,7 +21,7 @@ export const useAuthStore = defineStore('auth', () => {
     faviconData: ''
   })
   const oemLoading = ref(true)
-  
+
   // 向后兼容
   const username = computed(() => user.value?.username || '')
 
@@ -40,22 +40,27 @@ export const useAuthStore = defineStore('auth', () => {
       const result = await apiClient.post('/auth/login', credentials)
 
       if (result.success && result.data) {
-        const { sessionToken: token, sessionId: id, expiresAt: expiry, user: userData } = result.data
-        
+        const {
+          sessionToken: token,
+          sessionId: id,
+          expiresAt: expiry,
+          user: userData
+        } = result.data
+
         // 更新状态
         sessionToken.value = token
         sessionId.value = id
         expiresAt.value = expiry
         user.value = userData
         isLoggedIn.value = true
-        
+
         // 保存到localStorage
         localStorage.setItem('sessionToken', token)
         localStorage.setItem('sessionId', id)
         if (expiry) {
           localStorage.setItem('expiresAt', expiry)
         }
-        
+
         // 向后兼容：同时保存到authToken
         authToken.value = token
         localStorage.setItem('authToken', token)
@@ -80,14 +85,14 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (error) {
       console.warn('Logout API call failed:', error.message)
     }
-    
+
     // 清理本地状态
     clearAuthState()
-    
+
     // 跳转到登录页
     router.push('/login')
   }
-  
+
   function clearAuthState() {
     isLoggedIn.value = false
     authToken.value = ''
@@ -95,7 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
     sessionId.value = ''
     expiresAt.value = null
     user.value = null
-    
+
     // 清理localStorage
     localStorage.removeItem('authToken')
     localStorage.removeItem('sessionToken')
@@ -108,21 +113,21 @@ export const useAuthStore = defineStore('auth', () => {
     const storedSessionToken = localStorage.getItem('sessionToken')
     const storedSessionId = localStorage.getItem('sessionId')
     const storedExpiresAt = localStorage.getItem('expiresAt')
-    
+
     if (storedSessionToken) {
       sessionToken.value = storedSessionToken
       sessionId.value = storedSessionId || ''
       expiresAt.value = storedExpiresAt
-      
+
       // 向后兼容
       authToken.value = storedSessionToken
-      
+
       // 检查会话是否过期
       if (storedExpiresAt && new Date(storedExpiresAt) <= new Date()) {
         clearAuthState()
         return
       }
-      
+
       isLoggedIn.value = true
       // 验证token有效性
       verifySession()
@@ -138,7 +143,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       // 使用新的会话验证端点
       const result = await apiClient.get('/auth/validate')
-      
+
       if (result.success && result.data) {
         user.value = result.data.user
         // 会话有效，更新状态
@@ -158,32 +163,37 @@ export const useAuthStore = defineStore('auth', () => {
     if (refreshing.value || !sessionToken.value) {
       return false
     }
-    
+
     refreshing.value = true
-    
+
     try {
       const result = await apiClient.post('/auth/refresh')
-      
+
       if (result.success && result.data) {
-        const { sessionToken: newToken, sessionId: newId, expiresAt: newExpiry, user: userData } = result.data
-        
+        const {
+          sessionToken: newToken,
+          sessionId: newId,
+          expiresAt: newExpiry,
+          user: userData
+        } = result.data
+
         // 更新状态
         sessionToken.value = newToken
         sessionId.value = newId
         expiresAt.value = newExpiry
         user.value = userData
-        
+
         // 更新localStorage
         localStorage.setItem('sessionToken', newToken)
         localStorage.setItem('sessionId', newId)
         if (newExpiry) {
           localStorage.setItem('expiresAt', newExpiry)
         }
-        
+
         // 向后兼容
         authToken.value = newToken
         localStorage.setItem('authToken', newToken)
-        
+
         return true
       } else {
         throw new Error(result.message || 'Session refresh failed')
@@ -197,7 +207,7 @@ export const useAuthStore = defineStore('auth', () => {
       refreshing.value = false
     }
   }
-  
+
   // 修改密码
   async function changePassword(oldPassword, newPassword) {
     try {
@@ -205,7 +215,7 @@ export const useAuthStore = defineStore('auth', () => {
         oldPassword,
         newPassword
       })
-      
+
       if (result.success) {
         return { success: true, message: result.message }
       } else {
@@ -243,7 +253,7 @@ export const useAuthStore = defineStore('auth', () => {
       oemLoading.value = false
     }
   }
-  
+
   return {
     // 状态
     isLoggedIn,

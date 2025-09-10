@@ -2,7 +2,7 @@
   <div class="session-manager">
     <!-- Session Status Indicator (minimal UI) -->
     <div v-if="showIndicator" class="session-indicator" :class="sessionStatusClass">
-      <i :class="sessionStatusIcon" class="text-sm" />
+      <i class="text-sm" :class="sessionStatusIcon" />
       <span v-if="showStatusText" class="ml-2 text-sm">{{ sessionStatusText }}</span>
     </div>
 
@@ -14,10 +14,8 @@
     >
       <div class="glass-strong w-full max-w-md rounded-2xl p-6 shadow-2xl">
         <div class="mb-4 text-center">
-          <i class="fas fa-clock text-3xl text-yellow-500 mb-3" />
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            会话即将过期
-          </h3>
+          <i class="fas fa-clock mb-3 text-3xl text-yellow-500" />
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">会话即将过期</h3>
           <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
             您的会话将在 <strong>{{ formatTime(timeUntilExpiry) }}</strong> 后过期。
             是否要刷新会话？
@@ -25,19 +23,11 @@
         </div>
 
         <div class="flex space-x-3">
-          <button
-            class="btn btn-outline flex-1"
-            @click="logout"
-            :disabled="refreshing"
-          >
+          <button class="btn btn-outline flex-1" :disabled="refreshing" @click="logout">
             <i class="fas fa-sign-out-alt mr-2" />
             登出
           </button>
-          <button
-            class="btn btn-primary flex-1"
-            @click="manualRefresh"
-            :disabled="refreshing"
-          >
+          <button class="btn btn-primary flex-1" :disabled="refreshing" @click="manualRefresh">
             <div v-if="refreshing" class="loading-spinner mr-2" />
             <i v-else class="fas fa-refresh mr-2" />
             {{ refreshing ? '刷新中...' : '刷新会话' }}
@@ -53,19 +43,12 @@
     >
       <div class="glass-strong w-full max-w-md rounded-2xl p-6 shadow-2xl">
         <div class="mb-6 text-center">
-          <i class="fas fa-exclamation-triangle text-3xl text-red-500 mb-3" />
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            会话已过期
-          </h3>
-          <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            您的会话已过期，请重新登录。
-          </p>
+          <i class="fas fa-exclamation-triangle mb-3 text-3xl text-red-500" />
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">会话已过期</h3>
+          <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">您的会话已过期，请重新登录。</p>
         </div>
 
-        <button
-          class="btn btn-primary w-full"
-          @click="redirectToLogin"
-        >
+        <button class="btn btn-primary w-full" @click="redirectToLogin">
           <i class="fas fa-sign-in-alt mr-2" />
           重新登录
         </button>
@@ -128,11 +111,11 @@ const lastRefreshAttempt = ref(0)
 // Computed
 const expiryTimestamp = computed(() => {
   if (!props.expiresAt) return null
-  
+
   if (typeof props.expiresAt === 'string') {
     return new Date(props.expiresAt).getTime()
   }
-  
+
   return props.expiresAt
 })
 
@@ -201,7 +184,7 @@ const formatTime = (ms) => {
   const seconds = Math.floor(ms / 1000)
   const minutes = Math.floor(seconds / 60)
   const hours = Math.floor(minutes / 60)
-  
+
   if (hours > 0) {
     return `${hours}小时${minutes % 60}分钟`
   } else if (minutes > 0) {
@@ -215,7 +198,7 @@ const startClockTimer = () => {
   if (clockTimer.value) {
     clearInterval(clockTimer.value)
   }
-  
+
   clockTimer.value = setInterval(() => {
     currentTime.value = Date.now()
   }, 1000)
@@ -232,11 +215,11 @@ const scheduleRefresh = () => {
   if (refreshTimer.value) {
     clearTimeout(refreshTimer.value)
   }
-  
+
   if (!expiryTimestamp.value || !props.autoRefresh) return
-  
+
   const timeUntilRefresh = Math.max(0, expiryTimestamp.value - Date.now() - props.refreshThreshold)
-  
+
   if (timeUntilRefresh > 0) {
     refreshTimer.value = setTimeout(() => {
       handleAutoRefresh()
@@ -246,15 +229,16 @@ const scheduleRefresh = () => {
 
 const handleAutoRefresh = async () => {
   if (refreshing.value || isExpired.value) return
-  
+
   // Prevent too frequent refresh attempts
   const now = Date.now()
-  if (now - lastRefreshAttempt.value < 30000) { // 30 seconds cooldown
+  if (now - lastRefreshAttempt.value < 30000) {
+    // 30 seconds cooldown
     return
   }
-  
+
   lastRefreshAttempt.value = now
-  
+
   try {
     refreshing.value = true
     await refreshSession()
@@ -271,7 +255,7 @@ const refreshSession = async () => {
   if (!props.sessionToken) {
     throw new Error('No session token available')
   }
-  
+
   // This should be implemented by the parent component (AuthStore)
   emit('sessionRefreshed')
 }
@@ -370,11 +354,11 @@ defineExpose({
 
 <style scoped>
 .session-indicator {
-  @apply inline-flex items-center px-2 py-1 rounded-lg text-sm font-medium;
+  @apply inline-flex items-center rounded-lg px-2 py-1 text-sm font-medium;
 }
 
 .loading-spinner {
-  @apply inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin;
+  @apply inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white;
 }
 
 /* Smooth transitions for modals */

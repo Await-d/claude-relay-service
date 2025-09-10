@@ -53,28 +53,70 @@ const authStore = useAuthStore()
 
 // 所有可能的标签
 const allTabs = [
-  { key: 'dashboard', name: '仪表板', shortName: '仪表板', icon: 'fas fa-tachometer-alt', requiredRole: null },
+  {
+    key: 'dashboard',
+    name: '仪表板',
+    shortName: '仪表板',
+    icon: 'fas fa-tachometer-alt',
+    requiredRole: null
+  },
   { key: 'apiKeys', name: 'API Keys', shortName: 'API', icon: 'fas fa-key', requiredRole: null },
-  { key: 'accounts', name: '账户管理', shortName: '账户', icon: 'fas fa-user-circle', requiredRole: null },
-  { key: 'users', name: '用户管理', shortName: '用户', icon: 'fas fa-user-friends', requiredRole: 'admin' },
+  {
+    key: 'accounts',
+    name: '账户管理',
+    shortName: '账户',
+    icon: 'fas fa-user-circle',
+    requiredRole: null
+  },
+  {
+    key: 'users',
+    name: '用户管理',
+    shortName: '用户',
+    icon: 'fas fa-user-friends',
+    requiredRole: 'admin'
+  },
   { key: 'groups', name: '用户组', shortName: '组', icon: 'fas fa-users', requiredRole: 'admin' },
-  { key: 'user-groups', name: '用户组管理', shortName: '组管理', icon: 'fas fa-users-cog', requiredRole: 'admin' },
-  { key: 'requestLogs', name: '请求日志', shortName: '日志', icon: 'fas fa-file-alt', requiredRole: null },
-  { key: 'tutorial', name: '使用教程', shortName: '教程', icon: 'fas fa-graduation-cap', requiredRole: null },
-  { key: 'settings', name: '系统设置', shortName: '设置', icon: 'fas fa-cogs', requiredRole: 'admin' }
+  {
+    key: 'user-groups',
+    name: '用户组管理',
+    shortName: '组管理',
+    icon: 'fas fa-users-cog',
+    requiredRole: 'admin'
+  },
+  {
+    key: 'requestLogs',
+    name: '请求日志',
+    shortName: '日志',
+    icon: 'fas fa-file-alt',
+    requiredRole: null
+  },
+  {
+    key: 'tutorial',
+    name: '使用教程',
+    shortName: '教程',
+    icon: 'fas fa-graduation-cap',
+    requiredRole: null
+  },
+  {
+    key: 'settings',
+    name: '系统设置',
+    shortName: '设置',
+    icon: 'fas fa-cogs',
+    requiredRole: 'admin'
+  }
 ]
 
 // 根据用户权限过滤显示的标签
 const tabs = computed(() => {
   const user = authStore.user
   const userRole = user?.role || 'user'
-  
-  return allTabs.filter(tab => {
+
+  return allTabs.filter((tab) => {
     // 如果标签不需要特殊权限，或者用户是管理员，则显示
     if (!tab.requiredRole || userRole === 'admin') {
       return true
     }
-    
+
     // 检查用户角色是否满足标签要求
     return userRole === tab.requiredRole
   })

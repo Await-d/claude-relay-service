@@ -34,10 +34,10 @@
         <input
           v-model="form.username"
           class="form-input w-full"
-          type="text"
+          :disabled="loading"
           placeholder="请输入用户名"
           required
-          :disabled="loading"
+          type="text"
           @blur="validateUsername"
         />
         <div v-if="errors.username" class="mt-2 text-sm text-red-500 dark:text-red-400">
@@ -54,18 +54,18 @@
         <div class="relative">
           <input
             v-model="form.password"
-            :type="showPassword ? 'text' : 'password'"
             class="form-input w-full pr-12"
+            :disabled="loading"
             placeholder="请输入密码"
             required
-            :disabled="loading"
+            :type="showPassword ? 'text' : 'password'"
             @blur="validatePassword"
           />
           <button
-            type="button"
             class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            @click="showPassword = !showPassword"
             :disabled="loading"
+            type="button"
+            @click="showPassword = !showPassword"
           >
             <i :class="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'" />
           </button>
@@ -90,9 +90,9 @@
 
       <!-- Submit Button -->
       <button
-        type="submit"
         class="btn btn-primary w-full px-6 py-4 text-lg font-semibold"
         :disabled="loading || !isFormValid"
+        type="submit"
       >
         <div v-if="loading" class="loading-spinner mr-2" />
         <i v-else class="fas fa-sign-in-alt mr-2" />
@@ -112,8 +112,8 @@
     <!-- Advanced Options Toggle -->
     <div class="text-center">
       <button
-        type="button"
         class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        type="button"
         @click="showAuthMethod = !showAuthMethod"
       >
         <i class="fas fa-cog mr-1" />
@@ -127,7 +127,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 
 // Props
-const props = defineProps({
+const _props = defineProps({
   loading: {
     type: Boolean,
     default: false

@@ -71,7 +71,7 @@ class ExcelExporter {
     const startDate = dayjs(config.startDate)
     const endDate = dayjs(config.endDate).add(1, 'day') // 包含结束日期当天
 
-    return apiKeys.filter(key => {
+    return apiKeys.filter((key) => {
       const createdAt = dayjs(key.createdAt)
       return createdAt.isAfter(startDate) && createdAt.isBefore(endDate)
     })
@@ -99,10 +99,10 @@ class ExcelExporter {
       expiresAt: '过期时间'
     }
 
-    return data.map(key => {
+    return data.map((key) => {
       const row = {}
-      
-      config.fields.forEach(field => {
+
+      config.fields.forEach((field) => {
         const label = fieldLabels[field] || field
         let value = key[field]
 
@@ -177,15 +177,15 @@ class ExcelExporter {
     try {
       // 这里需要使用 xlsx 库或其他Excel导出库
       // 为了保持简单，这里使用模拟实现
-      
+
       // 实际实现时可以使用 SheetJS (xlsx) 库：
       // import * as XLSX from 'xlsx'
-      
+
       const filename = this.generateFilename('xlsx')
-      
+
       // 模拟Excel导出
       console.log('导出Excel数据:', { data, filename, config })
-      
+
       // 实际实现示例：
       /*
       const ws = XLSX.utils.json_to_sheet(data)
@@ -202,7 +202,6 @@ class ExcelExporter {
 
       // 临时实现：转换为CSV并下载
       await this.exportToCSV(data, config)
-      
     } catch (error) {
       console.error('Excel导出失败:', error)
       throw error
@@ -214,7 +213,7 @@ class ExcelExporter {
    * @param {Array} data 格式化后的数据
    * @param {Object} config 配置
    */
-  async exportToCSV(data, config) {
+  async exportToCSV(data, _config) {
     try {
       if (data.length === 0) {
         throw new Error('没有可导出的数据')
@@ -222,15 +221,13 @@ class ExcelExporter {
 
       // 获取表头
       const headers = Object.keys(data[0])
-      
+
       // 构建CSV内容
       const csvContent = [
         // 表头
-        headers.map(header => this.escapeCSVField(header)).join(','),
+        headers.map((header) => this.escapeCSVField(header)).join(','),
         // 数据行
-        ...data.map(row => 
-          headers.map(header => this.escapeCSVField(row[header])).join(',')
-        )
+        ...data.map((row) => headers.map((header) => this.escapeCSVField(row[header])).join(','))
       ].join('\n')
 
       // 添加UTF-8 BOM以支持中文
@@ -238,13 +235,12 @@ class ExcelExporter {
       const finalContent = bom + csvContent
 
       // 创建下载链接
-      const blob = new Blob([finalContent], { 
-        type: 'text/csv;charset=utf-8' 
+      const blob = new Blob([finalContent], {
+        type: 'text/csv;charset=utf-8'
       })
-      
+
       const filename = this.generateFilename('csv')
       this.downloadFile(blob, filename)
-
     } catch (error) {
       console.error('CSV导出失败:', error)
       throw error
@@ -258,13 +254,13 @@ class ExcelExporter {
    */
   escapeCSVField(field) {
     const str = String(field || '')
-    
+
     // 如果包含逗号、换行或双引号，需要用双引号包围
     if (str.includes(',') || str.includes('\n') || str.includes('"')) {
       // 双引号需要转义为两个双引号
       return `"${str.replace(/"/g, '""')}"`
     }
-    
+
     return str
   }
 
@@ -287,18 +283,17 @@ class ExcelExporter {
     try {
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
-      
+
       link.href = url
       link.download = filename
       link.style.display = 'none'
-      
+
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      
+
       // 清理URL对象
       setTimeout(() => URL.revokeObjectURL(url), 100)
-      
     } catch (error) {
       console.error('文件下载失败:', error)
       throw new Error('文件下载失败')

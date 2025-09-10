@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="visible"
-    class="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden overflow-y-auto outline-none focus:outline-none"
+    class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overflow-x-hidden outline-none focus:outline-none"
     @click.self="$emit('close')"
   >
     <!-- Backdrop -->
@@ -17,16 +17,16 @@
           class="flex items-start justify-between rounded-t border-b border-solid border-gray-200 p-5 dark:border-gray-600"
         >
           <div class="flex items-center gap-3">
-            <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500">
-              <i class="fas fa-users text-white text-lg"></i>
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500"
+            >
+              <i class="fas fa-users text-lg text-white"></i>
             </div>
             <div>
               <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
                 {{ group?.name }}
               </h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400">
-                组详情和配置信息
-              </p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">组详情和配置信息</p>
             </div>
           </div>
           <button
@@ -46,64 +46,89 @@
 
           <div v-else class="space-y-6">
             <!-- Basic Information -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <div class="space-y-4">
-                <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+                <h4
+                  class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+                >
                   <i class="fas fa-info-circle mr-2 text-blue-500"></i>
                   基本信息
                 </h4>
-                
+
                 <div class="space-y-3">
-                  <div class="flex justify-between items-start">
+                  <div class="flex items-start justify-between">
                     <span class="text-sm font-medium text-gray-600 dark:text-gray-400">组ID:</span>
-                    <span class="text-sm text-gray-900 dark:text-gray-100 font-mono">{{ group.id }}</span>
+                    <span class="font-mono text-sm text-gray-900 dark:text-gray-100">{{
+                      group.id
+                    }}</span>
                   </div>
-                  
-                  <div class="flex justify-between items-start">
-                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">组名称:</span>
+
+                  <div class="flex items-start justify-between">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400"
+                      >组名称:</span
+                    >
                     <span class="text-sm text-gray-900 dark:text-gray-100">{{ group.name }}</span>
                   </div>
-                  
-                  <div v-if="group.description" class="flex justify-between items-start">
+
+                  <div v-if="group.description" class="flex items-start justify-between">
                     <span class="text-sm font-medium text-gray-600 dark:text-gray-400">描述:</span>
-                    <span class="text-sm text-gray-900 dark:text-gray-100 max-w-60 text-right">{{ group.description }}</span>
+                    <span class="max-w-60 text-right text-sm text-gray-900 dark:text-gray-100">{{
+                      group.description
+                    }}</span>
                   </div>
-                  
-                  <div class="flex justify-between items-start">
+
+                  <div class="flex items-start justify-between">
                     <span class="text-sm font-medium text-gray-600 dark:text-gray-400">状态:</span>
-                    <span :class="[
-                      'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium',
-                      group.isActive 
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' 
-                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                    ]">
-                      <i :class="['fas mr-1', group.isActive ? 'fa-check-circle' : 'fa-times-circle']"></i>
+                    <span
+                      :class="[
+                        'inline-flex items-center rounded-full px-2 py-1 text-xs font-medium',
+                        group.isActive
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                          : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                      ]"
+                    >
+                      <i
+                        :class="[
+                          'fas mr-1',
+                          group.isActive ? 'fa-check-circle' : 'fa-times-circle'
+                        ]"
+                      ></i>
                       {{ group.isActive ? '激活' : '禁用' }}
                     </span>
                   </div>
-                  
-                  <div class="flex justify-between items-start">
-                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">创建时间:</span>
-                    <span class="text-sm text-gray-900 dark:text-gray-100">{{ formatDate(group.createdAt) }}</span>
+
+                  <div class="flex items-start justify-between">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400"
+                      >创建时间:</span
+                    >
+                    <span class="text-sm text-gray-900 dark:text-gray-100">{{
+                      formatDate(group.createdAt)
+                    }}</span>
                   </div>
-                  
-                  <div class="flex justify-between items-start">
-                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">更新时间:</span>
-                    <span class="text-sm text-gray-900 dark:text-gray-100">{{ formatDate(group.updatedAt) }}</span>
+
+                  <div class="flex items-start justify-between">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400"
+                      >更新时间:</span
+                    >
+                    <span class="text-sm text-gray-900 dark:text-gray-100">{{
+                      formatDate(group.updatedAt)
+                    }}</span>
                   </div>
                 </div>
               </div>
 
               <!-- Hierarchy Information -->
               <div class="space-y-4">
-                <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+                <h4
+                  class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+                >
                   <i class="fas fa-sitemap mr-2 text-green-500"></i>
                   层级关系
                 </h4>
-                
+
                 <div class="space-y-3">
-                  <div v-if="group.parentId" class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                    <div class="flex items-center gap-2 mb-2">
+                  <div v-if="group.parentId" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                    <div class="mb-2 flex items-center gap-2">
                       <i class="fas fa-arrow-up text-blue-500"></i>
                       <span class="text-sm font-medium text-blue-900 dark:text-blue-100">父组</span>
                     </div>
@@ -111,15 +136,20 @@
                       {{ group.parentGroup?.name || '未知父组' }}
                     </div>
                   </div>
-                  
-                  <div v-if="group.childGroups && group.childGroups.length > 0" class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                    <div class="flex items-center gap-2 mb-2">
+
+                  <div
+                    v-if="group.childGroups && group.childGroups.length > 0"
+                    class="rounded-lg bg-green-50 p-3 dark:bg-green-900/20"
+                  >
+                    <div class="mb-2 flex items-center gap-2">
                       <i class="fas fa-arrow-down text-green-500"></i>
-                      <span class="text-sm font-medium text-green-900 dark:text-green-100">子组 ({{ group.childGroups.length }})</span>
+                      <span class="text-sm font-medium text-green-900 dark:text-green-100"
+                        >子组 ({{ group.childGroups.length }})</span
+                      >
                     </div>
                     <div class="space-y-1">
-                      <div 
-                        v-for="child in group.childGroups" 
+                      <div
+                        v-for="child in group.childGroups"
                         :key="child.id"
                         class="text-sm text-green-700 dark:text-green-300"
                       >
@@ -127,9 +157,12 @@
                       </div>
                     </div>
                   </div>
-                  
-                  <div v-if="!group.parentId && (!group.childGroups || group.childGroups.length === 0)" class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
-                    <i class="fas fa-layer-group text-gray-400 text-lg mb-2"></i>
+
+                  <div
+                    v-if="!group.parentId && (!group.childGroups || group.childGroups.length === 0)"
+                    class="rounded-lg bg-gray-50 p-3 text-center dark:bg-gray-700"
+                  >
+                    <i class="fas fa-layer-group mb-2 text-lg text-gray-400"></i>
                     <div class="text-sm text-gray-500 dark:text-gray-400">独立组</div>
                   </div>
                 </div>
@@ -137,16 +170,18 @@
             </div>
 
             <!-- Statistics -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="grid grid-cols-1 gap-6 md:grid-cols-3">
               <!-- Members -->
-              <div class="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg">
+              <div
+                class="rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 p-4 dark:from-blue-900/20 dark:to-indigo-900/20"
+              >
                 <div class="flex items-center gap-3">
                   <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500">
                     <i class="fas fa-users text-white"></i>
                   </div>
                   <div>
                     <div class="text-2xl font-bold text-blue-900 dark:text-blue-100">
-                      {{ group.memberCount || (group.members?.length || 0) }}
+                      {{ group.memberCount || group.members?.length || 0 }}
                     </div>
                     <div class="text-sm text-blue-600 dark:text-blue-300">成员</div>
                   </div>
@@ -154,7 +189,9 @@
               </div>
 
               <!-- Accounts -->
-              <div class="p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-lg">
+              <div
+                class="rounded-lg bg-gradient-to-r from-purple-50 to-pink-50 p-4 dark:from-purple-900/20 dark:to-pink-900/20"
+              >
                 <div class="flex items-center gap-3">
                   <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500">
                     <i class="fas fa-server text-white"></i>
@@ -169,7 +206,9 @@
               </div>
 
               <!-- Strategy -->
-              <div class="p-4 bg-gradient-to-r from-green-50 to-teal-50 dark:from-green-900/20 dark:to-teal-900/20 rounded-lg">
+              <div
+                class="rounded-lg bg-gradient-to-r from-green-50 to-teal-50 p-4 dark:from-green-900/20 dark:to-teal-900/20"
+              >
                 <div class="flex items-center gap-3">
                   <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500">
                     <i class="fas fa-cogs text-white"></i>
@@ -186,55 +225,99 @@
 
             <!-- Permissions -->
             <div class="space-y-4">
-              <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+              <h4
+                class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+              >
                 <i class="fas fa-shield-alt mr-2 text-green-500"></i>
                 权限配置
               </h4>
-              
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <h5 class="font-medium text-gray-900 dark:text-gray-100 mb-2">聊天权限</h5>
+
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-700">
+                  <h5 class="mb-2 font-medium text-gray-900 dark:text-gray-100">聊天权限</h5>
                   <div class="space-y-1 text-sm">
                     <div class="flex items-center gap-2">
-                      <i :class="['fas', group.permissions?.['chat.create'] ? 'fa-check text-green-500' : 'fa-times text-red-500']"></i>
+                      <i
+                        :class="[
+                          'fas',
+                          group.permissions?.['chat.create']
+                            ? 'fa-check text-green-500'
+                            : 'fa-times text-red-500'
+                        ]"
+                      ></i>
                       <span class="text-gray-700 dark:text-gray-300">创建聊天</span>
                     </div>
                     <div class="flex items-center gap-2">
-                      <i :class="['fas', group.permissions?.['chat.history'] ? 'fa-check text-green-500' : 'fa-times text-red-500']"></i>
+                      <i
+                        :class="[
+                          'fas',
+                          group.permissions?.['chat.history']
+                            ? 'fa-check text-green-500'
+                            : 'fa-times text-red-500'
+                        ]"
+                      ></i>
                       <span class="text-gray-700 dark:text-gray-300">查看历史</span>
                     </div>
                   </div>
                 </div>
 
-                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <h5 class="font-medium text-gray-900 dark:text-gray-100 mb-2">模型权限</h5>
+                <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-700">
+                  <h5 class="mb-2 font-medium text-gray-900 dark:text-gray-100">模型权限</h5>
                   <div class="space-y-1 text-sm">
                     <div class="flex items-center gap-2">
-                      <i :class="['fas', group.permissions?.['models.list'] ? 'fa-check text-green-500' : 'fa-times text-red-500']"></i>
+                      <i
+                        :class="[
+                          'fas',
+                          group.permissions?.['models.list']
+                            ? 'fa-check text-green-500'
+                            : 'fa-times text-red-500'
+                        ]"
+                      ></i>
                       <span class="text-gray-700 dark:text-gray-300">列出模型</span>
                     </div>
                   </div>
                 </div>
 
-                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <h5 class="font-medium text-gray-900 dark:text-gray-100 mb-2">使用统计</h5>
+                <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-700">
+                  <h5 class="mb-2 font-medium text-gray-900 dark:text-gray-100">使用统计</h5>
                   <div class="space-y-1 text-sm">
                     <div class="flex items-center gap-2">
-                      <i :class="['fas', group.permissions?.['usage.view'] ? 'fa-check text-green-500' : 'fa-times text-red-500']"></i>
+                      <i
+                        :class="[
+                          'fas',
+                          group.permissions?.['usage.view']
+                            ? 'fa-check text-green-500'
+                            : 'fa-times text-red-500'
+                        ]"
+                      ></i>
                       <span class="text-gray-700 dark:text-gray-300">查看使用量</span>
                     </div>
                   </div>
                 </div>
 
-                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <h5 class="font-medium text-gray-900 dark:text-gray-100 mb-2">管理权限</h5>
+                <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-700">
+                  <h5 class="mb-2 font-medium text-gray-900 dark:text-gray-100">管理权限</h5>
                   <div class="space-y-1 text-sm">
                     <div class="flex items-center gap-2">
-                      <i :class="['fas', group.permissions?.['admin.read'] ? 'fa-check text-green-500' : 'fa-times text-red-500']"></i>
+                      <i
+                        :class="[
+                          'fas',
+                          group.permissions?.['admin.read']
+                            ? 'fa-check text-green-500'
+                            : 'fa-times text-red-500'
+                        ]"
+                      ></i>
                       <span class="text-gray-700 dark:text-gray-300">只读管理</span>
                     </div>
                     <div class="flex items-center gap-2">
-                      <i :class="['fas', group.permissions?.['admin.write'] ? 'fa-check text-green-500' : 'fa-times text-red-500']"></i>
+                      <i
+                        :class="[
+                          'fas',
+                          group.permissions?.['admin.write']
+                            ? 'fa-check text-green-500'
+                            : 'fa-times text-red-500'
+                        ]"
+                      ></i>
                       <span class="text-gray-700 dark:text-gray-300">管理写入</span>
                     </div>
                   </div>
@@ -243,56 +326,102 @@
             </div>
 
             <!-- Account Distribution -->
-            <div v-if="group.accounts && (group.accounts.claudeAccounts?.length || group.accounts.geminiAccounts?.length || group.accounts.openaiAccounts?.length)" class="space-y-4">
-              <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+            <div
+              v-if="
+                group.accounts &&
+                (group.accounts.claudeAccounts?.length ||
+                  group.accounts.geminiAccounts?.length ||
+                  group.accounts.openaiAccounts?.length)
+              "
+              class="space-y-4"
+            >
+              <h4
+                class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+              >
                 <i class="fas fa-server mr-2 text-purple-500"></i>
                 账户分配
               </h4>
-              
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <!-- Claude Accounts -->
-                <div v-if="group.accounts.claudeAccounts?.length" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <div class="flex items-center gap-2 mb-3">
+                <div
+                  v-if="group.accounts.claudeAccounts?.length"
+                  class="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20"
+                >
+                  <div class="mb-3 flex items-center gap-2">
                     <i class="fas fa-robot text-blue-500"></i>
-                    <span class="font-medium text-blue-900 dark:text-blue-100">Claude ({{ group.accounts.claudeAccounts.length }})</span>
+                    <span class="font-medium text-blue-900 dark:text-blue-100"
+                      >Claude ({{ group.accounts.claudeAccounts.length }})</span
+                    >
                   </div>
                   <div class="space-y-1 text-sm">
-                    <div v-for="accountId in group.accounts.claudeAccounts.slice(0, 3)" :key="accountId" class="text-blue-700 dark:text-blue-300 font-mono">
+                    <div
+                      v-for="accountId in group.accounts.claudeAccounts.slice(0, 3)"
+                      :key="accountId"
+                      class="font-mono text-blue-700 dark:text-blue-300"
+                    >
                       {{ accountId.slice(0, 8) }}...
                     </div>
-                    <div v-if="group.accounts.claudeAccounts.length > 3" class="text-blue-600 dark:text-blue-400">
+                    <div
+                      v-if="group.accounts.claudeAccounts.length > 3"
+                      class="text-blue-600 dark:text-blue-400"
+                    >
                       还有 {{ group.accounts.claudeAccounts.length - 3 }} 个...
                     </div>
                   </div>
                 </div>
 
                 <!-- Gemini Accounts -->
-                <div v-if="group.accounts.geminiAccounts?.length" class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                  <div class="flex items-center gap-2 mb-3">
+                <div
+                  v-if="group.accounts.geminiAccounts?.length"
+                  class="rounded-lg bg-green-50 p-4 dark:bg-green-900/20"
+                >
+                  <div class="mb-3 flex items-center gap-2">
                     <i class="fas fa-gem text-green-500"></i>
-                    <span class="font-medium text-green-900 dark:text-green-100">Gemini ({{ group.accounts.geminiAccounts.length }})</span>
+                    <span class="font-medium text-green-900 dark:text-green-100"
+                      >Gemini ({{ group.accounts.geminiAccounts.length }})</span
+                    >
                   </div>
                   <div class="space-y-1 text-sm">
-                    <div v-for="accountId in group.accounts.geminiAccounts.slice(0, 3)" :key="accountId" class="text-green-700 dark:text-green-300 font-mono">
+                    <div
+                      v-for="accountId in group.accounts.geminiAccounts.slice(0, 3)"
+                      :key="accountId"
+                      class="font-mono text-green-700 dark:text-green-300"
+                    >
                       {{ accountId.slice(0, 8) }}...
                     </div>
-                    <div v-if="group.accounts.geminiAccounts.length > 3" class="text-green-600 dark:text-green-400">
+                    <div
+                      v-if="group.accounts.geminiAccounts.length > 3"
+                      class="text-green-600 dark:text-green-400"
+                    >
                       还有 {{ group.accounts.geminiAccounts.length - 3 }} 个...
                     </div>
                   </div>
                 </div>
 
                 <!-- OpenAI Accounts -->
-                <div v-if="group.accounts.openaiAccounts?.length" class="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                  <div class="flex items-center gap-2 mb-3">
+                <div
+                  v-if="group.accounts.openaiAccounts?.length"
+                  class="rounded-lg bg-orange-50 p-4 dark:bg-orange-900/20"
+                >
+                  <div class="mb-3 flex items-center gap-2">
                     <i class="fas fa-brain text-orange-500"></i>
-                    <span class="font-medium text-orange-900 dark:text-orange-100">OpenAI ({{ group.accounts.openaiAccounts.length }})</span>
+                    <span class="font-medium text-orange-900 dark:text-orange-100"
+                      >OpenAI ({{ group.accounts.openaiAccounts.length }})</span
+                    >
                   </div>
                   <div class="space-y-1 text-sm">
-                    <div v-for="accountId in group.accounts.openaiAccounts.slice(0, 3)" :key="accountId" class="text-orange-700 dark:text-orange-300 font-mono">
+                    <div
+                      v-for="accountId in group.accounts.openaiAccounts.slice(0, 3)"
+                      :key="accountId"
+                      class="font-mono text-orange-700 dark:text-orange-300"
+                    >
                       {{ accountId.slice(0, 8) }}...
                     </div>
-                    <div v-if="group.accounts.openaiAccounts.length > 3" class="text-orange-600 dark:text-orange-400">
+                    <div
+                      v-if="group.accounts.openaiAccounts.length > 3"
+                      class="text-orange-600 dark:text-orange-400"
+                    >
                       还有 {{ group.accounts.openaiAccounts.length - 3 }} 个...
                     </div>
                   </div>
@@ -302,54 +431,74 @@
 
             <!-- Scheduling Configuration -->
             <div class="space-y-4">
-              <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+              <h4
+                class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+              >
                 <i class="fas fa-cogs mr-2 text-indigo-500"></i>
                 调度配置
               </h4>
-              
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+              <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <div class="space-y-3">
-                  <div class="flex justify-between items-center">
+                  <div class="flex items-center justify-between">
                     <span class="text-sm font-medium text-gray-600 dark:text-gray-400">策略:</span>
                     <span class="text-sm text-gray-900 dark:text-gray-100">
                       {{ formatSchedulingStrategy(group.schedulingConfig?.strategy) }}
                     </span>
                   </div>
-                  
-                  <div class="flex justify-between items-center">
-                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">回退到全局:</span>
-                    <span :class="[
-                      'inline-flex items-center px-2 py-1 rounded text-xs font-medium',
-                      group.schedulingConfig?.fallbackToGlobal !== false
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                    ]">
+
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400"
+                      >回退到全局:</span
+                    >
+                    <span
+                      :class="[
+                        'inline-flex items-center rounded px-2 py-1 text-xs font-medium',
+                        group.schedulingConfig?.fallbackToGlobal !== false
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                          : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                      ]"
+                    >
                       {{ group.schedulingConfig?.fallbackToGlobal !== false ? '启用' : '禁用' }}
                     </span>
                   </div>
-                  
-                  <div class="flex justify-between items-center">
-                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">健康检查:</span>
-                    <span :class="[
-                      'inline-flex items-center px-2 py-1 rounded text-xs font-medium',
-                      group.schedulingConfig?.healthCheckEnabled !== false
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                    ]">
+
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400"
+                      >健康检查:</span
+                    >
+                    <span
+                      :class="[
+                        'inline-flex items-center rounded px-2 py-1 text-xs font-medium',
+                        group.schedulingConfig?.healthCheckEnabled !== false
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                          : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                      ]"
+                    >
                       {{ group.schedulingConfig?.healthCheckEnabled !== false ? '启用' : '禁用' }}
                     </span>
                   </div>
                 </div>
 
-                <div v-if="group.schedulingConfig?.weights && Object.keys(group.schedulingConfig.weights).length" class="space-y-2">
-                  <span class="text-sm font-medium text-gray-600 dark:text-gray-400">权重配置:</span>
-                  <div class="max-h-32 overflow-y-auto space-y-1">
-                    <div 
-                      v-for="(weight, accountId) in group.schedulingConfig.weights" 
+                <div
+                  v-if="
+                    group.schedulingConfig?.weights &&
+                    Object.keys(group.schedulingConfig.weights).length
+                  "
+                  class="space-y-2"
+                >
+                  <span class="text-sm font-medium text-gray-600 dark:text-gray-400"
+                    >权重配置:</span
+                  >
+                  <div class="max-h-32 space-y-1 overflow-y-auto">
+                    <div
+                      v-for="(weight, accountId) in group.schedulingConfig.weights"
                       :key="accountId"
-                      class="flex justify-between items-center text-xs p-2 bg-gray-100 dark:bg-gray-600 rounded"
+                      class="flex items-center justify-between rounded bg-gray-100 p-2 text-xs dark:bg-gray-600"
                     >
-                      <span class="font-mono text-gray-600 dark:text-gray-400">{{ accountId.slice(0, 8) }}...</span>
+                      <span class="font-mono text-gray-600 dark:text-gray-400"
+                        >{{ accountId.slice(0, 8) }}...</span
+                      >
                       <span class="font-medium">{{ weight }}</span>
                     </div>
                   </div>
@@ -365,24 +514,24 @@
         >
           <div class="flex gap-3">
             <button
+              class="flex items-center gap-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-600"
               @click="$emit('edit', group)"
-              class="flex items-center gap-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-600 transition-colors"
             >
               <i class="fas fa-edit"></i>
               编辑组
             </button>
-            
+
             <button
+              class="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600"
               @click="$emit('manage-members', group)"
-              class="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 transition-colors"
             >
               <i class="fas fa-users"></i>
               管理成员
             </button>
-            
+
             <button
+              class="flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-600"
               @click="$emit('assign-accounts', group)"
-              class="flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-medium text-white hover:bg-purple-600 transition-colors"
             >
               <i class="fas fa-server"></i>
               分配账户
@@ -390,8 +539,8 @@
           </div>
 
           <button
-            type="button"
             class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            type="button"
             @click="$emit('close')"
           >
             关闭
@@ -416,7 +565,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'edit', 'manage-members', 'assign-accounts'])
+const _emit = defineEmits(['close', 'edit', 'manage-members', 'assign-accounts'])
 
 // Methods
 const formatDate = (dateString) => {
@@ -426,20 +575,22 @@ const formatDate = (dateString) => {
 
 const formatSchedulingStrategy = (strategy) => {
   const strategies = {
-    'round_robin': '轮询',
-    'random': '随机',
-    'weighted': '权重',
-    'priority': '优先级',
-    'least_recent': '最少使用'
+    round_robin: '轮询',
+    random: '随机',
+    weighted: '权重',
+    priority: '优先级',
+    least_recent: '最少使用'
   }
   return strategies[strategy] || strategy || '未配置'
 }
 
 const getTotalAccounts = () => {
   if (!props.group?.accounts) return 0
-  return (props.group.accounts.claudeAccounts?.length || 0) + 
-         (props.group.accounts.geminiAccounts?.length || 0) + 
-         (props.group.accounts.openaiAccounts?.length || 0)
+  return (
+    (props.group.accounts.claudeAccounts?.length || 0) +
+    (props.group.accounts.geminiAccounts?.length || 0) +
+    (props.group.accounts.openaiAccounts?.length || 0)
+  )
 }
 </script>
 
@@ -450,11 +601,11 @@ const getTotalAccounts = () => {
 }
 
 .max-h-32::-webkit-scrollbar-track {
-  @apply bg-gray-100 dark:bg-gray-600 rounded;
+  @apply rounded bg-gray-100 dark:bg-gray-600;
 }
 
 .max-h-32::-webkit-scrollbar-thumb {
-  @apply bg-gray-300 dark:bg-gray-500 rounded;
+  @apply rounded bg-gray-300 dark:bg-gray-500;
 }
 
 .max-h-32::-webkit-scrollbar-thumb:hover {

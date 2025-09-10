@@ -56,7 +56,7 @@
           >
             <i class="fas fa-user-circle text-sm sm:text-base" />
             <span class="hidden sm:inline">{{ currentUser.username || 'Admin' }}</span>
-            <span v-if="currentUser.role" class="hidden lg:inline text-xs opacity-75">
+            <span v-if="currentUser.role" class="hidden text-xs opacity-75 lg:inline">
               ({{ currentUser.role === 'admin' ? '管理员' : '用户' }})
             </span>
             <i
@@ -74,12 +74,16 @@
           >
             <!-- 用户信息 -->
             <div class="border-b border-gray-100 px-4 py-3 dark:border-gray-700">
-              <div class="flex items-center gap-3 mb-3">
+              <div class="mb-3 flex items-center gap-3">
                 <div
                   class="flex h-10 w-10 items-center justify-center rounded-full"
-                  :class="currentUser.role === 'admin' ? 'bg-gradient-to-br from-purple-500 to-pink-500' : 'bg-gradient-to-br from-blue-500 to-indigo-500'"
+                  :class="
+                    currentUser.role === 'admin'
+                      ? 'bg-gradient-to-br from-purple-500 to-pink-500'
+                      : 'bg-gradient-to-br from-blue-500 to-indigo-500'
+                  "
                 >
-                  <i class="fas fa-user text-white text-sm" />
+                  <i class="fas fa-user text-sm text-white" />
                 </div>
                 <div>
                   <div class="font-semibold text-gray-900 dark:text-gray-100">
@@ -148,29 +152,32 @@
             </div>
 
             <!-- 快捷导航菜单（仅管理员可见） -->
-            <div v-if="currentUser.role === 'admin'" class="border-b border-gray-200 dark:border-gray-700">
+            <div
+              v-if="currentUser.role === 'admin'"
+              class="border-b border-gray-200 dark:border-gray-700"
+            >
               <div class="px-4 py-2">
-                <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">管理功能</p>
+                <p class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">管理功能</p>
                 <div class="space-y-1">
                   <button
-                    class="flex w-full items-center gap-3 px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 rounded-lg"
+                    class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
                     @click="navigateToUsers"
                   >
-                    <i class="fas fa-user-friends text-blue-500 text-xs w-4" />
+                    <i class="fas fa-user-friends w-4 text-xs text-blue-500" />
                     <span>用户管理</span>
                   </button>
                   <button
-                    class="flex w-full items-center gap-3 px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 rounded-lg"
+                    class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
                     @click="navigateToUserGroups"
                   >
-                    <i class="fas fa-users-cog text-purple-500 text-xs w-4" />
+                    <i class="fas fa-users-cog w-4 text-xs text-purple-500" />
                     <span>用户组管理</span>
                   </button>
                   <button
-                    class="flex w-full items-center gap-3 px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 rounded-lg"
+                    class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
                     @click="navigateToSettings"
                   >
-                    <i class="fas fa-cogs text-gray-500 text-xs w-4" />
+                    <i class="fas fa-cogs w-4 text-xs text-gray-500" />
                     <span>系统设置</span>
                   </button>
                 </div>

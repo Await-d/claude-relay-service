@@ -2,15 +2,15 @@
   <div class="min-h-screen p-3 sm:p-4 md:p-6">
     <!-- Session Manager for authenticated pages -->
     <SessionManager
-      :sessionToken="authStore.sessionToken"
-      :expiresAt="authStore.expiresAt"
-      :autoRefresh="true"
-      :showIndicator="true"
-      :showStatusText="false"
-      @sessionRefreshed="handleSessionRefresh"
-      @sessionExpired="handleSessionExpired"
-      @refreshFailed="handleRefreshFailed"
+      :auto-refresh="true"
+      :expires-at="authStore.expiresAt"
+      :session-token="authStore.sessionToken"
+      :show-indicator="true"
+      :show-status-text="false"
       @logout="handleLogout"
+      @refresh-failed="handleRefreshFailed"
+      @session-expired="handleSessionExpired"
+      @session-refreshed="handleSessionRefresh"
     />
 
     <!-- 顶部导航 -->

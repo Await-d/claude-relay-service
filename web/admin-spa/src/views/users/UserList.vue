@@ -21,9 +21,9 @@
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               v-model="searchQuery"
-              type="text"
-              placeholder="搜索用户名、邮箱或角色..."
               class="form-input w-full pl-10"
+              placeholder="搜索用户名、邮箱或角色..."
+              type="text"
             />
           </div>
         </div>
@@ -154,31 +154,31 @@
                 <div class="flex items-center justify-end gap-2">
                   <button
                     class="btn-icon text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
-                    @click="editUser(user)"
                     title="编辑用户"
+                    @click="editUser(user)"
                   >
                     <i class="fas fa-edit" />
                   </button>
                   <button
                     v-if="user.status === 'active'"
                     class="btn-icon text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-900/20"
-                    @click="toggleUserStatus(user)"
                     title="禁用用户"
+                    @click="toggleUserStatus(user)"
                   >
                     <i class="fas fa-ban" />
                   </button>
                   <button
                     v-else
                     class="btn-icon text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/20"
-                    @click="toggleUserStatus(user)"
                     title="启用用户"
+                    @click="toggleUserStatus(user)"
                   >
                     <i class="fas fa-check" />
                   </button>
                   <button
                     class="btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                    @click="deleteUser(user)"
                     title="删除用户"
+                    @click="deleteUser(user)"
                   >
                     <i class="fas fa-trash" />
                   </button>
@@ -224,17 +224,17 @@
           </button>
         </div>
 
-        <form @submit.prevent="saveUser" class="space-y-4">
+        <form class="space-y-4" @submit.prevent="saveUser">
           <div>
             <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
               用户名 *
             </label>
             <input
               v-model="userForm.username"
-              type="text"
-              required
               class="form-input w-full"
               placeholder="请输入用户名"
+              required
+              type="text"
             />
           </div>
 
@@ -244,9 +244,9 @@
             </label>
             <input
               v-model="userForm.email"
-              type="email"
               class="form-input w-full"
               placeholder="请输入邮箱地址"
+              type="email"
             />
           </div>
 
@@ -256,10 +256,10 @@
             </label>
             <input
               v-model="userForm.password"
-              type="password"
-              required
               class="form-input w-full"
               placeholder="请输入密码"
+              required
+              type="password"
             />
           </div>
 
@@ -267,7 +267,7 @@
             <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
               角色 *
             </label>
-            <select v-model="userForm.role" required class="form-select w-full">
+            <select v-model="userForm.role" class="form-select w-full" required>
               <option value="">选择角色</option>
               <option value="admin">管理员</option>
               <option value="user">普通用户</option>
@@ -275,10 +275,10 @@
           </div>
 
           <div class="flex gap-3 pt-4">
-            <button type="button" class="btn btn-secondary flex-1" @click="closeModals">
+            <button class="btn btn-secondary flex-1" type="button" @click="closeModals">
               取消
             </button>
-            <button type="submit" class="btn btn-primary flex-1" :disabled="saving">
+            <button class="btn btn-primary flex-1" :disabled="saving" type="submit">
               <div v-if="saving" class="loading-spinner mr-2" />
               {{ saving ? '保存中...' : '保存' }}
             </button>

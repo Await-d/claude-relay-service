@@ -21,9 +21,9 @@
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               v-model="searchQuery"
-              type="text"
-              placeholder="搜索用户组名称或描述..."
               class="form-input w-full pl-10"
+              placeholder="搜索用户组名称或描述..."
+              type="text"
             />
           </div>
         </div>
@@ -52,8 +52,8 @@
 
       <!-- 用户组卡片 -->
       <div
-        v-else-if="filteredGroups.length > 0"
         v-for="group in filteredGroups"
+        v-else-if="filteredGroups.length > 0"
         :key="group.id"
         class="glass-strong rounded-xl p-6 transition-all duration-300 hover:shadow-xl"
       >
@@ -136,8 +136,8 @@
           </button>
           <button
             class="btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-            @click="deleteGroup(group)"
             title="删除用户组"
+            @click="deleteGroup(group)"
           >
             <i class="fas fa-trash text-xs" />
           </button>
@@ -183,17 +183,17 @@
           </button>
         </div>
 
-        <form @submit.prevent="saveGroup" class="space-y-4">
+        <form class="space-y-4" @submit.prevent="saveGroup">
           <div>
             <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
               用户组名称 *
             </label>
             <input
               v-model="groupForm.name"
-              type="text"
-              required
               class="form-input w-full"
               placeholder="请输入用户组名称"
+              required
+              type="text"
             />
           </div>
 
@@ -203,9 +203,9 @@
             </label>
             <textarea
               v-model="groupForm.description"
-              rows="3"
               class="form-input w-full resize-none"
               placeholder="请输入用户组描述（可选）"
+              rows="3"
             />
           </div>
 
@@ -213,7 +213,7 @@
             <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
               状态 *
             </label>
-            <select v-model="groupForm.status" required class="form-select w-full">
+            <select v-model="groupForm.status" class="form-select w-full" required>
               <option value="">选择状态</option>
               <option value="active">活跃</option>
               <option value="inactive">不活跃</option>
@@ -232,9 +232,9 @@
               >
                 <input
                   v-model="groupForm.permissions"
+                  class="rounded border-gray-300 text-blue-600 focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 dark:border-gray-600 dark:bg-gray-700"
                   type="checkbox"
                   :value="permission.value"
-                  class="rounded border-gray-300 text-blue-600 focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 dark:border-gray-600 dark:bg-gray-700"
                 />
                 <span class="text-sm text-gray-700 dark:text-gray-300">
                   {{ permission.label }}
@@ -244,10 +244,10 @@
           </div>
 
           <div class="flex gap-3 pt-4">
-            <button type="button" class="btn btn-secondary flex-1" @click="closeModals">
+            <button class="btn btn-secondary flex-1" type="button" @click="closeModals">
               取消
             </button>
-            <button type="submit" class="btn btn-primary flex-1" :disabled="saving">
+            <button class="btn btn-primary flex-1" :disabled="saving" type="submit">
               <div v-if="saving" class="loading-spinner mr-2" />
               {{ saving ? '保存中...' : '保存' }}
             </button>
@@ -290,8 +290,8 @@
               </select>
               <button
                 class="btn btn-primary"
-                @click="addMember"
                 :disabled="!selectedUserId || addingMember"
+                @click="addMember"
               >
                 <div v-if="addingMember" class="loading-spinner mr-2" />
                 添加
@@ -339,8 +339,8 @@
                 </div>
                 <button
                   class="btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                  @click="removeMember(member.id)"
                   title="移除成员"
+                  @click="removeMember(member.id)"
                 >
                   <i class="fas fa-times" />
                 </button>

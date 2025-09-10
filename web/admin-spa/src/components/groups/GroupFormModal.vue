@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="visible"
-    class="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden overflow-y-auto outline-none focus:outline-none"
+    class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overflow-x-hidden outline-none focus:outline-none"
     @click.self="$emit('close')"
   >
     <!-- Backdrop -->
@@ -17,7 +17,9 @@
           class="flex items-start justify-between rounded-t border-b border-solid border-gray-200 p-5 dark:border-gray-600"
         >
           <div class="flex items-center gap-3">
-            <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500">
+            <div
+              class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500"
+            >
               <i class="fas fa-users text-white"></i>
             </div>
             <div>
@@ -39,53 +41,55 @@
 
         <!-- Body -->
         <div class="relative flex-auto p-6">
-          <form @submit.prevent="saveGroup" class="space-y-6">
+          <form class="space-y-6" @submit.prevent="saveGroup">
             <!-- Basic Info Section -->
             <div class="space-y-4">
-              <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+              <h4
+                class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+              >
                 <i class="fas fa-info-circle mr-2 text-blue-500"></i>
                 基本信息
               </h4>
-              
+
               <!-- Group Name -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   组名称 <span class="text-red-500">*</span>
                 </label>
                 <input
                   v-model="formData.name"
-                  type="text"
-                  required
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
                   maxlength="100"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                   placeholder="输入组名称"
+                  required
+                  type="text"
                 />
                 <p class="mt-1 text-xs text-gray-500">最多100个字符</p>
               </div>
 
               <!-- Description -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   描述
                 </label>
                 <textarea
                   v-model="formData.description"
-                  rows="3"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
                   maxlength="500"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
                   placeholder="输入组描述"
+                  rows="3"
                 ></textarea>
                 <p class="mt-1 text-xs text-gray-500">最多500个字符</p>
               </div>
 
               <!-- Parent Group -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   父组
                 </label>
                 <select
                   v-model="formData.parentId"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
                 >
                   <option value="">无父组（顶级组）</option>
                   <option
@@ -104,40 +108,42 @@
                 <label class="flex items-center gap-3">
                   <input
                     v-model="formData.isActive"
-                    type="checkbox"
                     class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    type="checkbox"
                   />
                   <span class="text-sm font-medium text-gray-700 dark:text-gray-300">激活组</span>
                 </label>
-                <p class="mt-1 ml-6 text-xs text-gray-500">只有激活的组才能分配成员和账户</p>
+                <p class="ml-6 mt-1 text-xs text-gray-500">只有激活的组才能分配成员和账户</p>
               </div>
             </div>
 
             <!-- Permissions Section -->
             <div class="space-y-4">
-              <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+              <h4
+                class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+              >
                 <i class="fas fa-shield-alt mr-2 text-green-500"></i>
                 权限配置
               </h4>
-              
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <!-- Chat Permissions -->
-                <div class="space-y-3 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
                   <h5 class="font-medium text-gray-900 dark:text-gray-100">聊天权限</h5>
                   <div class="space-y-2">
                     <label class="flex items-center gap-2">
                       <input
                         v-model="formData.permissions['chat.create']"
-                        type="checkbox"
                         class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        type="checkbox"
                       />
                       <span class="text-sm text-gray-700 dark:text-gray-300">创建聊天</span>
                     </label>
                     <label class="flex items-center gap-2">
                       <input
                         v-model="formData.permissions['chat.history']"
-                        type="checkbox"
                         class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        type="checkbox"
                       />
                       <span class="text-sm text-gray-700 dark:text-gray-300">查看历史</span>
                     </label>
@@ -145,14 +151,14 @@
                 </div>
 
                 <!-- Model Permissions -->
-                <div class="space-y-3 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
                   <h5 class="font-medium text-gray-900 dark:text-gray-100">模型权限</h5>
                   <div class="space-y-2">
                     <label class="flex items-center gap-2">
                       <input
                         v-model="formData.permissions['models.list']"
-                        type="checkbox"
                         class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        type="checkbox"
                       />
                       <span class="text-sm text-gray-700 dark:text-gray-300">列出模型</span>
                     </label>
@@ -160,14 +166,14 @@
                 </div>
 
                 <!-- Usage Permissions -->
-                <div class="space-y-3 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
                   <h5 class="font-medium text-gray-900 dark:text-gray-100">使用统计</h5>
                   <div class="space-y-2">
                     <label class="flex items-center gap-2">
                       <input
                         v-model="formData.permissions['usage.view']"
-                        type="checkbox"
                         class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        type="checkbox"
                       />
                       <span class="text-sm text-gray-700 dark:text-gray-300">查看使用量</span>
                     </label>
@@ -175,22 +181,22 @@
                 </div>
 
                 <!-- Admin Permissions -->
-                <div class="space-y-3 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
                   <h5 class="font-medium text-gray-900 dark:text-gray-100">管理权限</h5>
                   <div class="space-y-2">
                     <label class="flex items-center gap-2">
                       <input
                         v-model="formData.permissions['admin.read']"
-                        type="checkbox"
                         class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        type="checkbox"
                       />
                       <span class="text-sm text-gray-700 dark:text-gray-300">只读管理</span>
                     </label>
                     <label class="flex items-center gap-2">
                       <input
                         v-model="formData.permissions['admin.write']"
-                        type="checkbox"
                         class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        type="checkbox"
                       />
                       <span class="text-sm text-gray-700 dark:text-gray-300">管理写入</span>
                     </label>
@@ -201,19 +207,21 @@
 
             <!-- Scheduling Configuration -->
             <div class="space-y-4">
-              <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 pb-2">
+              <h4
+                class="border-b border-gray-200 pb-2 text-lg font-medium text-gray-900 dark:border-gray-600 dark:text-gray-100"
+              >
                 <i class="fas fa-cogs mr-2 text-purple-500"></i>
                 调度配置
               </h4>
 
               <!-- Scheduling Strategy -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   调度策略
                 </label>
                 <select
                   v-model="formData.schedulingConfig.strategy"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
                 >
                   <option value="round_robin">轮询 (Round Robin)</option>
                   <option value="random">随机 (Random)</option>
@@ -224,23 +232,23 @@
               </div>
 
               <!-- Scheduling Options -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label class="flex items-center gap-3">
                   <input
                     v-model="formData.schedulingConfig.fallbackToGlobal"
-                    type="checkbox"
                     class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    type="checkbox"
                   />
                   <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                     回退到全局账户
                   </span>
                 </label>
-                
+
                 <label class="flex items-center gap-3">
                   <input
                     v-model="formData.schedulingConfig.healthCheckEnabled"
-                    type="checkbox"
                     class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    type="checkbox"
                   />
                   <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                     启用健康检查
@@ -257,21 +265,21 @@
         >
           <div class="flex gap-3">
             <button
-              type="button"
               class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              type="button"
               @click="$emit('close')"
             >
               取消
             </button>
             <button
-              type="submit"
-              :disabled="saving"
               class="flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:from-indigo-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="saving"
+              type="submit"
               @click="saveGroup"
             >
               <i v-if="saving" class="fas fa-spinner fa-spin"></i>
               <i v-else class="fas fa-save"></i>
-              {{ saving ? '保存中...' : (isEdit ? '更新' : '创建') }}
+              {{ saving ? '保存中...' : isEdit ? '更新' : '创建' }}
             </button>
           </div>
         </div>
@@ -382,17 +390,17 @@ const validateForm = () => {
     ElMessage.error('组名称不能为空')
     return false
   }
-  
+
   if (formData.value.name.length > 100) {
     ElMessage.error('组名称不能超过100个字符')
     return false
   }
-  
+
   if (formData.value.description && formData.value.description.length > 500) {
     ElMessage.error('组描述不能超过500个字符')
     return false
   }
-  
+
   return true
 }
 
@@ -400,9 +408,9 @@ const saveGroup = async () => {
   if (!validateForm()) {
     return
   }
-  
+
   saving.value = true
-  
+
   try {
     const payload = {
       name: formData.value.name.trim(),
@@ -412,14 +420,14 @@ const saveGroup = async () => {
       permissions: formData.value.permissions,
       schedulingConfig: formData.value.schedulingConfig
     }
-    
+
     let response
     if (isEdit.value) {
       response = await apiClient.put(`/admin/groups/${props.group.id}`, payload)
     } else {
       response = await apiClient.post('/admin/groups', payload)
     }
-    
+
     if (response.success) {
       ElMessage.success(isEdit.value ? '组更新成功' : '组创建成功')
       emit('saved', response.data)
@@ -473,7 +481,9 @@ watch(
 /* Modal content animation */
 .modal-enter-active,
 .modal-leave-active {
-  transition: transform 0.3s ease, opacity 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    opacity 0.3s ease;
 }
 
 .modal-enter-from,

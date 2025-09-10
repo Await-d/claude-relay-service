@@ -7,25 +7,27 @@
 
     <!-- Session Manager for handling session logic -->
     <SessionManager
-      :sessionToken="authStore.sessionToken"
-      :expiresAt="authStore.expiresAt"
-      :autoRefresh="true"
-      :showIndicator="false"
-      @sessionRefreshed="handleSessionRefresh"
-      @sessionExpired="handleSessionExpired"
-      @refreshFailed="handleRefreshFailed"
+      :auto-refresh="true"
+      :expires-at="authStore.expiresAt"
+      :session-token="authStore.sessionToken"
+      :show-indicator="false"
       @logout="handleLogout"
+      @refresh-failed="handleRefreshFailed"
+      @session-expired="handleSessionExpired"
+      @session-refreshed="handleSessionRefresh"
     />
 
-    <div class="glass-strong w-full max-w-md rounded-xl p-6 shadow-2xl sm:rounded-2xl sm:p-8 md:rounded-3xl md:p-10">
+    <div
+      class="glass-strong w-full max-w-md rounded-xl p-6 shadow-2xl sm:rounded-2xl sm:p-8 md:rounded-3xl md:p-10"
+    >
       <!-- Login Form Component -->
       <LoginForm
-        :loading="authStore.loginLoading"
-        :error="authStore.loginError"
-        :oemSettings="authStore.oemSettings"
-        :oemLoading="authStore.oemLoading"
-        @submit="handleLogin"
         ref="loginFormRef"
+        :error="authStore.loginError"
+        :loading="authStore.loginLoading"
+        :oem-loading="authStore.oemLoading"
+        :oem-settings="authStore.oemSettings"
+        @submit="handleLogin"
       />
     </div>
   </div>
@@ -71,7 +73,7 @@ const handleSessionRefresh = async () => {
 const handleSessionExpired = () => {
   console.warn('Session expired')
   authStore.clearAuthState()
-  
+
   // 重置登录表单
   if (loginFormRef.value) {
     loginFormRef.value.resetForm()
@@ -82,7 +84,7 @@ const handleSessionExpired = () => {
 const handleRefreshFailed = (error) => {
   console.error('Session refresh failed:', error)
   authStore.clearAuthState()
-  
+
   // 重置登录表单
   if (loginFormRef.value) {
     loginFormRef.value.resetForm()
@@ -92,7 +94,7 @@ const handleRefreshFailed = (error) => {
 // 处理登出
 const handleLogout = () => {
   authStore.logout()
-  
+
   // 重置登录表单
   if (loginFormRef.value) {
     loginFormRef.value.resetForm()

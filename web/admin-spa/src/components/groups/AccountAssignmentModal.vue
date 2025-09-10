@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="visible"
-    class="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden overflow-y-auto outline-none focus:outline-none"
+    class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overflow-x-hidden outline-none focus:outline-none"
     @click.self="$emit('close')"
   >
     <!-- Backdrop -->
@@ -17,13 +17,13 @@
           class="flex items-start justify-between rounded-t border-b border-solid border-gray-200 p-5 dark:border-gray-600"
         >
           <div class="flex items-center gap-3">
-            <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-r from-purple-500 to-pink-500">
+            <div
+              class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-r from-purple-500 to-pink-500"
+            >
               <i class="fas fa-server text-white"></i>
             </div>
             <div>
-              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                账户分配管理
-              </h3>
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100">账户分配管理</h3>
               <p class="text-sm text-gray-500 dark:text-gray-400">
                 管理组 "{{ group?.name }}" 的AI账户分配和调度配置
               </p>
@@ -46,17 +46,20 @@
                 <button
                   v-for="platform in platforms"
                   :key="platform.key"
-                  @click="activePlatform = platform.key"
                   :class="[
-                    'py-2 px-1 border-b-2 font-medium text-sm transition-colors',
+                    'border-b-2 px-1 py-2 text-sm font-medium transition-colors',
                     activePlatform === platform.key
                       ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
                   ]"
+                  @click="activePlatform = platform.key"
                 >
                   <i :class="[platform.icon, 'mr-2']"></i>
                   {{ platform.name }}
-                  <span v-if="getAssignedCount(platform.key) > 0" class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+                  <span
+                    v-if="getAssignedCount(platform.key) > 0"
+                    class="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
+                  >
                     {{ getAssignedCount(platform.key) }}
                   </span>
                 </button>
@@ -67,7 +70,7 @@
           <!-- Platform Content -->
           <div class="space-y-6">
             <!-- Account Assignment Section -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <!-- Available Accounts -->
               <div class="space-y-4">
                 <div class="flex items-center justify-between">
@@ -77,34 +80,38 @@
                   </h4>
                   <button
                     class="text-sm text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
-                    @click="loadAvailableAccounts"
                     :disabled="loadingAccounts"
+                    @click="loadAvailableAccounts"
                   >
-                    <i :class="['fas mr-1', loadingAccounts ? 'fa-spinner fa-spin' : 'fa-sync-alt']"></i>
+                    <i
+                      :class="['fas mr-1', loadingAccounts ? 'fa-spinner fa-spin' : 'fa-sync-alt']"
+                    ></i>
                     刷新
                   </button>
                 </div>
 
                 <!-- Account Search -->
                 <div class="relative">
-                  <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                  <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                     <i class="fas fa-search text-gray-400"></i>
                   </div>
                   <input
                     v-model="accountSearchTerm"
-                    type="text"
+                    class="w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-4 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
                     placeholder="搜索账户..."
-                    class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+                    type="text"
                   />
                 </div>
 
                 <!-- Available Accounts List -->
-                <div class="border border-gray-200 rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 max-h-80 overflow-y-auto">
+                <div
+                  class="max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-700"
+                >
                   <div v-if="loadingAccounts" class="p-8 text-center">
                     <i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i>
                     <p class="mt-2 text-gray-500 dark:text-gray-400">加载中...</p>
                   </div>
-                  
+
                   <div v-else-if="filteredAvailableAccounts.length === 0" class="p-8 text-center">
                     <i class="fas fa-server text-3xl text-gray-300 dark:text-gray-500"></i>
                     <p class="mt-2 text-gray-500 dark:text-gray-400">没有可分配的账户</p>
@@ -114,13 +121,15 @@
                     <div
                       v-for="account in filteredAvailableAccounts"
                       :key="account.id"
-                      class="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                      class="flex items-center justify-between p-4 transition-colors hover:bg-gray-50 dark:hover:bg-gray-600"
                     >
                       <div class="flex items-center gap-3">
-                        <div :class="[
-                          'flex h-8 w-8 items-center justify-center rounded-full text-white text-sm',
-                          getPlatformColor(activePlatform)
-                        ]">
+                        <div
+                          :class="[
+                            'flex h-8 w-8 items-center justify-center rounded-full text-sm text-white',
+                            getPlatformColor(activePlatform)
+                          ]"
+                        >
                           <i :class="getPlatformIcon(activePlatform)"></i>
                         </div>
                         <div>
@@ -130,27 +139,39 @@
                           <div class="text-sm text-gray-500 dark:text-gray-400">
                             {{ account.description || account.email || 'No description' }}
                           </div>
-                          <div class="flex items-center gap-2 mt-1">
-                            <span :class="[
-                              'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium',
-                              account.isActive || account.status === 'active'
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                            ]">
-                              {{ (account.isActive || account.status === 'active') ? '活跃' : '禁用' }}
+                          <div class="mt-1 flex items-center gap-2">
+                            <span
+                              :class="[
+                                'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium',
+                                account.isActive || account.status === 'active'
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                  : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                              ]"
+                            >
+                              {{
+                                account.isActive || account.status === 'active' ? '活跃' : '禁用'
+                              }}
                             </span>
-                            <span v-if="account.accountType" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                            <span
+                              v-if="account.accountType"
+                              class="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+                            >
                               {{ account.accountType }}
                             </span>
                           </div>
                         </div>
                       </div>
                       <button
-                        @click="assignAccount(account)"
+                        class="flex items-center gap-1 rounded-md bg-purple-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-purple-600 disabled:cursor-not-allowed disabled:opacity-50"
                         :disabled="assigningAccount === account.id"
-                        class="flex items-center gap-1 px-3 py-1.5 bg-purple-500 text-white text-sm rounded-md hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        @click="assignAccount(account)"
                       >
-                        <i :class="['fas', assigningAccount === account.id ? 'fa-spinner fa-spin' : 'fa-plus']"></i>
+                        <i
+                          :class="[
+                            'fas',
+                            assigningAccount === account.id ? 'fa-spinner fa-spin' : 'fa-plus'
+                          ]"
+                        ></i>
                         分配
                       </button>
                     </div>
@@ -167,21 +188,25 @@
                   </h4>
                   <button
                     class="text-sm text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
-                    @click="loadAssignedAccounts"
                     :disabled="loadingAssigned"
+                    @click="loadAssignedAccounts"
                   >
-                    <i :class="['fas mr-1', loadingAssigned ? 'fa-spinner fa-spin' : 'fa-sync-alt']"></i>
+                    <i
+                      :class="['fas mr-1', loadingAssigned ? 'fa-spinner fa-spin' : 'fa-sync-alt']"
+                    ></i>
                     刷新
                   </button>
                 </div>
 
                 <!-- Assigned Accounts List -->
-                <div class="border border-gray-200 rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600 max-h-80 overflow-y-auto">
+                <div
+                  class="max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-700"
+                >
                   <div v-if="loadingAssigned" class="p-8 text-center">
                     <i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i>
                     <p class="mt-2 text-gray-500 dark:text-gray-400">加载中...</p>
                   </div>
-                  
+
                   <div v-else-if="currentAssignedAccounts.length === 0" class="p-8 text-center">
                     <i class="fas fa-unlink text-3xl text-gray-300 dark:text-gray-500"></i>
                     <p class="mt-2 text-gray-500 dark:text-gray-400">暂无分配的账户</p>
@@ -191,13 +216,15 @@
                     <div
                       v-for="account in currentAssignedAccounts"
                       :key="account.id"
-                      class="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                      class="flex items-center justify-between p-4 transition-colors hover:bg-gray-50 dark:hover:bg-gray-600"
                     >
                       <div class="flex items-center gap-3">
-                        <div :class="[
-                          'flex h-8 w-8 items-center justify-center rounded-full text-white text-sm',
-                          getPlatformColor(activePlatform)
-                        ]">
+                        <div
+                          :class="[
+                            'flex h-8 w-8 items-center justify-center rounded-full text-sm text-white',
+                            getPlatformColor(activePlatform)
+                          ]"
+                        >
                           <i :class="getPlatformIcon(activePlatform)"></i>
                         </div>
                         <div>
@@ -207,42 +234,54 @@
                           <div class="text-sm text-gray-500 dark:text-gray-400">
                             {{ account.description || account.email || 'No description' }}
                           </div>
-                          <div class="flex items-center gap-2 mt-1">
-                            <span :class="[
-                              'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium',
-                              account.isActive || account.status === 'active'
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                            ]">
-                              {{ (account.isActive || account.status === 'active') ? '活跃' : '禁用' }}
+                          <div class="mt-1 flex items-center gap-2">
+                            <span
+                              :class="[
+                                'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium',
+                                account.isActive || account.status === 'active'
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                  : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                              ]"
+                            >
+                              {{
+                                account.isActive || account.status === 'active' ? '活跃' : '禁用'
+                              }}
                             </span>
-                            <span v-if="account.weight !== undefined" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+                            <span
+                              v-if="account.weight !== undefined"
+                              class="inline-flex items-center rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
+                            >
                               权重: {{ account.weight }}
                             </span>
                           </div>
                         </div>
                       </div>
-                      
+
                       <div class="flex items-center gap-2">
                         <!-- Weight adjustment -->
                         <div class="flex items-center gap-1">
                           <span class="text-xs text-gray-500">权重:</span>
                           <input
                             v-model.number="weightInputs[account.id]"
-                            type="number"
-                            min="0"
+                            class="w-16 rounded border border-gray-300 px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500 dark:border-gray-500 dark:bg-gray-600 dark:text-gray-200"
                             max="1"
+                            min="0"
                             step="0.1"
-                            class="w-16 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-gray-200"
+                            type="number"
                             @change="updateAccountWeight(account)"
                           />
                         </div>
                         <button
-                          @click="unassignAccount(account)"
+                          class="flex items-center gap-1 rounded-md bg-red-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                           :disabled="unassigningAccount === account.id"
-                          class="flex items-center gap-1 px-3 py-1.5 bg-red-500 text-white text-sm rounded-md hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          @click="unassignAccount(account)"
                         >
-                          <i :class="['fas', unassigningAccount === account.id ? 'fa-spinner fa-spin' : 'fa-minus']"></i>
+                          <i
+                            :class="[
+                              'fas',
+                              unassigningAccount === account.id ? 'fa-spinner fa-spin' : 'fa-minus'
+                            ]"
+                          ></i>
                           移除
                         </button>
                       </div>
@@ -253,9 +292,9 @@
                 <!-- Bulk Actions -->
                 <div v-if="currentAssignedAccounts.length > 0" class="flex gap-2 pt-2">
                   <button
-                    @click="confirmUnassignAll"
+                    class="flex items-center gap-1 rounded-md bg-red-500 px-3 py-2 text-sm text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                     :disabled="unassigningAll"
-                    class="flex items-center gap-1 px-3 py-2 bg-red-500 text-white text-sm rounded-md hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    @click="confirmUnassignAll"
                   >
                     <i :class="['fas', unassigningAll ? 'fa-spinner fa-spin' : 'fa-unlink']"></i>
                     移除所有账户
@@ -265,22 +304,22 @@
             </div>
 
             <!-- Scheduling Configuration -->
-            <div class="mt-8 p-6 bg-gray-50 dark:bg-gray-700 rounded-lg">
-              <div class="flex items-center gap-2 mb-4">
+            <div class="mt-8 rounded-lg bg-gray-50 p-6 dark:bg-gray-700">
+              <div class="mb-4 flex items-center gap-2">
                 <i class="fas fa-cogs text-indigo-500"></i>
                 <h4 class="text-lg font-medium text-gray-900 dark:text-gray-100">调度配置</h4>
               </div>
-              
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+              <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <!-- Strategy -->
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     调度策略
                   </label>
                   <select
                     v-model="schedulingConfig.strategy"
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 dark:border-gray-500 dark:bg-gray-600 dark:text-gray-200"
                     @change="updateSchedulingConfig"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-600 dark:border-gray-500 dark:text-gray-200"
                   >
                     <option value="round_robin">轮询 (Round Robin)</option>
                     <option value="random">随机 (Random)</option>
@@ -295,48 +334,60 @@
                   <label class="flex items-center gap-3">
                     <input
                       v-model="schedulingConfig.fallbackToGlobal"
-                      @change="updateSchedulingConfig"
-                      type="checkbox"
                       class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      type="checkbox"
+                      @change="updateSchedulingConfig"
                     />
-                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">回退到全局账户</span>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >回退到全局账户</span
+                    >
                   </label>
-                  
+
                   <label class="flex items-center gap-3">
                     <input
                       v-model="schedulingConfig.healthCheckEnabled"
-                      @change="updateSchedulingConfig"
-                      type="checkbox"
                       class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      type="checkbox"
+                      @change="updateSchedulingConfig"
                     />
-                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">启用健康检查</span>
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >启用健康检查</span
+                    >
                   </label>
                 </div>
               </div>
             </div>
 
             <!-- Summary -->
-            <div class="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-              <div class="flex items-center gap-2 mb-2">
+            <div class="rounded-lg bg-purple-50 p-4 dark:bg-purple-900/20">
+              <div class="mb-2 flex items-center gap-2">
                 <i class="fas fa-chart-bar text-purple-500"></i>
                 <span class="font-medium text-purple-900 dark:text-purple-100">账户分配统计</span>
               </div>
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div class="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
                 <div>
                   <span class="text-purple-600 dark:text-purple-300">Claude:</span>
-                  <span class="font-medium text-purple-900 dark:text-purple-100">{{ getAssignedCount('claude') }}</span>
+                  <span class="font-medium text-purple-900 dark:text-purple-100">{{
+                    getAssignedCount('claude')
+                  }}</span>
                 </div>
                 <div>
                   <span class="text-purple-600 dark:text-purple-300">Gemini:</span>
-                  <span class="font-medium text-purple-900 dark:text-purple-100">{{ getAssignedCount('gemini') }}</span>
+                  <span class="font-medium text-purple-900 dark:text-purple-100">{{
+                    getAssignedCount('gemini')
+                  }}</span>
                 </div>
                 <div>
                   <span class="text-purple-600 dark:text-purple-300">OpenAI:</span>
-                  <span class="font-medium text-purple-900 dark:text-purple-100">{{ getAssignedCount('openai') }}</span>
+                  <span class="font-medium text-purple-900 dark:text-purple-100">{{
+                    getAssignedCount('openai')
+                  }}</span>
                 </div>
                 <div>
                   <span class="text-purple-600 dark:text-purple-300">总计:</span>
-                  <span class="font-medium text-purple-900 dark:text-purple-100">{{ totalAssigned }}</span>
+                  <span class="font-medium text-purple-900 dark:text-purple-100">{{
+                    totalAssigned
+                  }}</span>
                 </div>
               </div>
             </div>
@@ -348,8 +399,8 @@
           class="flex items-center justify-end rounded-b border-t border-solid border-gray-200 p-6 dark:border-gray-600"
         >
           <button
-            type="button"
             class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            type="button"
             @click="$emit('close')"
           >
             关闭
@@ -422,10 +473,11 @@ const filteredAvailableAccounts = computed(() => {
     return accounts
   }
   const term = accountSearchTerm.value.toLowerCase()
-  return accounts.filter(account => 
-    (account.name && account.name.toLowerCase().includes(term)) ||
-    (account.username && account.username.toLowerCase().includes(term)) ||
-    (account.description && account.description.toLowerCase().includes(term))
+  return accounts.filter(
+    (account) =>
+      (account.name && account.name.toLowerCase().includes(term)) ||
+      (account.username && account.username.toLowerCase().includes(term)) ||
+      (account.description && account.description.toLowerCase().includes(term))
   )
 })
 
@@ -434,7 +486,10 @@ const currentAssignedAccounts = computed(() => {
 })
 
 const totalAssigned = computed(() => {
-  return Object.values(assignedAccounts.value).reduce((total, accounts) => total + accounts.length, 0)
+  return Object.values(assignedAccounts.value).reduce(
+    (total, accounts) => total + accounts.length,
+    0
+  )
 })
 
 // Methods
@@ -445,7 +500,7 @@ const getAssignedCount = (platform) => {
 const getPlatformColor = (platform) => {
   const colors = {
     claude: 'bg-gradient-to-r from-blue-500 to-indigo-500',
-    gemini: 'bg-gradient-to-r from-green-500 to-teal-500', 
+    gemini: 'bg-gradient-to-r from-green-500 to-teal-500',
     openai: 'bg-gradient-to-r from-orange-500 to-red-500'
   }
   return colors[platform] || 'bg-gray-500'
@@ -462,19 +517,19 @@ const getPlatformIcon = (platform) => {
 
 const loadAvailableAccounts = async () => {
   if (!props.group) return
-  
+
   loadingAccounts.value = true
   try {
     const endpoint = {
       claude: '/admin/claude-accounts',
-      gemini: '/admin/gemini-accounts', 
+      gemini: '/admin/gemini-accounts',
       openai: '/admin/openai-accounts'
     }[activePlatform.value]
-    
+
     const response = await apiClient.get(endpoint, {
       params: { groupId: 'ungrouped' }
     })
-    
+
     if (response.success) {
       availableAccounts.value[activePlatform.value] = response.data || []
     } else {
@@ -491,11 +546,11 @@ const loadAvailableAccounts = async () => {
 
 const loadAssignedAccounts = async () => {
   if (!props.group) return
-  
+
   loadingAssigned.value = true
   try {
     const response = await apiClient.get(`/admin/groups/${props.group.id}/accounts`)
-    
+
     if (response.success) {
       const accounts = response.data
       assignedAccounts.value = {
@@ -503,11 +558,13 @@ const loadAssignedAccounts = async () => {
         gemini: accounts.geminiAccounts || [],
         openai: accounts.openaiAccounts || []
       }
-      
+
       // Initialize weight inputs
-      Object.values(assignedAccounts.value).flat().forEach(account => {
-        weightInputs.value[account.id] = account.weight || 0.5
-      })
+      Object.values(assignedAccounts.value)
+        .flat()
+        .forEach((account) => {
+          weightInputs.value[account.id] = account.weight || 0.5
+        })
     } else {
       throw new Error(response.message || '获取已分配账户失败')
     }
@@ -521,10 +578,10 @@ const loadAssignedAccounts = async () => {
 
 const loadSchedulingConfig = async () => {
   if (!props.group) return
-  
+
   try {
     const response = await apiClient.get(`/admin/groups/${props.group.id}`)
-    
+
     if (response.success && response.data.schedulingConfig) {
       schedulingConfig.value = {
         strategy: response.data.schedulingConfig.strategy || 'round_robin',
@@ -543,13 +600,15 @@ const assignAccount = async (account) => {
   try {
     const accounts = {}
     accounts[`${activePlatform.value}Accounts`] = [account.id]
-    
+
     const response = await apiClient.post(`/admin/groups/${props.group.id}/accounts`, { accounts })
-    
+
     if (response.success) {
       ElMessage.success(`账户 ${account.name || account.id} 已分配到组`)
       // Move account from available to assigned
-      availableAccounts.value[activePlatform.value] = availableAccounts.value[activePlatform.value].filter(a => a.id !== account.id)
+      availableAccounts.value[activePlatform.value] = availableAccounts.value[
+        activePlatform.value
+      ].filter((a) => a.id !== account.id)
       assignedAccounts.value[activePlatform.value].push(account)
       weightInputs.value[account.id] = 0.5
       emit('updated')
@@ -569,13 +628,17 @@ const unassignAccount = async (account) => {
   try {
     const accounts = {}
     accounts[`${activePlatform.value}Accounts`] = [account.id]
-    
-    const response = await apiClient.delete(`/admin/groups/${props.group.id}/accounts`, { data: { accounts } })
-    
+
+    const response = await apiClient.delete(`/admin/groups/${props.group.id}/accounts`, {
+      data: { accounts }
+    })
+
     if (response.success) {
       ElMessage.success(`账户 ${account.name || account.id} 已从组中移除`)
       // Move account from assigned to available
-      assignedAccounts.value[activePlatform.value] = assignedAccounts.value[activePlatform.value].filter(a => a.id !== account.id)
+      assignedAccounts.value[activePlatform.value] = assignedAccounts.value[
+        activePlatform.value
+      ].filter((a) => a.id !== account.id)
       availableAccounts.value[activePlatform.value].push(account)
       delete weightInputs.value[account.id]
       emit('updated')
@@ -598,14 +661,14 @@ const updateAccountWeight = async (account) => {
       weightInputs.value[account.id] = account.weight || 0.5
       return
     }
-    
+
     const weights = { ...schedulingConfig.value.weights }
     weights[account.id] = weight
-    
+
     const response = await apiClient.put(`/admin/groups/${props.group.id}/scheduling`, {
       weights
     })
-    
+
     if (response.success) {
       schedulingConfig.value.weights = weights
       account.weight = weight
@@ -622,8 +685,11 @@ const updateAccountWeight = async (account) => {
 
 const updateSchedulingConfig = async () => {
   try {
-    const response = await apiClient.put(`/admin/groups/${props.group.id}/scheduling`, schedulingConfig.value)
-    
+    const response = await apiClient.put(
+      `/admin/groups/${props.group.id}/scheduling`,
+      schedulingConfig.value
+    )
+
     if (response.success) {
       ElMessage.success('调度配置更新成功')
     } else {
@@ -647,7 +713,7 @@ const confirmUnassignAll = async () => {
         confirmButtonClass: 'el-button--danger'
       }
     )
-    
+
     await unassignAllAccounts()
   } catch (error) {
     if (error !== 'cancel') {
@@ -659,21 +725,25 @@ const confirmUnassignAll = async () => {
 const unassignAllAccounts = async () => {
   unassigningAll.value = true
   try {
-    const accountIds = currentAssignedAccounts.value.map(a => a.id)
+    const accountIds = currentAssignedAccounts.value.map((a) => a.id)
     const accounts = {}
     accounts[`${activePlatform.value}Accounts`] = accountIds
-    
-    const response = await apiClient.delete(`/admin/groups/${props.group.id}/accounts`, { data: { accounts } })
-    
+
+    const response = await apiClient.delete(`/admin/groups/${props.group.id}/accounts`, {
+      data: { accounts }
+    })
+
     if (response.success) {
       ElMessage.success(`所有 ${activePlatform.value.toUpperCase()} 账户已从组中移除`)
       // Move all accounts back to available
-      availableAccounts.value[activePlatform.value].push(...assignedAccounts.value[activePlatform.value])
+      availableAccounts.value[activePlatform.value].push(
+        ...assignedAccounts.value[activePlatform.value]
+      )
       assignedAccounts.value[activePlatform.value] = []
-      
+
       // Clear weight inputs
-      accountIds.forEach(id => delete weightInputs.value[id])
-      
+      accountIds.forEach((id) => delete weightInputs.value[id])
+
       emit('updated')
     } else {
       throw new Error(response.message || '移除所有账户失败')
@@ -715,11 +785,11 @@ watch(activePlatform, () => {
 }
 
 .max-h-80::-webkit-scrollbar-track {
-  @apply bg-gray-100 dark:bg-gray-600 rounded;
+  @apply rounded bg-gray-100 dark:bg-gray-600;
 }
 
 .max-h-80::-webkit-scrollbar-thumb {
-  @apply bg-gray-300 dark:bg-gray-500 rounded;
+  @apply rounded bg-gray-300 dark:bg-gray-500;
 }
 
 .max-h-80::-webkit-scrollbar-thumb:hover {
