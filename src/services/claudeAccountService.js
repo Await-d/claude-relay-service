@@ -17,6 +17,7 @@ const tokenRefreshService = require('./tokenRefreshService')
 const LRUCache = require('../utils/lruCache')
 const CostCalculator = require('../utils/costCalculator')
 const groupService = require('./groupService')
+const IntelligentLoadBalancer = require('./intelligentLoadBalancer')
 
 class ClaudeAccountService {
   constructor() {
@@ -44,11 +45,26 @@ class ClaudeAccountService {
     )
 
     // 🎯 Group scheduling configuration
-    this.SCHEDULING_STRATEGIES = ['random', 'round_robin', 'weighted', 'priority', 'least_recent']
+    this.SCHEDULING_STRATEGIES = [
+      'random',
+      'round_robin',
+      'weighted',
+      'priority',
+      'least_recent',
+      'intelligent'
+    ]
 
     // 🗂️ Group session caches for round_robin and state tracking
     this._groupRoundRobinCache = new LRUCache(100) // Group round robin state
     this._groupSelectionCache = new LRUCache(1000) // Recent selections for least_recent strategy
+
+    // 🧠 智能负载均衡器实例
+    this.intelligentLoadBalancer = new IntelligentLoadBalancer({
+      performanceWindow: 300000, // 5分钟性能窗口
+      healthCheckThreshold: 0.7, // 健康检查阈值
+      costOptimizationEnabled: true, // 启用成本优化
+      maxCostThreshold: 0.05 // 最大可接受成本阈值
+    })
   }
 
   // 🏢 创建Claude账户
@@ -859,11 +875,15 @@ class ClaudeAccountService {
       for (const group of userGroups) {
         try {
           const accounts = await groupService.getGroupAccounts(group.id)
-          const config = await groupService.getSchedulingConfig(group.id)
+          const schedulingConfig = await groupService.getSchedulingConfig(group.id)
 
           if (accounts.claudeAccounts && accounts.claudeAccounts.length > 0) {
             groupAccounts.push(...accounts.claudeAccounts)
-            groupConfigs.push({ groupId: group.id, config, accounts: accounts.claudeAccounts })
+            groupConfigs.push({
+              groupId: group.id,
+              config: schedulingConfig,
+              accounts: accounts.claudeAccounts
+            })
             logger.info(
               `🔗 Group ${group.name} has ${accounts.claudeAccounts.length} Claude accounts`
             )
@@ -2076,8 +2096,8 @@ class ClaudeAccountService {
     let effectiveStrategy = 'least_recent'
     let highestPriority = 5
 
-    for (const { config } of groupConfigs) {
-      const strategy = config?.strategy || 'round_robin'
+    for (const { config: groupConfig } of groupConfigs) {
+      const strategy = groupConfig?.strategy || 'round_robin'
       const priority = strategyPriority[strategy] || 5
 
       if (priority < highestPriority) {
@@ -2092,7 +2112,7 @@ class ClaudeAccountService {
 
   // 🎯 Apply scheduling strategy to select an account
   async applySchedulingStrategy(healthyAccounts, strategy, context) {
-    const { userId, groupConfigs, sessionHash } = context
+    const { userId, groupConfigs } = context
 
     if (!healthyAccounts || healthyAccounts.length === 0) {
       return null
@@ -2128,6 +2148,9 @@ class ClaudeAccountService {
           break
         case 'least_recent':
           selectedAccount = await this._applyLeastRecentStrategy(healthyAccounts)
+          break
+        case 'intelligent':
+          selectedAccount = await this._applyIntelligentStrategy(healthyAccounts, context)
           break
         default:
           logger.warn(`⚠️ Unknown strategy ${strategy}, using least_recent`)
@@ -2167,7 +2190,7 @@ class ClaudeAccountService {
   async _applyRoundRobinStrategy(accounts, userId, groupConfigs) {
     try {
       // Create a cache key based on user and groups
-      const groupIds = groupConfigs.map((config) => config.groupId).sort()
+      const groupIds = groupConfigs.map((groupConfigItem) => groupConfigItem.groupId).sort()
       const cacheKey = `${userId}:${groupIds.join(',')}`
 
       // Get current round robin state
@@ -2199,9 +2222,9 @@ class ClaudeAccountService {
     try {
       // Collect weights from all group configurations
       const weights = {}
-      for (const { config } of groupConfigs) {
-        if (config.weights) {
-          Object.assign(weights, config.weights)
+      for (const { config: groupConfig } of groupConfigs) {
+        if (groupConfig.weights) {
+          Object.assign(weights, groupConfig.weights)
         }
       }
 
@@ -2297,6 +2320,108 @@ class ClaudeAccountService {
     }
   }
 
+  // 🧠 Intelligent strategy implementation (cost-efficiency based)
+  async _applyIntelligentStrategy(accounts, context = {}) {
+    try {
+      logger.info(`🧠 Applying intelligent load balancing to ${accounts.length} accounts`)
+
+      // 从上下文中提取模型信息
+      const { modelName = 'claude-3-5-sonnet-20241022' } = context
+
+      // 预估token数量（基于历史平均值或默认值）
+      const estimatedTokens = await this.estimateTokenUsage(accounts, modelName)
+
+      // 构建请求上下文
+      const requestContext = {
+        model: modelName,
+        estimatedTokens,
+        strategy: 'intelligent',
+        timestamp: Date.now()
+      }
+
+      // 使用智能负载均衡器选择最优账户
+      const selectionResult = await this.intelligentLoadBalancer.selectOptimalAccount(
+        accounts,
+        requestContext
+      )
+
+      if (!selectionResult || !selectionResult.account) {
+        logger.warn('⚠️ Intelligent load balancer returned no result, falling back to random')
+        return await this._applyRandomStrategy(accounts)
+      }
+
+      logger.info(
+        `🎯 Intelligent strategy selected: ${selectionResult.account.name} (score: ${(selectionResult.score || 0).toFixed(3)}, reason: ${selectionResult.reason})`
+      )
+
+      // 记录选择的详细信息用于调试
+      if (selectionResult.breakdown) {
+        logger.debug('🔍 Selection score breakdown:', selectionResult.breakdown)
+      }
+
+      return selectionResult.account
+    } catch (error) {
+      logger.error('❌ Intelligent strategy failed:', error)
+      // 智能策略失败时回退到最近最少使用策略
+      return await this._applyLeastRecentStrategy(accounts)
+    }
+  }
+
+  // 📊 Estimate token usage based on historical data or defaults
+  async estimateTokenUsage(accounts, modelName) {
+    try {
+      // 获取账户的历史使用情况来估算token使用量
+      let totalTokens = 0
+      let sampleCount = 0
+
+      for (const account of accounts.slice(0, 3)) {
+        // 只检查前3个账户以避免性能问题
+        try {
+          const metrics = await this.intelligentLoadBalancer.getAccountMetrics(account.id)
+          if (metrics.totalRequests > 0) {
+            // 从历史数据估算，假设平均每请求2000 tokens
+            totalTokens += 2000 // 基础估算值
+            sampleCount++
+          }
+        } catch (error) {
+          // 忽略单个账户的错误
+          logger.debug(`⚠️ Failed to get metrics for account ${account.id}:`, error)
+        }
+      }
+
+      // 如果有历史数据，使用平均值；否则使用默认值
+      const estimatedTokens = sampleCount > 0 ? Math.round(totalTokens / sampleCount) : 2000
+
+      // 根据模型调整估算值
+      const modelMultiplier = this.getModelComplexityMultiplier(modelName)
+      const adjustedTokens = Math.round(estimatedTokens * modelMultiplier)
+
+      logger.debug(
+        `📊 Estimated ${adjustedTokens} tokens for model ${modelName} (samples: ${sampleCount})`
+      )
+
+      return Math.max(500, Math.min(50000, adjustedTokens)) // 限制在合理范围内
+    } catch (error) {
+      logger.warn('⚠️ Failed to estimate token usage, using default:', error)
+      return 2000 // 默认值
+    }
+  }
+
+  // 🎛️ Get model complexity multiplier for token estimation
+  getModelComplexityMultiplier(modelName) {
+    const complexityMap = {
+      'claude-3-5-sonnet-20241022': 1.0,
+      'claude-sonnet-4-20250514': 1.0,
+      'claude-3-5-haiku-20241022': 0.7,
+      'claude-3-opus-20240229': 1.5,
+      'claude-opus-4-1-20250805': 1.5,
+      'claude-3-sonnet-20240229': 1.0,
+      'claude-3-haiku-20240307': 0.7
+    }
+
+    return complexityMap[modelName] || 1.0
+  }
+
   // ==================== Integration and Convenience Methods ====================
 
   // 🎯 Enhanced account selection with group support (main integration point)
@@ -2360,6 +2485,7 @@ class ClaudeAccountService {
               : '0.00'
         },
         supportedStrategies: [...this.SCHEDULING_STRATEGIES],
+        intelligentLoadBalancer: this.intelligentLoadBalancer.getLoadBalancerStats(),
         timestamp: new Date().toISOString()
       }
 
@@ -2385,37 +2511,40 @@ class ClaudeAccountService {
   }
 
   // 🔧 Validate group scheduling configuration
-  validateGroupSchedulingConfig(config) {
+  validateGroupSchedulingConfig(configObj) {
     try {
-      if (!config || typeof config !== 'object') {
+      if (!configObj || typeof configObj !== 'object') {
         throw new Error('Config must be an object')
       }
 
-      if (config.strategy && !this.SCHEDULING_STRATEGIES.includes(config.strategy)) {
+      if (configObj.strategy && !this.SCHEDULING_STRATEGIES.includes(configObj.strategy)) {
         throw new Error(
-          `Invalid strategy: ${config.strategy}. Must be one of: ${this.SCHEDULING_STRATEGIES.join(', ')}`
+          `Invalid strategy: ${configObj.strategy}. Must be one of: ${this.SCHEDULING_STRATEGIES.join(', ')}`
         )
       }
 
-      if (config.weights && typeof config.weights !== 'object') {
+      if (configObj.weights && typeof configObj.weights !== 'object') {
         throw new Error('Weights must be an object')
       }
 
-      if (config.weights) {
-        for (const [accountId, weight] of Object.entries(config.weights)) {
+      if (configObj.weights) {
+        for (const [accountId, weight] of Object.entries(configObj.weights)) {
           if (typeof weight !== 'number' || weight < 0 || weight > 1) {
             throw new Error(`Invalid weight for ${accountId}: must be number between 0 and 1`)
           }
         }
       }
 
-      if (config.fallbackToGlobal !== undefined && typeof config.fallbackToGlobal !== 'boolean') {
+      if (
+        configObj.fallbackToGlobal !== undefined &&
+        typeof configObj.fallbackToGlobal !== 'boolean'
+      ) {
         throw new Error('fallbackToGlobal must be boolean')
       }
 
       if (
-        config.healthCheckEnabled !== undefined &&
-        typeof config.healthCheckEnabled !== 'boolean'
+        configObj.healthCheckEnabled !== undefined &&
+        typeof configObj.healthCheckEnabled !== 'boolean'
       ) {
         throw new Error('healthCheckEnabled must be boolean')
       }
@@ -2482,6 +2611,94 @@ class ClaudeAccountService {
     } catch (error) {
       logger.error(`❌ Failed to reset account status for ${accountId}:`, error)
       throw error
+    }
+  }
+
+  // ==================== 智能负载均衡器集成方法 ====================
+
+  // 🧠 更新智能负载均衡器权重配置
+  updateIntelligentLoadBalancerWeights(newWeights) {
+    try {
+      this.intelligentLoadBalancer.updateWeights(newWeights)
+      logger.info('🔧 Updated intelligent load balancer weights:', newWeights)
+      return true
+    } catch (error) {
+      logger.error('❌ Failed to update intelligent load balancer weights:', error)
+      throw error
+    }
+  }
+
+  // 📈 记录账户性能数据（用于智能负载均衡）
+  async recordAccountPerformance(accountId, performanceData) {
+    try {
+      const { responseTime, cost, status = 'success', model, tokens } = performanceData
+
+      // 更新智能负载均衡器的使用统计
+      await this.intelligentLoadBalancer.updateAccountUsage(accountId, {
+        responseTime,
+        cost,
+        status,
+        model,
+        tokens,
+        timestamp: Date.now()
+      })
+
+      logger.debug(`📈 Recorded performance for account ${accountId}`, {
+        responseTime,
+        cost,
+        status
+      })
+
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to record account performance for ${accountId}:`, error)
+      // 不抛出错误，避免影响主要流程
+      return false
+    }
+  }
+
+  // 🏥 执行账户健康检查（智能负载均衡支持）
+  async performIntelligentHealthCheck(accounts) {
+    try {
+      logger.info(`🏥 Performing intelligent health check on ${accounts.length} accounts`)
+
+      const healthyAccounts = await this.intelligentLoadBalancer.performHealthCheck(accounts)
+
+      logger.info(
+        `✅ Health check completed: ${healthyAccounts.length}/${accounts.length} accounts passed`
+      )
+
+      return healthyAccounts
+    } catch (error) {
+      logger.error('❌ Intelligent health check failed:', error)
+      // 返回原账户列表作为后备
+      return accounts
+    }
+  }
+
+  // 📊 获取智能负载均衡器详细统计
+  getIntelligentLoadBalancerStats() {
+    try {
+      return this.intelligentLoadBalancer.getLoadBalancerStats()
+    } catch (error) {
+      logger.error('❌ Failed to get intelligent load balancer stats:', error)
+      return {
+        error: error.message,
+        totalAccountsTracked: 0,
+        healthChecks: 0
+      }
+    }
+  }
+
+  // 🧹 清理智能负载均衡器缓存
+  cleanupIntelligentLoadBalancerCache() {
+    try {
+      this.intelligentLoadBalancer.cleanup()
+      logger.info('🧹 Cleaned up intelligent load balancer cache')
+      return { success: true }
+    } catch (error) {
+      logger.error('❌ Failed to cleanup intelligent load balancer cache:', error)
+      return { success: false, error: error.message }
     }
   }
 }

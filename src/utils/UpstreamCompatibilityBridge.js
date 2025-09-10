@@ -12,7 +12,7 @@ const logger = require('./logger')
 
 /**
  * 上游兼容性桥接器
- * 
+ *
  * 功能特性：
  * - Redis直接调用适配到DatabaseAdapter
  * - 保持上游代码调用方式不变
@@ -28,7 +28,7 @@ class UpstreamCompatibilityBridge {
 
     this.db = databaseAdapter
     this.client = databaseAdapter.getClient()
-    
+
     // 统计信息
     this.stats = {
       totalCalls: 0,
@@ -56,9 +56,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<string|null>} 值或null
    */
   async get(key) {
-    return await this._executeWithStats('get', async () => {
-      return await this.client.get(key)
-    })
+    return await this._executeWithStats('get', async () => await this.client.get(key))
   }
 
   /**
@@ -77,7 +75,7 @@ class UpstreamCompatibilityBridge {
         // 处理旧式TTL参数：set(key, value, seconds)
         return await this.client.setex(key, options[0], value)
       }
-      
+
       // 标准SET操作
       return await this.client.set(key, value, ...options)
     })
@@ -91,9 +89,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<string>} 操作结果
    */
   async setex(key, seconds, value) {
-    return await this._executeWithStats('setex', async () => {
-      return await this.client.setex(key, seconds, value)
-    })
+    return await this._executeWithStats(
+      'setex',
+      async () => await this.client.setex(key, seconds, value)
+    )
   }
 
   /**
@@ -102,9 +101,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<number>} 删除的键数量
    */
   async del(...keys) {
-    return await this._executeWithStats('del', async () => {
-      return await this.client.del(...keys)
-    })
+    return await this._executeWithStats('del', async () => await this.client.del(...keys))
   }
 
   /**
@@ -113,9 +110,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<number>} 存在返回1，不存在返回0
    */
   async exists(key) {
-    return await this._executeWithStats('exists', async () => {
-      return await this.client.exists(key)
-    })
+    return await this._executeWithStats('exists', async () => await this.client.exists(key))
   }
 
   /**
@@ -125,9 +120,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<number>} 成功返回1，失败返回0
    */
   async expire(key, seconds) {
-    return await this._executeWithStats('expire', async () => {
-      return await this.client.expire(key, seconds)
-    })
+    return await this._executeWithStats(
+      'expire',
+      async () => await this.client.expire(key, seconds)
+    )
   }
 
   /**
@@ -136,9 +132,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<number>} 剩余秒数，-1表示无过期时间，-2表示键不存在
    */
   async ttl(key) {
-    return await this._executeWithStats('ttl', async () => {
-      return await this.client.ttl(key)
-    })
+    return await this._executeWithStats('ttl', async () => await this.client.ttl(key))
   }
 
   /**
@@ -147,9 +141,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Array<string>>} 匹配的键数组
    */
   async keys(pattern) {
-    return await this._executeWithStats('keys', async () => {
-      return await this.client.keys(pattern)
-    })
+    return await this._executeWithStats('keys', async () => await this.client.keys(pattern))
   }
 
   /**
@@ -158,9 +150,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Array>} 值数组
    */
   async mget(...keys) {
-    return await this._executeWithStats('mget', async () => {
-      return await this.client.mget(...keys)
-    })
+    return await this._executeWithStats('mget', async () => await this.client.mget(...keys))
   }
 
   /**
@@ -169,9 +159,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<string>} 操作结果
    */
   async mset(...keyValues) {
-    return await this._executeWithStats('mset', async () => {
-      return await this.client.mset(...keyValues)
-    })
+    return await this._executeWithStats('mset', async () => await this.client.mset(...keyValues))
   }
 
   // ==================== Hash操作适配 ====================
@@ -183,9 +171,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<number>} 设置的字段数量
    */
   async hset(key, ...args) {
-    return await this._executeWithStats('hset', async () => {
-      return await this.client.hset(key, ...args)
-    })
+    return await this._executeWithStats('hset', async () => await this.client.hset(key, ...args))
   }
 
   /**
@@ -195,9 +181,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<string|null>} 字段值
    */
   async hget(key, field) {
-    return await this._executeWithStats('hget', async () => {
-      return await this.client.hget(key, field)
-    })
+    return await this._executeWithStats('hget', async () => await this.client.hget(key, field))
   }
 
   /**
@@ -206,9 +190,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Object>} 字段值对象
    */
   async hgetall(key) {
-    return await this._executeWithStats('hgetall', async () => {
-      return await this.client.hgetall(key)
-    })
+    return await this._executeWithStats('hgetall', async () => await this.client.hgetall(key))
   }
 
   /**
@@ -218,9 +200,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<number>} 删除的字段数量
    */
   async hdel(key, ...fields) {
-    return await this._executeWithStats('hdel', async () => {
-      return await this.client.hdel(key, ...fields)
-    })
+    return await this._executeWithStats('hdel', async () => await this.client.hdel(key, ...fields))
   }
 
   /**
@@ -231,9 +211,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<number>} 递增后的值
    */
   async hincrby(key, field, increment = 1) {
-    return await this._executeWithStats('hincrby', async () => {
-      return await this.client.hincrby(key, field, increment)
-    })
+    return await this._executeWithStats(
+      'hincrby',
+      async () => await this.client.hincrby(key, field, increment)
+    )
   }
 
   // ==================== API Key管理方法适配 ====================
@@ -246,9 +227,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<void>}
    */
   async setApiKey(keyId, keyData, hashedKey) {
-    return await this._executeWithStats('setApiKey', async () => {
-      return await this.db.setApiKey(keyId, keyData, hashedKey)
-    })
+    return await this._executeWithStats(
+      'setApiKey',
+      async () => await this.db.setApiKey(keyId, keyData, hashedKey)
+    )
   }
 
   /**
@@ -257,9 +239,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Object|null>} API Key数据
    */
   async getApiKey(keyId) {
-    return await this._executeWithStats('getApiKey', async () => {
-      return await this.db.getApiKey(keyId)
-    })
+    return await this._executeWithStats('getApiKey', async () => await this.db.getApiKey(keyId))
   }
 
   /**
@@ -268,9 +248,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Object|null>} API Key数据
    */
   async findApiKeyByHash(hash) {
-    return await this._executeWithStats('findApiKeyByHash', async () => {
-      return await this.db.findApiKeyByHash(hash)
-    })
+    return await this._executeWithStats(
+      'findApiKeyByHash',
+      async () => await this.db.findApiKeyByHash(hash)
+    )
   }
 
   /**
@@ -279,9 +260,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<void>}
    */
   async deleteApiKey(keyId) {
-    return await this._executeWithStats('deleteApiKey', async () => {
-      return await this.db.deleteApiKey(keyId)
-    })
+    return await this._executeWithStats(
+      'deleteApiKey',
+      async () => await this.db.deleteApiKey(keyId)
+    )
   }
 
   /**
@@ -289,9 +271,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Array>} API Keys数组
    */
   async getAllApiKeys() {
-    return await this._executeWithStats('getAllApiKeys', async () => {
-      return await this.db.getAllApiKeys()
-    })
+    return await this._executeWithStats('getAllApiKeys', async () => await this.db.getAllApiKeys())
   }
 
   // ==================== 使用统计方法适配 ====================
@@ -306,9 +286,11 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<void>}
    */
   async incrementTokenUsage(keyId, inputTokens, outputTokens, model, accountId) {
-    return await this._executeWithStats('incrementTokenUsage', async () => {
-      return await this.db.incrementTokenUsage(keyId, inputTokens, outputTokens, model, accountId)
-    })
+    return await this._executeWithStats(
+      'incrementTokenUsage',
+      async () =>
+        await this.db.incrementTokenUsage(keyId, inputTokens, outputTokens, model, accountId)
+    )
   }
 
   /**
@@ -318,9 +300,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Object>} 成本统计数据
    */
   async getCostStats(keyId, options = {}) {
-    return await this._executeWithStats('getCostStats', async () => {
-      return await this.db.getCostStats(keyId, options)
-    })
+    return await this._executeWithStats(
+      'getCostStats',
+      async () => await this.db.getCostStats(keyId, options)
+    )
   }
 
   /**
@@ -330,9 +313,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Object>} 使用统计数据
    */
   async getUsageStats(keyId, options = {}) {
-    return await this._executeWithStats('getUsageStats', async () => {
-      return await this.db.getUsageStats(keyId, options)
-    })
+    return await this._executeWithStats(
+      'getUsageStats',
+      async () => await this.db.getUsageStats(keyId, options)
+    )
   }
 
   /**
@@ -342,9 +326,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<void>}
    */
   async incrementDailyCost(keyId, cost) {
-    return await this._executeWithStats('incrementDailyCost', async () => {
-      return await this.db.incrementDailyCost(keyId, cost)
-    })
+    return await this._executeWithStats(
+      'incrementDailyCost',
+      async () => await this.db.incrementDailyCost(keyId, cost)
+    )
   }
 
   // ==================== 会话管理方法适配 ====================
@@ -357,9 +342,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<void>}
    */
   async setSession(token, sessionData, ttl) {
-    return await this._executeWithStats('setSession', async () => {
-      return await this.db.setSession(token, sessionData, ttl)
-    })
+    return await this._executeWithStats(
+      'setSession',
+      async () => await this.db.setSession(token, sessionData, ttl)
+    )
   }
 
   /**
@@ -368,9 +354,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Object|null>} 会话数据
    */
   async getSession(token) {
-    return await this._executeWithStats('getSession', async () => {
-      return await this.db.getSession(token)
-    })
+    return await this._executeWithStats('getSession', async () => await this.db.getSession(token))
   }
 
   /**
@@ -379,9 +363,10 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<void>}
    */
   async deleteSession(token) {
-    return await this._executeWithStats('deleteSession', async () => {
-      return await this.db.deleteSession(token)
-    })
+    return await this._executeWithStats(
+      'deleteSession',
+      async () => await this.db.deleteSession(token)
+    )
   }
 
   // ==================== 批量操作和事务支持 ====================
@@ -400,9 +385,7 @@ class UpstreamCompatibilityBridge {
    * @returns {Promise<Array>} 执行结果
    */
   async exec(pipeline) {
-    return await this._executeWithStats('pipeline.exec', async () => {
-      return await pipeline.exec()
-    })
+    return await this._executeWithStats('pipeline.exec', async () => await pipeline.exec())
   }
 
   // ==================== 统计和监控方法 ====================
@@ -416,10 +399,11 @@ class UpstreamCompatibilityBridge {
       totalCalls: this.stats.totalCalls,
       successfulCalls: this.stats.successfulCalls,
       failedCalls: this.stats.failedCalls,
-      successRate: this.stats.totalCalls > 0 
-        ? (this.stats.successfulCalls / this.stats.totalCalls * 100).toFixed(2) + '%' 
-        : '0%',
-      averageResponseTime: this.stats.averageResponseTime.toFixed(2) + 'ms',
+      successRate:
+        this.stats.totalCalls > 0
+          ? `${((this.stats.successfulCalls / this.stats.totalCalls) * 100).toFixed(2)}%`
+          : '0%',
+      averageResponseTime: `${this.stats.averageResponseTime.toFixed(2)}ms`,
       callsByMethod: this.stats.callsByMethod,
       slowQueries: this.performanceMetrics.slowQueries.length,
       errors: this.performanceMetrics.errorLog.length
@@ -437,13 +421,13 @@ class UpstreamCompatibilityBridge {
       averageResponseTime: 0,
       callsByMethod: {}
     }
-    
+
     this.performanceMetrics = {
       callTimes: [],
       slowQueries: [],
       errorLog: []
     }
-    
+
     logger.info('📊 UpstreamCompatibilityBridge stats reset')
   }
 
@@ -452,20 +436,20 @@ class UpstreamCompatibilityBridge {
    * @returns {Object} 性能报告
    */
   getPerformanceReport() {
-    const callTimes = this.performanceMetrics.callTimes
-    
+    const { callTimes } = this.performanceMetrics
+
     if (callTimes.length === 0) {
       return { message: 'No performance data available' }
     }
 
     const sortedTimes = [...callTimes].sort((a, b) => a - b)
-    
+
     return {
       totalCalls: callTimes.length,
-      averageTime: (callTimes.reduce((a, b) => a + b, 0) / callTimes.length).toFixed(2) + 'ms',
-      medianTime: sortedTimes[Math.floor(sortedTimes.length / 2)].toFixed(2) + 'ms',
-      p95Time: sortedTimes[Math.floor(sortedTimes.length * 0.95)].toFixed(2) + 'ms',
-      p99Time: sortedTimes[Math.floor(sortedTimes.length * 0.99)].toFixed(2) + 'ms',
+      averageTime: `${(callTimes.reduce((a, b) => a + b, 0) / callTimes.length).toFixed(2)}ms`,
+      medianTime: `${sortedTimes[Math.floor(sortedTimes.length / 2)].toFixed(2)}ms`,
+      p95Time: `${sortedTimes[Math.floor(sortedTimes.length * 0.95)].toFixed(2)}ms`,
+      p99Time: `${sortedTimes[Math.floor(sortedTimes.length * 0.99)].toFixed(2)}ms`,
       slowQueries: this.performanceMetrics.slowQueries.slice(0, 10), // 最慢的10个查询
       recentErrors: this.performanceMetrics.errorLog.slice(-5) // 最近5个错误
     }
@@ -483,7 +467,7 @@ class UpstreamCompatibilityBridge {
   async _executeWithStats(methodName, operation) {
     const startTime = Date.now()
     this.stats.totalCalls++
-    
+
     if (!this.stats.callsByMethod[methodName]) {
       this.stats.callsByMethod[methodName] = 0
     }
@@ -491,20 +475,19 @@ class UpstreamCompatibilityBridge {
 
     try {
       const result = await operation()
-      
+
       const endTime = Date.now()
       const executionTime = endTime - startTime
-      
+
       // 更新统计信息
       this.stats.successfulCalls++
       this._updatePerformanceMetrics(methodName, executionTime)
-      
+
       return result
-      
     } catch (error) {
       const endTime = Date.now()
       const executionTime = endTime - startTime
-      
+
       // 记录错误
       this.stats.failedCalls++
       this.performanceMetrics.errorLog.push({
@@ -513,9 +496,9 @@ class UpstreamCompatibilityBridge {
         timestamp: new Date().toISOString(),
         executionTime
       })
-      
+
       logger.error(`❌ UpstreamCompatibilityBridge.${methodName} failed:`, error)
-      
+
       // 重新抛出错误
       throw error
     }
@@ -530,12 +513,12 @@ class UpstreamCompatibilityBridge {
   _updatePerformanceMetrics(methodName, executionTime) {
     // 记录调用时间
     this.performanceMetrics.callTimes.push(executionTime)
-    
+
     // 保持最近1000次调用的记录
     if (this.performanceMetrics.callTimes.length > 1000) {
       this.performanceMetrics.callTimes = this.performanceMetrics.callTimes.slice(-1000)
     }
-    
+
     // 记录慢查询 (>100ms)
     if (executionTime > 100) {
       this.performanceMetrics.slowQueries.push({
@@ -543,13 +526,13 @@ class UpstreamCompatibilityBridge {
         executionTime,
         timestamp: new Date().toISOString()
       })
-      
+
       // 保持最近50个慢查询记录
       if (this.performanceMetrics.slowQueries.length > 50) {
         this.performanceMetrics.slowQueries = this.performanceMetrics.slowQueries.slice(-50)
       }
     }
-    
+
     // 更新平均响应时间
     const totalTime = this.performanceMetrics.callTimes.reduce((a, b) => a + b, 0)
     this.stats.averageResponseTime = totalTime / this.performanceMetrics.callTimes.length

@@ -6,6 +6,8 @@ const ProxyHelper = require('../utils/proxyHelper')
 const claudeAccountService = require('./claudeAccountService')
 const unifiedClaudeScheduler = require('./unifiedClaudeScheduler')
 const sessionHelper = require('../utils/sessionHelper')
+const { connectionManager } = require('./connectionManager')
+const { sessionManager } = require('./sessionManager')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const claudeCodeHeadersService = require('./claudeCodeHeadersService')
@@ -132,8 +134,30 @@ class ClaudeRelayService {
       // 处理模型名称（检测1M上下文）
       processedBody = modelUtils.processModelNameInRequest(processedBody)
 
-      // 获取代理配置
-      const proxyAgent = await this._getProxyAgent(accountId)
+      // 🔗 创建或获取会话
+      const sessionId =
+        sessionHelper.generateSessionHash(requestBody) ||
+        `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      let session = await sessionManager.getSession(sessionId)
+
+      if (!session) {
+        session = await sessionManager.createSession({
+          sessionId,
+          accountId,
+          apiKeyId: apiKeyData.id,
+          clientInfo: {
+            userAgent: clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent'],
+            requestId: clientHeaders?.['x-request-id']
+          },
+          metadata: {
+            model: requestBody.model,
+            stream: requestBody.stream
+          }
+        })
+      }
+
+      // 🌐 获取优化的连接代理（使用连接管理器）
+      const proxyAgent = await this._getOptimizedProxyAgent(accountId, sessionId)
 
       // 设置客户端断开监听器
       const handleClientDisconnect = () => {
@@ -272,6 +296,14 @@ class ClaudeRelayService {
         }
       }
 
+      // 📊 更新会话统计和状态
+      if (session) {
+        await sessionManager.updateSession(sessionId, {
+          status: response.statusCode === 200 ? 'completed' : 'error',
+          lastError: response.statusCode !== 200 ? `HTTP ${response.statusCode}` : null
+        })
+      }
+
       // 记录成功的API调用并打印详细的usage数据
       let responseBody = null
       try {
@@ -305,6 +337,7 @@ class ClaudeRelayService {
 
       // 在响应中添加accountId，以便调用方记录账户级别统计
       response.accountId = accountId
+      response.sessionId = sessionId
       return response
     } catch (error) {
       logger.error(
@@ -502,7 +535,39 @@ class ClaudeRelayService {
     }
   }
 
-  // 🌐 获取代理Agent（使用统一的代理工具）
+  // 🌐 获取优化的代理Agent（使用连接管理器）
+  async _getOptimizedProxyAgent(accountId, sessionId = null) {
+    try {
+      const accountData = await claudeAccountService.getAllAccounts()
+      const account = accountData.find((acc) => acc.id === accountId)
+
+      const connectionOptions = {
+        target: 'api.anthropic.com',
+        proxy: account?.proxy || null,
+        accountId,
+        sessionId
+      }
+
+      // 使用连接管理器获取优化的代理
+      const agent = await connectionManager.getConnectionAgent(connectionOptions)
+
+      if (account?.proxy) {
+        logger.info(
+          `🌐 Using optimized proxy connection for account ${accountId}: ${ProxyHelper.getProxyDescription(account.proxy)}`
+        )
+      } else {
+        logger.debug(`🔗 Using optimized direct connection for account ${accountId}`)
+      }
+
+      return agent
+    } catch (error) {
+      logger.warn(`⚠️ Failed to get optimized connection for account ${accountId}:`, error)
+      // 降级到原有方法
+      return await this._getProxyAgent(accountId)
+    }
+  }
+
+  // 🌐 获取代理Agent（使用统一的代理工具）- 保持向后兼容
   async _getProxyAgent(accountId) {
     try {
       const accountData = await claudeAccountService.getAllAccounts()
@@ -796,8 +861,30 @@ class ClaudeRelayService {
       // 处理模型名称（检测1M上下文）
       processedBody = modelUtils.processModelNameInRequest(processedBody)
 
-      // 获取代理配置
-      const proxyAgent = await this._getProxyAgent(accountId)
+      // 🔗 创建或获取流式会话
+      const sessionId =
+        sessionHelper.generateSessionHash(requestBody) ||
+        `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      let session = await sessionManager.getSession(sessionId)
+
+      if (!session) {
+        session = await sessionManager.createSession({
+          sessionId,
+          accountId,
+          apiKeyId: apiKeyData.id,
+          clientInfo: {
+            userAgent: clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent'],
+            requestId: clientHeaders?.['x-request-id']
+          },
+          metadata: {
+            model: requestBody.model,
+            stream: true
+          }
+        })
+      }
+
+      // 🌐 获取优化的连接代理（使用连接管理器）
+      const proxyAgent = await this._getOptimizedProxyAgent(accountId, sessionId)
 
       // 发送流式请求并捕获usage数据
       await this._makeClaudeStreamRequestWithUsageCapture(
@@ -807,14 +894,15 @@ class ClaudeRelayService {
         clientHeaders,
         responseStream,
         (usageData) => {
-          // 在usageCallback中添加accountId
-          usageCallback({ ...usageData, accountId })
+          // 在usageCallback中添加accountId和sessionId
+          usageCallback({ ...usageData, accountId, sessionId })
         },
         accountId,
         accountType,
         sessionHash,
         streamTransformer,
-        options
+        options,
+        sessionId // 传递sessionId
       )
     } catch (error) {
       logger.error('❌ Claude stream relay with usage capture failed:', error)
@@ -834,7 +922,8 @@ class ClaudeRelayService {
     accountType,
     sessionHash,
     streamTransformer = null,
-    requestOptions = {}
+    requestOptions = {},
+    sessionId = null
   ) {
     // 获取过滤后的客户端 headers
     const filteredHeaders = this._filterClientHeaders(clientHeaders)
@@ -1152,7 +1241,15 @@ class ClaudeRelayService {
             }
 
             // 调用一次usageCallback记录合并后的数据
-            usageCallback(finalUsage)
+            usageCallback({ ...finalUsage, sessionId })
+          }
+
+          // 📊 更新流式会话统计
+          if (sessionId) {
+            await sessionManager.updateSession(sessionId, {
+              status: res.statusCode === 200 ? 'completed' : 'error',
+              lastError: res.statusCode !== 200 ? `HTTP ${res.statusCode}` : null
+            })
           }
 
           // 处理限流状态

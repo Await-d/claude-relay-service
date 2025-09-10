@@ -56,15 +56,14 @@ class ExcelDataQueryAdapter {
    */
   async getApiKeysWithStats(keyIds = [], timeRange = {}) {
     const startTime = Date.now()
-    
+
     try {
       logger.debug(`🔍 Querying API Keys with stats`, { keyIds: keyIds.length, timeRange })
 
       // 1. 获取API Keys基础信息
       const allApiKeys = await this.bridge.getAllApiKeys()
-      const targetKeys = keyIds.length > 0 
-        ? allApiKeys.filter(key => keyIds.includes(key.id))
-        : allApiKeys
+      const targetKeys =
+        keyIds.length > 0 ? allApiKeys.filter((key) => keyIds.includes(key.id)) : allApiKeys
 
       if (targetKeys.length === 0) {
         logger.warn('⚠️ No API Keys found for export')
@@ -78,10 +77,11 @@ class ExcelDataQueryAdapter {
       const queryTime = Date.now() - startTime
       this._recordQueryStats('getApiKeysWithStats', queryTime)
 
-      logger.success(`✅ Retrieved ${apiKeysWithStats.length} API Keys with stats in ${queryTime}ms`)
+      logger.success(
+        `✅ Retrieved ${apiKeysWithStats.length} API Keys with stats in ${queryTime}ms`
+      )
 
       return apiKeysWithStats
-
     } catch (error) {
       logger.error('❌ Failed to get API Keys with stats:', error)
       throw new Error(`Failed to query API Keys data: ${error.message}`)
@@ -101,15 +101,15 @@ class ExcelDataQueryAdapter {
 
     for (let i = 0; i < apiKeys.length; i += batchSize) {
       const batch = apiKeys.slice(i, i + batchSize)
-      
+
       const batchPromises = batch.map(async (apiKey) => {
         try {
           // 获取使用统计
           const usage = await this._getApiKeyUsage(apiKey.id, timeRange)
-          
+
           // 获取成本统计
           const costs = await this._getApiKeyCosts(apiKey.id, timeRange)
-          
+
           // 获取模型使用情况
           const modelUsage = await this._getApiKeyModelUsage(apiKey.id, timeRange)
 
@@ -124,10 +124,9 @@ class ExcelDataQueryAdapter {
             costEfficiency: this._calculateCostEfficiency(usage, costs),
             averageTokensPerRequest: this._calculateAverageTokensPerRequest(usage)
           }
-
         } catch (error) {
           logger.warn(`⚠️ Failed to get stats for API Key ${apiKey.id}:`, error.message)
-          
+
           // 返回基础信息，统计数据为空
           return {
             ...apiKey,
@@ -146,7 +145,7 @@ class ExcelDataQueryAdapter {
 
       // 添加小延迟避免过度负载
       if (i + batchSize < apiKeys.length) {
-        await new Promise(resolve => setTimeout(resolve, 50))
+        await new Promise((resolve) => setTimeout(resolve, 50))
       }
     }
 
@@ -163,7 +162,7 @@ class ExcelDataQueryAdapter {
    */
   async getUsageStatistics(keyIds = [], timeRange = {}) {
     const startTime = Date.now()
-    
+
     try {
       logger.debug(`📊 Querying usage statistics`, { keyIds: keyIds.length, timeRange })
 
@@ -177,7 +176,7 @@ class ExcelDataQueryAdapter {
       // 构建聚合统计
       const aggregatedStats = {
         totalKeys: keyIds.length,
-        timeRange: timeRange,
+        timeRange,
         summary: {
           totalRequests: 0,
           totalInputTokens: 0,
@@ -195,14 +194,14 @@ class ExcelDataQueryAdapter {
       }
 
       // 并行查询每个API Key的使用数据
-      const keyUsagePromises = keyIds.map(keyId => this._getDetailedUsageStats(keyId, timeRange))
+      const keyUsagePromises = keyIds.map((keyId) => this._getDetailedUsageStats(keyId, timeRange))
       const keyUsageResults = await Promise.all(keyUsagePromises)
 
       // 聚合数据
       for (let i = 0; i < keyIds.length; i++) {
         const keyId = keyIds[i]
         const keyUsage = keyUsageResults[i]
-        
+
         // 添加到按键统计
         aggregatedStats.keyBreakdown.push({
           keyId,
@@ -223,17 +222,22 @@ class ExcelDataQueryAdapter {
 
         // 聚合模型使用情况
         this._aggregateModelUsage(aggregatedStats.modelBreakdown, keyUsage.modelUsage)
-        
+
         // 聚合时间分布
-        this._aggregateHourlyDistribution(aggregatedStats.hourlyDistribution, keyUsage.hourlyDistribution)
+        this._aggregateHourlyDistribution(
+          aggregatedStats.hourlyDistribution,
+          keyUsage.hourlyDistribution
+        )
       }
 
       // 计算平均值
       if (aggregatedStats.totalKeys > 0) {
-        aggregatedStats.summary.averageRequestsPerKey = 
-          Math.round(aggregatedStats.summary.totalRequests / aggregatedStats.totalKeys)
-        aggregatedStats.summary.averageTokensPerKey = 
-          Math.round(aggregatedStats.summary.totalTokens / aggregatedStats.totalKeys)
+        aggregatedStats.summary.averageRequestsPerKey = Math.round(
+          aggregatedStats.summary.totalRequests / aggregatedStats.totalKeys
+        )
+        aggregatedStats.summary.averageTokensPerKey = Math.round(
+          aggregatedStats.summary.totalTokens / aggregatedStats.totalKeys
+        )
       }
 
       // 生成每日趋势
@@ -248,7 +252,6 @@ class ExcelDataQueryAdapter {
       logger.success(`✅ Generated usage statistics for ${keyIds.length} keys in ${queryTime}ms`)
 
       return aggregatedStats
-
     } catch (error) {
       logger.error('❌ Failed to get usage statistics:', error)
       throw new Error(`Failed to query usage statistics: ${error.message}`)
@@ -265,7 +268,7 @@ class ExcelDataQueryAdapter {
    */
   async getCostStatistics(keyIds = [], timeRange = {}) {
     const startTime = Date.now()
-    
+
     try {
       logger.debug(`💰 Querying cost statistics`, { keyIds: keyIds.length, timeRange })
 
@@ -278,7 +281,7 @@ class ExcelDataQueryAdapter {
 
       const aggregatedCosts = {
         totalKeys: keyIds.length,
-        timeRange: timeRange,
+        timeRange,
         summary: {
           totalCost: 0,
           averageCostPerKey: 0,
@@ -295,14 +298,14 @@ class ExcelDataQueryAdapter {
       }
 
       // 并行查询成本数据
-      const costPromises = keyIds.map(keyId => this._getDetailedCostStats(keyId, timeRange))
+      const costPromises = keyIds.map((keyId) => this._getDetailedCostStats(keyId, timeRange))
       const costResults = await Promise.all(costPromises)
 
       // 聚合成本数据
       for (let i = 0; i < keyIds.length; i++) {
         const keyId = keyIds[i]
         const keyCost = costResults[i]
-        
+
         aggregatedCosts.keyBreakdown.push({
           keyId,
           ...keyCost
@@ -323,21 +326,27 @@ class ExcelDataQueryAdapter {
 
       // 计算平均值和比率
       if (aggregatedCosts.totalKeys > 0) {
-        aggregatedCosts.summary.averageCostPerKey = 
+        aggregatedCosts.summary.averageCostPerKey =
           aggregatedCosts.summary.totalCost / aggregatedCosts.totalKeys
       }
 
       // 获取总请求数和Token数用于计算单位成本
-      const totalRequests = aggregatedCosts.keyBreakdown.reduce((sum, key) => sum + key.totalRequests, 0)
-      const totalTokens = aggregatedCosts.keyBreakdown.reduce((sum, key) => sum + key.totalTokens, 0)
+      const totalRequests = aggregatedCosts.keyBreakdown.reduce(
+        (sum, key) => sum + key.totalRequests,
+        0
+      )
+      const totalTokens = aggregatedCosts.keyBreakdown.reduce(
+        (sum, key) => sum + key.totalTokens,
+        0
+      )
 
       if (totalRequests > 0) {
-        aggregatedCosts.summary.averageCostPerRequest = 
+        aggregatedCosts.summary.averageCostPerRequest =
           aggregatedCosts.summary.totalCost / totalRequests
       }
 
       if (totalTokens > 0) {
-        aggregatedCosts.summary.averageCostPerToken = 
+        aggregatedCosts.summary.averageCostPerToken =
           aggregatedCosts.summary.totalCost / totalTokens
       }
 
@@ -353,7 +362,6 @@ class ExcelDataQueryAdapter {
       logger.success(`✅ Generated cost statistics for ${keyIds.length} keys in ${queryTime}ms`)
 
       return aggregatedCosts
-
     } catch (error) {
       logger.error('❌ Failed to get cost statistics:', error)
       throw new Error(`Failed to query cost statistics: ${error.message}`)
@@ -370,20 +378,20 @@ class ExcelDataQueryAdapter {
    */
   async getModelUsageBreakdown(keyIds = [], timeRange = {}) {
     const startTime = Date.now()
-    
+
     try {
       logger.debug(`🤖 Querying model usage breakdown`, { keyIds: keyIds.length, timeRange })
 
       const modelBreakdown = []
-      
+
       // 为每个API Key查询模型使用情况
       for (const keyId of keyIds) {
         const keyModelUsage = await this._getApiKeyModelUsage(keyId, timeRange)
-        
+
         for (const modelData of keyModelUsage) {
           // 查找是否已存在该模型的记录
-          let existingModel = modelBreakdown.find(m => m.model === modelData.model)
-          
+          let existingModel = modelBreakdown.find((m) => m.model === modelData.model)
+
           if (!existingModel) {
             existingModel = {
               model: modelData.model,
@@ -423,18 +431,20 @@ class ExcelDataQueryAdapter {
       for (const model of modelBreakdown) {
         if (model.keyUsage.length > 0) {
           // 计算平均响应时间
-          const totalResponseTime = model.keyUsage.reduce((sum, key) => 
-            sum + (key.averageResponseTime * key.requests), 0)
-          model.averageResponseTime = model.totalRequests > 0 
-            ? totalResponseTime / model.totalRequests
-            : 0
+          const totalResponseTime = model.keyUsage.reduce(
+            (sum, key) => sum + key.averageResponseTime * key.requests,
+            0
+          )
+          model.averageResponseTime =
+            model.totalRequests > 0 ? totalResponseTime / model.totalRequests : 0
 
           // 计算成功率
-          const totalSuccessfulRequests = model.keyUsage.reduce((sum, key) => 
-            sum + (key.requests * key.successRate / 100), 0)
-          model.successRate = model.totalRequests > 0 
-            ? (totalSuccessfulRequests / model.totalRequests) * 100
-            : 0
+          const totalSuccessfulRequests = model.keyUsage.reduce(
+            (sum, key) => sum + (key.requests * key.successRate) / 100,
+            0
+          )
+          model.successRate =
+            model.totalRequests > 0 ? (totalSuccessfulRequests / model.totalRequests) * 100 : 0
         }
       }
 
@@ -444,10 +454,11 @@ class ExcelDataQueryAdapter {
       const queryTime = Date.now() - startTime
       this._recordQueryStats('getModelUsageBreakdown', queryTime)
 
-      logger.success(`✅ Generated model usage breakdown for ${modelBreakdown.length} models in ${queryTime}ms`)
+      logger.success(
+        `✅ Generated model usage breakdown for ${modelBreakdown.length} models in ${queryTime}ms`
+      )
 
       return modelBreakdown
-
     } catch (error) {
       logger.error('❌ Failed to get model usage breakdown:', error)
       throw new Error(`Failed to query model usage breakdown: ${error.message}`)
@@ -614,11 +625,11 @@ class ExcelDataQueryAdapter {
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
       return cached.data
     }
-    
+
     if (cached) {
       this.cache.delete(key) // 清理过期缓存
     }
-    
+
     return null
   }
 
@@ -653,7 +664,7 @@ class ExcelDataQueryAdapter {
     }
 
     // 计算平均查询时间
-    this.stats.averageQueryTime = 
+    this.stats.averageQueryTime =
       this.stats.queryTimes.reduce((sum, time) => sum + time, 0) / this.stats.queryTimes.length
   }
 
@@ -666,11 +677,12 @@ class ExcelDataQueryAdapter {
   getStats() {
     return {
       ...this.stats,
-      cacheHitRate: this.stats.totalQueries > 0 
-        ? ((this.stats.cacheHits / this.stats.totalQueries) * 100).toFixed(2) + '%'
-        : '0%',
+      cacheHitRate:
+        this.stats.totalQueries > 0
+          ? `${((this.stats.cacheHits / this.stats.totalQueries) * 100).toFixed(2)}%`
+          : '0%',
       cacheSize: this.cache.size,
-      averageQueryTime: Math.round(this.stats.averageQueryTime) + 'ms'
+      averageQueryTime: `${Math.round(this.stats.averageQueryTime)}ms`
     }
   }
 

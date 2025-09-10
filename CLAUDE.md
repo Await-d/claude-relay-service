@@ -96,8 +96,8 @@ npm run setup  # 自动生成密钥并创建管理员账户
 ### 核心管理功能
 
 - **实时仪表板**: 系统统计、账户状态、使用量监控
-- **API Key管理**: 创建、配额设置、使用统计查看
-- **Claude账户管理**: OAuth账户添加、代理配置、状态监控
+- **API Key管理**: 创建、配额设置、使用统计查看、批量导出功能
+- **Claude账户管理**: OAuth账户添加、代理配置、状态监控、智能负载均衡
 - **数据管理**: 数据导出、导入、数据库迁移（需2FA验证）
 - **系统日志**: 实时日志查看，多级别过滤
 - **主题系统**: 支持明亮/暗黑模式切换，自动保存用户偏好设置
@@ -126,6 +126,12 @@ npm run setup  # 自动生成密钥并创建管理员账户
 - `POST /admin/data/export` - 数据导出（需2FA）
 - `POST /admin/data/import` - 数据导入（需2FA）
 - `POST /admin/data/migrate` - 数据库迁移（需2FA）
+
+### API Key导出端点
+
+- `POST /admin/api-keys/export` - API Key批量导出（支持多格式）
+- `GET /admin/api-keys/export/stats` - 导出统计信息
+- `DELETE /admin/api-keys/export/cleanup` - 清理过期导出文件
 
 ### 系统端点
 
@@ -335,13 +341,71 @@ requestLoggingIntegration.setSamplingRate(0.5) // 50%采样
 - **测试脚本**: `scripts/enhanced-logging-test.js`
 - **使用文档**: `ENHANCED_LOGGING_GUIDE.md`
 
+#### 智能负载均衡系统文件
+
+- **智能调度器**: `src/services/IntelligentScheduler.js`
+- **负载均衡算法**: `src/services/LoadBalancingAlgorithms.js`
+- **健康监控服务**: `src/services/HealthMonitorService.js`
+- **故障恢复服务**: `src/services/FailureRecoveryService.js`
+- **算法设计文档**: `docs/intelligent-load-balancing-algorithm-design.md`
+- **连接管理架构**: `docs/connection-session-architecture.md`
+
+#### 上游功能适配器文件
+
+- **适配器基类**: `src/adapters/UpstreamFeatureAdapter.js`
+- **API Key导出适配器**: `src/adapters/ApiKeyExportAdapter.js`
+- **查询优化器**: `src/utils/QueryOptimizer.js`
+- **前端导出组件**: `web/admin-spa/src/components/apikeys/ExportApiKeysModal.vue`
+- **Excel导出工具**: `web/admin-spa/src/utils/ExcelExporter.js`
+
 ### 重要架构决策
 
 - 所有敏感数据（OAuth token、refreshToken）都使用 AES 加密存储在 Redis
 - 每个 Claude 账户支持独立的代理配置，包括 SOCKS5 和 HTTP 代理
 - API Key 使用哈希存储，支持 `cr_` 前缀格式
-- 请求流程：API Key 验证 → 账户选择 → Token 刷新（如需）→ 请求转发
+- 请求流程：API Key 验证 → 智能账户选择 → Token 刷新（如需）→ 请求转发
 - 支持流式和非流式响应，客户端断开时自动清理资源
+
+### 智能负载均衡架构
+
+#### 核心算法特性
+
+- **成本优先调度**: 基于日消费成本的智能选择，优先选择成本效益最高的账户
+- **健康状态监控**: 实时监控账户健康状态，包括响应时间、成功率、错误率
+- **故障自动转移**: 请求失败后的自动故障转移和智能重试机制
+- **动态权重调整**: 根据账户性能动态调整权重，优化长期负载分布
+
+#### 调度策略
+
+- **最少使用策略** (`least_used`): 选择使用次数最少的账户
+- **最近最少使用** (`least_recent`): 选择最长时间未使用的账户
+- **成本优先策略** (`lowest_cost`): 选择成本最低的健康账户
+- **均衡策略** (`balanced`): 综合考虑成本、性能、负载的平衡选择
+- **加权随机** (`weighted_random`): 基于权重的随机选择，避免热点
+
+#### 性能指标
+
+- 账户选择延迟：< 10ms (目标)
+- 系统可用性：> 99.9%
+- 内存使用：< 50MB
+- 选择准确率：成本最优 > 80%
+
+### API Key导出系统架构
+
+#### 核心特性
+
+- **多格式支持**: 支持JSON、CSV格式导出
+- **敏感数据脱敏**: 自动识别并脱敏API Key、Token等敏感信息
+- **批量处理优化**: 支持大数据量的分批处理和内存优化
+- **查询性能优化**: 使用QueryOptimizer提供高性能的批量查询
+- **实时进度反馈**: 导出过程的实时进度显示
+
+#### 数据安全
+
+- **字段选择性导出**: 用户可选择需要导出的具体字段
+- **时间范围过滤**: 支持按创建时间范围过滤导出数据
+- **自动脱敏处理**: 敏感字段自动保留前4位和后4位，中间用星号替换
+- **文件自动清理**: 过期导出文件自动清理机制
 
 ### 核心数据流和性能优化
 

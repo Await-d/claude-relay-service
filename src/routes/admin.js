@@ -355,6 +355,101 @@ router.get('/supported-clients', authenticateAdmin, async (req, res) => {
   }
 })
 
+// 📤 导出API Keys数据
+router.post('/api-keys/export', authenticateAdmin, async (req, res) => {
+  try {
+    const { format = 'csv', dateFrom, dateTo, status, minUsage, maxUsage, search } = req.body
+
+    // 验证导出格式
+    if (!['csv', 'xlsx'].includes(format.toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: '不支持的导出格式，仅支持 csv 和 xlsx'
+      })
+    }
+
+    // 构建过滤条件
+    const filters = {}
+    if (dateFrom) {
+      filters.dateFrom = dateFrom
+    }
+    if (dateTo) {
+      filters.dateTo = dateTo
+    }
+    if (status) {
+      filters.status = status
+    }
+    if (minUsage !== undefined) {
+      filters.minUsage = minUsage
+    }
+    if (maxUsage !== undefined) {
+      filters.maxUsage = maxUsage
+    }
+    if (search) {
+      filters.search = search
+    }
+
+    // 记录导出请求日志
+    logger.info('📤 API Keys导出请求:', {
+      user: req.user.username,
+      userId: req.user.id,
+      filters,
+      format,
+      timestamp: new Date().toISOString()
+    })
+
+    // 使用API Key服务获取导出数据
+    const exportData = await apiKeyService.exportApiKeys(filters, format, req.user.id)
+
+    if (!exportData || exportData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '没有找到符合条件的API Key数据'
+      })
+    }
+
+    // 使用数据导出工具生成文件
+    const dataExporter = require('../utils/dataExporter')
+    const result = await dataExporter.export(exportData, format)
+
+    // 设置下载响应头
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
+    res.setHeader('Content-Type', result.mimeType)
+    res.setHeader('Content-Length', result.size)
+
+    // 记录成功日志
+    logger.info('📤 API Keys导出成功:', {
+      user: req.user.username,
+      filename: result.filename,
+      size: result.size,
+      records: exportData.length,
+      format
+    })
+
+    // 发送文件
+    res.sendFile(path.resolve(result.filePath), (error) => {
+      if (error) {
+        logger.error('❌ 文件发送失败:', {
+          filename: result.filename,
+          error: error.message
+        })
+      }
+    })
+  } catch (error) {
+    logger.error('❌ API Keys导出失败:', {
+      error: error.message,
+      user: req.user?.username,
+      stack: error.stack
+    })
+
+    res.status(500).json({
+      success: false,
+      message: '导出失败',
+      error: error.message
+    })
+  }
+})
+
 // 获取已存在的标签列表
 router.get('/api-keys/tags', authenticateAdmin, async (req, res) => {
   try {
@@ -7036,7 +7131,7 @@ router.post('/groups', authenticateAdmin, async (req, res) => {
 
     // 提供更具体的错误信息
     let statusCode = 500
-    let errorMessage = error.message
+    const errorMessage = error.message
 
     if (error.message.includes('already exists')) {
       statusCode = 409
@@ -7106,7 +7201,7 @@ router.put('/groups/:id', authenticateAdmin, async (req, res) => {
     logger.error(`❌ Failed to update group ${req.params.id}:`, error)
 
     let statusCode = 500
-    let errorMessage = error.message
+    const errorMessage = error.message
 
     if (error.message.includes('not found')) {
       statusCode = 404
@@ -7160,7 +7255,7 @@ router.delete('/groups/:id', authenticateAdmin, async (req, res) => {
     logger.error(`❌ Failed to delete group ${req.params.id}:`, error)
 
     let statusCode = 500
-    let errorMessage = error.message
+    const errorMessage = error.message
 
     if (error.message.includes('not found')) {
       statusCode = 404
@@ -7455,7 +7550,7 @@ router.get('/groups/:id/accounts', authenticateAdmin, async (req, res) => {
     // 获取账户分配
     const accounts = await groupService.getGroupAccounts(id)
 
-    let response = {
+    const response = {
       success: true,
       data: {
         groupId: id,

@@ -1138,7 +1138,7 @@ class UserService {
       const userPattern = 'user:*'
       const keys = await database.client.keys(userPattern)
 
-      let users = []
+      const users = []
       for (const key of keys) {
         try {
           const userData = await database.client.hgetall(key)
@@ -1371,14 +1371,20 @@ class UserService {
       for (const key of keys) {
         try {
           const sessionData = await database.client.get(key)
-          if (!sessionData) continue
+          if (!sessionData) {
+            continue
+          }
 
           const session = JSON.parse(sessionData)
-          if (session.userId !== userId) continue
+          if (session.userId !== userId) {
+            continue
+          }
 
           const isActive = new Date(session.expiresAt) > new Date()
 
-          if (!includeExpired && !isActive) continue
+          if (!includeExpired && !isActive) {
+            continue
+          }
 
           userSessions.push({
             sessionId: session.sessionId || key.replace('session:', ''),

@@ -1,0 +1,287 @@
+# Claude Relay Service - Performance Testing & Monitoring Makefile
+# 性能测试和监控的便捷命令集合
+
+.PHONY: help performance-quick performance-full monitoring-setup monitoring-start monitoring-test clean-reports
+
+# 默认目标
+help:
+	@echo "Claude Relay Service - Performance & Monitoring Commands"
+	@echo "========================================================="
+	@echo ""
+	@echo "Quick Performance Checks:"
+	@echo "  performance-quick     - Run quick performance check (< 2 min)"
+	@echo "  performance-health    - Alias for performance-quick"
+	@echo ""
+	@echo "Full Performance Tests:"
+	@echo "  performance-full      - Run complete performance benchmark suite"
+	@echo "  performance-load      - Test load balancer performance only"
+	@echo "  performance-error     - Test error handling performance only"
+	@echo "  performance-conn      - Test connection manager performance only"
+	@echo "  performance-session   - Test session manager performance only"
+	@echo "  performance-concurrent - Test concurrent load performance only"
+	@echo ""
+	@echo "Monitoring Commands:"
+	@echo "  monitoring-setup      - Setup complete monitoring system"
+	@echo "  monitoring-start      - Start monitoring system (background)"
+	@echo "  monitoring-test       - Test monitoring system functionality"
+	@echo "  monitoring-stop       - Stop monitoring system"
+	@echo ""
+	@echo "Utilities:"
+	@echo "  clean-reports         - Clean up old performance reports"
+	@echo "  install-deps          - Install performance testing dependencies"
+	@echo "  check-system          - Check system requirements"
+	@echo ""
+
+# 快速性能检查
+performance-quick:
+	@echo "🚀 Running Quick Performance Check..."
+	@node scripts/quick-performance-check.js
+
+performance-health: performance-quick
+
+# 完整性能测试
+performance-full:
+	@echo "🚀 Running Full Performance Benchmark Suite..."
+	@echo "⚠️  This may take 30+ minutes to complete"
+	@node scripts/performance-benchmark.js full
+
+performance-load:
+	@echo "🧠 Testing Load Balancer Performance..."
+	@node scripts/performance-benchmark.js load-balancer
+
+performance-error:
+	@echo "🔥 Testing Error Handling Performance..."
+	@node scripts/performance-benchmark.js error-handling
+
+performance-conn:
+	@echo "🔗 Testing Connection Manager Performance..."
+	@node scripts/performance-benchmark.js connection-manager
+
+performance-session:
+	@echo "📝 Testing Session Manager Performance..."
+	@node scripts/performance-benchmark.js session-manager
+
+performance-concurrent:
+	@echo "💪 Testing Concurrent Load Performance..."
+	@node scripts/performance-benchmark.js concurrent
+
+# 监控系统命令
+monitoring-setup:
+	@echo "📊 Setting up Complete Monitoring System..."
+	@node scripts/monitoring-setup.js setup
+
+monitoring-start:
+	@echo "🚀 Starting Monitoring System..."
+	@echo "💡 Use 'make monitoring-stop' to stop the monitoring system"
+	@nohup node scripts/monitoring-setup.js start > logs/monitoring.log 2>&1 &
+	@echo "✅ Monitoring system started in background"
+	@echo "📋 Check logs/monitoring.log for output"
+
+monitoring-test:
+	@echo "🧪 Testing Monitoring System..."
+	@node scripts/monitoring-setup.js test
+
+monitoring-stop:
+	@echo "🛑 Stopping Monitoring System..."
+	@pkill -f "monitoring-setup.js" || true
+	@echo "✅ Monitoring system stopped"
+
+# 工具命令
+clean-reports:
+	@echo "🧹 Cleaning up old performance reports..."
+	@rm -rf temp/performance-reports/*
+	@echo "✅ Performance reports cleaned"
+
+install-deps:
+	@echo "📦 Installing performance testing dependencies..."
+	@npm install --save-dev
+	@echo "✅ Dependencies installed"
+
+check-system:
+	@echo "🔍 Checking System Requirements..."
+	@echo "Node.js version: $$(node --version)"
+	@echo "NPM version: $$(npm --version)"
+	@echo "Redis status: $$(redis-cli ping 2>/dev/null || echo 'NOT RUNNING')"
+	@echo "Available memory: $$(free -h 2>/dev/null | grep Mem || echo 'N/A (non-Linux)')"
+	@echo "Disk space: $$(df -h . | tail -1 | awk '{print $$4}' || echo 'N/A')"
+
+# 开发和调试命令
+debug-performance:
+	@echo "🐛 Running Performance Benchmark in Debug Mode..."
+	@NODE_ENV=development node --inspect scripts/performance-benchmark.js full
+
+debug-monitoring:
+	@echo "🐛 Running Monitoring Setup in Debug Mode..."
+	@NODE_ENV=development node --inspect scripts/monitoring-setup.js test
+
+# 自动化任务
+cron-setup:
+	@echo "⏰ Setting up cron jobs for automated performance checks..."
+	@echo "# Claude Relay Service - Automated Performance Checks" > /tmp/claude-cron
+	@echo "# Daily performance check at 2 AM" >> /tmp/claude-cron
+	@echo "0 2 * * * cd $(PWD) && make performance-quick >> logs/daily-performance.log 2>&1" >> /tmp/claude-cron
+	@echo "# Weekly full benchmark on Sunday at 3 AM" >> /tmp/claude-cron
+	@echo "0 3 * * 0 cd $(PWD) && make performance-full >> logs/weekly-performance.log 2>&1" >> /tmp/claude-cron
+	@crontab /tmp/claude-cron
+	@rm /tmp/claude-cron
+	@echo "✅ Cron jobs set up successfully"
+	@echo "📋 View with: crontab -l"
+
+cron-remove:
+	@echo "❌ Removing automated performance cron jobs..."
+	@crontab -l | grep -v "Claude Relay Service" | crontab -
+	@echo "✅ Cron jobs removed"
+
+# CI/CD 集成命令
+ci-performance:
+	@echo "🤖 Running CI Performance Check..."
+	@make performance-quick
+	@if [ $$? -eq 0 ]; then \
+		echo "✅ Performance check passed"; \
+	else \
+		echo "❌ Performance check failed"; \
+		exit 1; \
+	fi
+
+ci-monitoring:
+	@echo "🤖 Running CI Monitoring Test..."
+	@make monitoring-test
+	@echo "✅ Monitoring test completed"
+
+# 报告生成
+report-html:
+	@echo "📊 Generating HTML Performance Report..."
+	@if [ -d "temp/performance-reports" ]; then \
+		latest_dir=$$(ls -t temp/performance-reports/ | head -1); \
+		if [ -f "temp/performance-reports/$$latest_dir/performance-report.html" ]; then \
+			echo "📋 Latest HTML report: temp/performance-reports/$$latest_dir/performance-report.html"; \
+			if command -v open >/dev/null 2>&1; then \
+				open "temp/performance-reports/$$latest_dir/performance-report.html"; \
+			elif command -v xdg-open >/dev/null 2>&1; then \
+				xdg-open "temp/performance-reports/$$latest_dir/performance-report.html"; \
+			else \
+				echo "📁 Open manually: temp/performance-reports/$$latest_dir/performance-report.html"; \
+			fi; \
+		else \
+			echo "❌ No HTML report found. Run 'make performance-full' first."; \
+		fi; \
+	else \
+		echo "❌ No performance reports found. Run 'make performance-full' first."; \
+	fi
+
+report-csv:
+	@echo "📊 Finding Latest CSV Performance Report..."
+	@if [ -d "temp/performance-reports" ]; then \
+		latest_dir=$$(ls -t temp/performance-reports/ | head -1); \
+		if [ -f "temp/performance-reports/$$latest_dir/performance-metrics.csv" ]; then \
+			echo "📋 Latest CSV report: temp/performance-reports/$$latest_dir/performance-metrics.csv"; \
+			head -20 "temp/performance-reports/$$latest_dir/performance-metrics.csv"; \
+		else \
+			echo "❌ No CSV report found. Run 'make performance-full' first."; \
+		fi; \
+	else \
+		echo "❌ No performance reports found. Run 'make performance-full' first."; \
+	fi
+
+# 性能趋势分析
+trend-analysis:
+	@echo "📈 Analyzing Performance Trends..."
+	@if [ -d "temp/performance-reports" ]; then \
+		echo "📊 Performance report history:"; \
+		ls -la temp/performance-reports/ | grep ^d | tail -10; \
+		echo "📈 Use 'make report-html' to view the latest detailed report"; \
+	else \
+		echo "❌ No historical data found. Run performance tests first."; \
+	fi
+
+# 帮助命令
+help-performance:
+	@echo "Performance Testing Help"
+	@echo "========================"
+	@echo ""
+	@echo "Quick Start:"
+	@echo "  1. Run 'make performance-quick' for a fast health check"
+	@echo "  2. Run 'make performance-full' for comprehensive testing"
+	@echo "  3. Run 'make monitoring-setup' to enable monitoring"
+	@echo ""
+	@echo "Interpreting Results:"
+	@echo "  • Green (✅): Excellent performance"
+	@echo "  • Yellow (⚠️): Warning - needs attention"
+	@echo "  • Red (❌): Critical - immediate action required"
+	@echo ""
+	@echo "Thresholds:"
+	@echo "  • Load Balancer: < 50ms account selection"
+	@echo "  • Error Handling: < 100ms retry overhead"
+	@echo "  • Connections: < 2s establishment, > 90% reuse"
+	@echo "  • Sessions: < 10ms creation, < 50ms restore"
+	@echo ""
+
+help-monitoring:
+	@echo "Monitoring System Help"
+	@echo "======================"
+	@echo ""
+	@echo "Setup Process:"
+	@echo "  1. Run 'make monitoring-setup' (one-time setup)"
+	@echo "  2. Run 'make monitoring-start' (start background monitoring)"
+	@echo "  3. Access monitoring data via API endpoints"
+	@echo ""
+	@echo "API Endpoints:"
+	@echo "  • GET /api/monitoring/metrics/realtime"
+	@echo "  • GET /api/monitoring/alerts"
+	@echo "  • GET /api/monitoring/dashboard/overview"
+	@echo "  • GET /api/monitoring/health"
+	@echo ""
+	@echo "Data Storage:"
+	@echo "  • Real-time metrics: Redis (1 hour TTL)"
+	@echo "  • Historical data: Redis (24 hours TTL)"
+	@echo "  • Alert history: Redis (7 days TTL)"
+	@echo ""
+
+# 高级命令组合
+full-health-check: performance-quick monitoring-test
+	@echo "🏥 Full Health Check Completed"
+
+deploy-check: check-system install-deps performance-quick
+	@echo "🚀 Deployment Readiness Check Completed"
+
+production-setup: monitoring-setup cron-setup
+	@echo "🏭 Production Setup Completed"
+	@echo "✅ Monitoring system configured"
+	@echo "✅ Automated checks scheduled"
+
+# 故障排除
+troubleshoot:
+	@echo "🔧 Running Troubleshooting Diagnostics..."
+	@echo ""
+	@echo "1. System Status:"
+	@make check-system
+	@echo ""
+	@echo "2. Log Files:"
+	@if [ -f "logs/claude-relay-error.log" ]; then \
+		echo "📋 Recent errors:"; \
+		tail -10 logs/claude-relay-error.log; \
+	else \
+		echo "✅ No error log found"; \
+	fi
+	@echo ""
+	@echo "3. Performance Status:"
+	@make performance-quick || echo "❌ Performance check failed"
+	@echo ""
+	@echo "4. Monitoring Status:"
+	@make monitoring-test || echo "❌ Monitoring test failed"
+
+# 清理命令
+clean-all: clean-reports
+	@echo "🧹 Cleaning all temporary files..."
+	@rm -rf logs/monitoring.log
+	@rm -rf logs/daily-performance.log
+	@rm -rf logs/weekly-performance.log
+	@echo "✅ All temporary files cleaned"
+
+# 文档生成
+docs:
+	@echo "📚 Performance & Monitoring Documentation:"
+	@echo "  📖 Main Guide: docs/PERFORMANCE_MONITORING_GUIDE.md"
+	@echo "  🚀 Quick Start: make help"
+	@echo "  🔧 Troubleshooting: make troubleshoot"
+	@echo "  📊 Latest Reports: make report-html"

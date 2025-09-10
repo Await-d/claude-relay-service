@@ -13,7 +13,7 @@ const path = require('path')
 const writeFileAsync = promisify(fs.writeFile)
 const readFileAsync = promisify(fs.readFile)
 
-const UnifiedLogService = require('../src/services/UnifiedLogService').UnifiedLogService
+const { UnifiedLogService } = require('../src/services/UnifiedLogService')
 const database = require('../src/models/database')
 const logger = require('../src/utils/logger')
 
@@ -81,10 +81,12 @@ class PerformanceMonitor {
    * 发送性能预警通知
    */
   async sendAlertNotification(alerts) {
-    if (alerts.length === 0) return
+    if (alerts.length === 0) {
+      return
+    }
 
     console.log(chalk.yellow('\n🚨 性能预警通知 🚨'))
-    alerts.forEach(alert => console.log(chalk.red(alert)))
+    alerts.forEach((alert) => console.log(chalk.red(alert)))
 
     // 可以在这里添加邮件、短信或其他通知渠道
     const notificationLog = {
@@ -93,7 +95,10 @@ class PerformanceMonitor {
       severity: alerts.length > 2 ? 'high' : 'medium'
     }
 
-    const notificationFile = path.join(this.reportDir, `alert-${notificationLog.timestamp.replace(/[:.]/g, '-')}.json`)
+    const notificationFile = path.join(
+      this.reportDir,
+      `alert-${notificationLog.timestamp.replace(/[:.]/g, '-')}.json`
+    )
     await writeFileAsync(notificationFile, JSON.stringify(notificationLog, null, 2))
   }
 
@@ -106,7 +111,7 @@ class PerformanceMonitor {
     try {
       const performanceReport = await this.generatePerformanceReport()
       const alerts = this.checkPerformanceAlerts(performanceReport)
-      
+
       if (alerts.length > 0) {
         await this.sendAlertNotification(alerts)
       } else {

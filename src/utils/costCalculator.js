@@ -434,6 +434,237 @@ class CostCalculator {
       }
     }
   }
+
+  /**
+   * 计算成本效率评分（用于智能负载均衡）
+   * @param {string} model - 模型名称
+   * @param {number} estimatedTokens - 预估token数量
+   * @param {Object} options - 配置选项
+   * @returns {Object} 成本效率信息
+   */
+  static calculateCostEfficiency(model = 'unknown', estimatedTokens = 2000, options = {}) {
+    const {
+      platform = null,
+      inputRatio = 0.7, // 输入token占比
+      outputRatio = 0.3, // 输出token占比
+      cacheHitRatio = 0.0 // 缓存命中率
+    } = options
+
+    try {
+      // 模拟使用量数据
+      const inputTokens = Math.floor(estimatedTokens * inputRatio)
+      const outputTokens = Math.floor(estimatedTokens * outputRatio)
+      const cacheReadTokens = Math.floor(inputTokens * cacheHitRatio)
+      const actualInputTokens = inputTokens - cacheReadTokens
+
+      const mockUsage = {
+        input_tokens: actualInputTokens,
+        output_tokens: outputTokens,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cacheReadTokens
+      }
+
+      const costResult = this.calculateCost(mockUsage, model, platform)
+      const totalCost = costResult.costs.total
+
+      // 计算每千token成本
+      const costPer1KTokens = (totalCost / estimatedTokens) * 1000
+
+      // 计算成本效率评分 (0-1, 成本越低评分越高)
+      const maxReasonableCost = 0.1 // $0.1 per 1K tokens 作为参考基准
+      const efficiencyScore = Math.max(0, Math.min(1, 1 - costPer1KTokens / maxReasonableCost))
+
+      // 计算成本等级
+      let costTier = 'premium'
+      if (costPer1KTokens < 0.001) {
+        costTier = 'ultra-low'
+      } else if (costPer1KTokens < 0.01) {
+        costTier = 'low'
+      } else if (costPer1KTokens < 0.05) {
+        costTier = 'moderate'
+      } else if (costPer1KTokens < 0.1) {
+        costTier = 'high'
+      }
+
+      return {
+        model,
+        platform,
+        estimatedTokens,
+        breakdown: {
+          inputTokens: actualInputTokens,
+          outputTokens,
+          cacheReadTokens,
+          cacheHitRatio
+        },
+        costs: {
+          total: totalCost,
+          per1KTokens: costPer1KTokens,
+          per1MTokens: costPer1KTokens * 1000
+        },
+        efficiency: {
+          score: efficiencyScore,
+          tier: costTier,
+          isOptimal: efficiencyScore > 0.7
+        },
+        formatted: {
+          totalCost: this.formatCost(totalCost),
+          costPer1KTokens: this.formatCost(costPer1KTokens),
+          costPer1MTokens: this.formatCost(costPer1KTokens * 1000)
+        },
+        recommendations: this.generateCostRecommendations(costPer1KTokens, cacheHitRatio)
+      }
+    } catch (error) {
+      // 返回安全的默认值
+      return {
+        model,
+        platform,
+        estimatedTokens,
+        error: error.message,
+        efficiency: {
+          score: 0.5,
+          tier: 'unknown',
+          isOptimal: false
+        },
+        costs: {
+          total: 0,
+          per1KTokens: 0,
+          per1MTokens: 0
+        }
+      }
+    }
+  }
+
+  /**
+   * 生成成本优化建议
+   * @param {number} costPer1KTokens - 每千token成本
+   * @param {number} cacheHitRatio - 缓存命中率
+   * @returns {Array} 建议列表
+   */
+  static generateCostRecommendations(costPer1KTokens, cacheHitRatio) {
+    const recommendations = []
+
+    if (costPer1KTokens > 0.05) {
+      recommendations.push({
+        type: 'high_cost_warning',
+        message: 'Consider using a more cost-effective model for routine tasks',
+        priority: 'high'
+      })
+    }
+
+    if (cacheHitRatio < 0.1) {
+      recommendations.push({
+        type: 'cache_optimization',
+        message: 'Enable prompt caching to reduce costs by up to 90%',
+        priority: 'medium'
+      })
+    }
+
+    if (costPer1KTokens < 0.001) {
+      recommendations.push({
+        type: 'cost_optimized',
+        message: 'Excellent cost efficiency - model well-suited for high-volume usage',
+        priority: 'info'
+      })
+    }
+
+    return recommendations
+  }
+
+  /**
+   * 比较多个模型的成本效率
+   * @param {Array} models - 模型列表
+   * @param {number} estimatedTokens - 预估token数量
+   * @param {Object} options - 配置选项
+   * @returns {Object} 比较结果
+   */
+  static compareModelCostEfficiency(models, estimatedTokens = 2000, options = {}) {
+    try {
+      const comparisons = models.map((model) =>
+        this.calculateCostEfficiency(model, estimatedTokens, options)
+      )
+
+      // 按效率评分排序
+      comparisons.sort((a, b) => b.efficiency.score - a.efficiency.score)
+
+      const bestModel = comparisons[0]
+      const worstModel = comparisons[comparisons.length - 1]
+      const avgScore =
+        comparisons.reduce((sum, comp) => sum + comp.efficiency.score, 0) / comparisons.length
+
+      const savings = worstModel.costs.total - bestModel.costs.total
+      const savingsPercentage =
+        worstModel.costs.total > 0 ? (savings / worstModel.costs.total) * 100 : 0
+
+      return {
+        totalModels: models.length,
+        estimatedTokens,
+        bestModel: bestModel.model,
+        worstModel: worstModel.model,
+        avgEfficiencyScore: avgScore,
+        potentialSavings: {
+          absolute: savings,
+          percentage: savingsPercentage,
+          formatted: this.formatCost(savings)
+        },
+        comparisons,
+        recommendation: bestModel.efficiency.isOptimal
+          ? `${bestModel.model} offers optimal cost efficiency`
+          : `Consider alternative models for better cost efficiency`
+      }
+    } catch (error) {
+      return {
+        error: error.message,
+        comparisons: [],
+        recommendation: 'Unable to compare model costs'
+      }
+    }
+  }
+
+  /**
+   * 获取模型成本性能比
+   * @param {string} model - 模型名称
+   * @param {Object} options - 配置选项
+   * @returns {Object} 成本性能比信息
+   */
+  static getModelCostPerformanceRatio(model, options = {}) {
+    const { qualityScore = 0.8, platform = null } = options
+
+    try {
+      const costEfficiency = this.calculateCostEfficiency(model, 2000, { platform })
+
+      // 成本性能比 = 质量评分 / 成本
+      const costPerformanceRatio =
+        costEfficiency.costs.per1KTokens > 0 ? qualityScore / costEfficiency.costs.per1KTokens : 0
+
+      let performanceTier = 'balanced'
+      if (costPerformanceRatio > 100) {
+        performanceTier = 'exceptional'
+      } else if (costPerformanceRatio > 50) {
+        performanceTier = 'excellent'
+      } else if (costPerformanceRatio > 20) {
+        performanceTier = 'good'
+      } else if (costPerformanceRatio < 5) {
+        performanceTier = 'poor'
+      }
+
+      return {
+        model,
+        qualityScore,
+        costEfficiency,
+        costPerformanceRatio,
+        performanceTier,
+        isRecommended: costPerformanceRatio > 20 && costEfficiency.efficiency.score > 0.5
+      }
+    } catch (error) {
+      return {
+        model,
+        error: error.message,
+        costPerformanceRatio: 0,
+        performanceTier: 'unknown',
+        isRecommended: false
+      }
+    }
+  }
 }
 
 module.exports = CostCalculator

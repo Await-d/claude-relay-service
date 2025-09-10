@@ -660,6 +660,227 @@ class ApiKeyService {
       return 0
     }
   }
+
+  // 📤 导出API Keys数据 (安全脱敏版本)
+  async exportApiKeys(filters = {}, format = 'csv', userId = null) {
+    try {
+      // 1. 权限检查 - 确保只有管理员可以导出
+      if (!userId) {
+        throw new Error('导出操作需要指定用户ID')
+      }
+
+      // 记录导出审计日志
+      logger.info('📤 API Key导出请求', {
+        userId,
+        filters,
+        format,
+        timestamp: new Date().toISOString()
+      })
+
+      // 2. 获取所有API Keys数据
+      const allApiKeys = await database.getAllApiKeys()
+      if (!allApiKeys || allApiKeys.length === 0) {
+        logger.warn('📤 没有可导出的API Key数据')
+        return []
+      }
+
+      // 3. 应用过滤条件
+      const filteredKeys = this._applyExportFilters(allApiKeys, filters)
+
+      // 4. 数据脱敏和格式化
+      const exportData = await this._prepareExportData(filteredKeys)
+
+      logger.info(`📤 成功准备导出数据: ${exportData.length} 条记录`, {
+        totalKeys: allApiKeys.length,
+        filteredKeys: filteredKeys.length,
+        format
+      })
+
+      return exportData
+    } catch (error) {
+      logger.error('❌ API Key导出失败:', {
+        error: error.message,
+        userId,
+        filters,
+        stack: error.stack
+      })
+      throw error
+    }
+  }
+
+  // 🎭 API Key脱敏处理
+  maskApiKey(apiKey) {
+    if (!apiKey || typeof apiKey !== 'string') {
+      return '****'
+    }
+
+    // 移除前缀（如果存在）
+    const cleanKey = apiKey.startsWith(this.prefix) ? apiKey.substring(this.prefix.length) : apiKey
+
+    if (cleanKey.length < 8) {
+      return '****'
+    }
+
+    // 显示前4位和后4位，中间用*替代
+    const front = cleanKey.substring(0, 4)
+    const back = cleanKey.substring(cleanKey.length - 4)
+    const middle = '*'.repeat(Math.max(cleanKey.length - 8, 4))
+
+    return `${this.prefix}${front}${middle}${back}`
+  }
+
+  // 🔍 应用导出过滤条件
+  _applyExportFilters(apiKeys, filters) {
+    let filtered = [...apiKeys]
+
+    // 时间范围过滤
+    if (filters.dateFrom || filters.dateTo) {
+      filtered = filtered.filter((key) => {
+        const createdAt = new Date(key.createdAt)
+
+        if (filters.dateFrom && createdAt < new Date(filters.dateFrom)) {
+          return false
+        }
+
+        if (filters.dateTo && createdAt > new Date(filters.dateTo)) {
+          return false
+        }
+
+        return true
+      })
+    }
+
+    // 状态过滤
+    if (filters.status) {
+      filtered = filtered.filter((key) => {
+        const isActive = key.isActive === 'true' || key.isActive === true
+        switch (filters.status) {
+          case 'active':
+            return isActive
+          case 'disabled':
+            return !isActive
+          case 'suspended':
+            return key.isSuspended === 'true' || key.isSuspended === true
+          default:
+            return true
+        }
+      })
+    }
+
+    // 使用量过滤
+    if (filters.minUsage !== undefined) {
+      filtered = filtered.filter((key) => {
+        const totalTokens = parseInt(key.totalTokens || '0')
+        return totalTokens >= parseInt(filters.minUsage)
+      })
+    }
+
+    if (filters.maxUsage !== undefined) {
+      filtered = filtered.filter((key) => {
+        const totalTokens = parseInt(key.totalTokens || '0')
+        return totalTokens <= parseInt(filters.maxUsage)
+      })
+    }
+
+    // 名称搜索过滤
+    if (filters.search) {
+      const searchTerm = filters.search.toLowerCase()
+      filtered = filtered.filter(
+        (key) =>
+          (key.name && key.name.toLowerCase().includes(searchTerm)) ||
+          (key.description && key.description.toLowerCase().includes(searchTerm))
+      )
+    }
+
+    return filtered
+  }
+
+  // 📋 准备导出数据（脱敏和格式化）
+  async _prepareExportData(apiKeys) {
+    const exportData = []
+
+    for (const key of apiKeys) {
+      try {
+        // 获取使用统计（如果可用）
+        let usageStats = null
+        try {
+          usageStats = await database.getUsageStats(key.id)
+        } catch (error) {
+          logger.debug(`无法获取API Key ${key.id} 的使用统计:`, error.message)
+        }
+
+        // 获取成本统计（如果可用）
+        let costStats = null
+        try {
+          costStats = await database.getCostStats(key.id)
+        } catch (error) {
+          logger.debug(`无法获取API Key ${key.id} 的成本统计:`, error.message)
+        }
+
+        // 构建导出记录
+        const exportRecord = {
+          ID: key.id || '',
+          名称: key.name || '未命名',
+          描述: key.description || '',
+          'API Key': this.maskApiKey(key.apiKey), // 脱敏处理
+          状态: this._getKeyStatus(key),
+          权限: key.permissions || 'all',
+          创建时间: key.createdAt || '',
+          最后使用: key.lastUsedAt || '从未使用',
+          过期时间: key.expiresAt || '永不过期',
+          Token限制: key.tokenLimit || '0',
+          并发限制: key.concurrencyLimit || '0',
+          总请求数: key.totalRequests || '0',
+          总Token数: key.totalTokens || '0',
+          输入Token: key.inputTokens || '0',
+          输出Token: key.outputTokens || '0',
+          缓存创建Token: key.cacheCreateTokens || '0',
+          缓存读取Token: key.cacheReadTokens || '0',
+          总费用: costStats?.totalCost
+            ? `$${parseFloat(costStats.totalCost).toFixed(6)}`
+            : '$0.000000',
+          日费用限制: key.dailyCostLimit ? `$${key.dailyCostLimit}` : '无限制',
+          标签: Array.isArray(key.tags) ? key.tags.join(', ') : key.tags || '',
+          关联Claude账户: key.claudeAccountId || '',
+          关联Gemini账户: key.geminiAccountId || '',
+          关联OpenAI账户: key.openaiAccountId || '',
+          模型限制: key.enableModelRestriction === 'true' ? '是' : '否',
+          受限模型: Array.isArray(key.restrictedModels)
+            ? key.restrictedModels.join(', ')
+            : key.restrictedModels || '',
+          客户端限制: key.enableClientRestriction === 'true' ? '是' : '否',
+          允许客户端: Array.isArray(key.allowedClients)
+            ? key.allowedClients.join(', ')
+            : key.allowedClients || ''
+        }
+
+        exportData.push(exportRecord)
+      } catch (error) {
+        logger.error(`处理API Key ${key.id} 导出数据时出错:`, error)
+        // 继续处理其他记录，不因单个错误而中断
+      }
+    }
+
+    return exportData
+  }
+
+  // 📊 获取API Key状态文本
+  _getKeyStatus(key) {
+    const isActive = key.isActive === 'true' || key.isActive === true
+    const isSuspended = key.isSuspended === 'true' || key.isSuspended === true
+    const isExpired = key.expiresAt && new Date(key.expiresAt) < new Date()
+
+    if (isExpired) {
+      return '已过期'
+    }
+    if (isSuspended) {
+      return '已暂停'
+    }
+    if (!isActive) {
+      return '已禁用'
+    }
+    return '活跃'
+  }
 }
 
 // 导出实例和单独的方法

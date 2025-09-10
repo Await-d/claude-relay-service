@@ -336,6 +336,107 @@ const config = {
     retries: parseInt(process.env.WEBHOOK_RETRIES) || 3 // 重试3次
   },
 
+  // 🧠 智能负载均衡配置
+  loadBalancing: {
+    // 启用智能负载均衡
+    enabled: process.env.LOAD_BALANCING_ENABLED !== 'false',
+    
+    // 默认调度策略: 'least_used', 'least_recent', 'lowest_cost', 'balanced', 'weighted_random'
+    defaultStrategy: process.env.LOAD_BALANCING_STRATEGY || 'balanced',
+    
+    // 账户选择超时时间（毫秒）
+    selectionTimeout: parseInt(process.env.LOAD_BALANCING_SELECTION_TIMEOUT) || 5000,
+    
+    // 健康检查配置
+    healthCheck: {
+      // 检查间隔（秒）
+      interval: parseInt(process.env.LOAD_BALANCING_HEALTH_CHECK_INTERVAL) || 30,
+      // 响应时间阈值（毫秒）
+      responseTimeThreshold: parseInt(process.env.LOAD_BALANCING_RESPONSE_TIME_THRESHOLD) || 5000,
+      // 成功率阈值（0-1）
+      successRateThreshold: parseFloat(process.env.LOAD_BALANCING_SUCCESS_RATE_THRESHOLD) || 0.95,
+      // 错误率阈值（0-1）
+      errorRateThreshold: parseFloat(process.env.LOAD_BALANCING_ERROR_RATE_THRESHOLD) || 0.05
+    },
+    
+    // 故障恢复配置
+    failureRecovery: {
+      // 连续失败次数阈值
+      failureThreshold: parseInt(process.env.LOAD_BALANCING_FAILURE_THRESHOLD) || 5,
+      // 临时故障重试延迟（秒）
+      temporaryFailureDelay: parseInt(process.env.LOAD_BALANCING_TEMPORARY_FAILURE_DELAY) || 300,
+      // 最大退避时间（秒）
+      maxBackoffTime: parseInt(process.env.LOAD_BALANCING_MAX_BACKOFF_TIME) || 3600,
+      // 启用熔断器
+      enableCircuitBreaker: process.env.LOAD_BALANCING_ENABLE_CIRCUIT_BREAKER !== 'false'
+    },
+    
+    // 算法权重配置
+    algorithmWeights: {
+      costPriority: parseFloat(process.env.LOAD_BALANCING_COST_PRIORITY_WEIGHT) || 0.4,
+      performance: parseFloat(process.env.LOAD_BALANCING_PERFORMANCE_WEIGHT) || 0.3,
+      loadBalance: parseFloat(process.env.LOAD_BALANCING_LOAD_BALANCE_WEIGHT) || 0.2,
+      reliability: parseFloat(process.env.LOAD_BALANCING_RELIABILITY_WEIGHT) || 0.1
+    }
+  },
+
+  // 📤 API导出配置
+  apiExport: {
+    // 启用API导出功能
+    enabled: process.env.API_EXPORT_ENABLED !== 'false',
+    
+    // 导出文件存储目录
+    outputDir: process.env.API_EXPORT_OUTPUT_DIR || './temp/exports',
+    
+    // 默认启用敏感数据脱敏
+    sanitizeData: process.env.API_EXPORT_SANITIZE_DATA !== 'false',
+    
+    // 批处理大小
+    batchSize: parseInt(process.env.API_EXPORT_BATCH_SIZE) || 100,
+    
+    // 支持的导出格式
+    supportedFormats: process.env.API_EXPORT_SUPPORTED_FORMATS 
+      ? process.env.API_EXPORT_SUPPORTED_FORMATS.split(',').map(f => f.trim())
+      : ['json', 'csv'],
+    
+    // 文件自动清理配置
+    autoCleanup: {
+      enabled: process.env.API_EXPORT_AUTO_CLEANUP_ENABLED !== 'false',
+      // 文件保留时间（小时）
+      maxAgeHours: parseInt(process.env.API_EXPORT_MAX_AGE_HOURS) || 24,
+      // 清理检查间隔（小时）
+      checkInterval: parseInt(process.env.API_EXPORT_CLEANUP_CHECK_INTERVAL) || 6
+    }
+  },
+
+  // 🚀 查询优化配置
+  queryOptimizer: {
+    // 启用查询优化
+    enabled: process.env.QUERY_OPTIMIZER_ENABLED !== 'false',
+    
+    // 批量查询大小
+    batchSize: parseInt(process.env.QUERY_OPTIMIZER_BATCH_SIZE) || 100,
+    // 管道大小
+    pipelineSize: parseInt(process.env.QUERY_OPTIMIZER_PIPELINE_SIZE) || 50,
+    // 最大并发数
+    maxConcurrency: parseInt(process.env.QUERY_OPTIMIZER_MAX_CONCURRENCY) || 10,
+    
+    // 缓存配置
+    cache: {
+      enabled: process.env.QUERY_CACHE_ENABLED !== 'false',
+      ttl: parseInt(process.env.QUERY_CACHE_TTL) || 300,           // 5分钟
+      prefix: process.env.QUERY_CACHE_PREFIX || 'query_cache:',
+      maxSize: parseInt(process.env.QUERY_CACHE_MAX_SIZE) || 1000  // 最大缓存条目数
+    },
+    
+    // 性能监控
+    performance: {
+      enableProfiling: process.env.QUERY_OPTIMIZER_ENABLE_PROFILING === 'true',
+      queryTimeout: parseInt(process.env.QUERY_OPTIMIZER_QUERY_TIMEOUT) || 30000,      // 30秒
+      memoryLimit: parseInt(process.env.QUERY_OPTIMIZER_MEMORY_LIMIT) || 104857600     // 100MB
+    }
+  },
+
   // 🛠️ 开发配置
   development: {
     debug: process.env.DEBUG === 'true',

@@ -119,14 +119,28 @@
               <span class="relative">删除选中 ({{ selectedApiKeys.length }})</span>
             </button>
           </div>
-          <!-- 创建按钮 -->
-          <button
-            class="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-blue-600 hover:to-blue-700 hover:shadow-lg sm:w-auto"
-            @click.stop="openCreateApiKeyModal"
-          >
-            <i class="fas fa-plus"></i>
-            <span>创建新 Key</span>
-          </button>
+          <!-- 操作按钮组 -->
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <!-- 导出按钮 -->
+            <button
+              class="group relative flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 shadow-sm transition-all duration-200 hover:border-emerald-300 hover:bg-emerald-100 hover:shadow-md dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:border-emerald-600 dark:hover:bg-emerald-800/30"
+              @click="openExportModal"
+            >
+              <div
+                class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 opacity-0 blur transition duration-300 group-hover:opacity-20"
+              ></div>
+              <i class="fas fa-download relative text-emerald-600 dark:text-emerald-400" />
+              <span class="relative">导出数据</span>
+            </button>
+            <!-- 创建按钮 -->
+            <button
+              class="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-blue-600 hover:to-blue-700 hover:shadow-lg sm:w-auto"
+              @click.stop="openCreateApiKeyModal"
+            >
+              <i class="fas fa-plus"></i>
+              <span>创建新 Key</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1354,6 +1368,13 @@
       @close="showQuickBindModal = false"
       @success="handleQuickBindSuccess"
     />
+
+    <ExportApiKeysModal
+      v-if="showExportModal"
+      :api-keys="apiKeys"
+      @close="showExportModal = false"
+      @export-complete="handleExportComplete"
+    />
   </div>
 </template>
 
@@ -1373,6 +1394,7 @@ import UsageDetailModal from '@/components/apikeys/UsageDetailModal.vue'
 import WindowCountdown from '@/components/apikeys/WindowCountdown.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
 import QuickBindModal from '@/components/apikeys/QuickBindModal.vue'
+import ExportApiKeysModal from '@/components/apikeys/ExportApiKeysModal.vue'
 
 // 响应式数据
 const clientsStore = useClientsStore()
@@ -1447,6 +1469,7 @@ const showRenewApiKeyModal = ref(false)
 const showNewApiKeyModal = ref(false)
 const showBatchApiKeyModal = ref(false)
 const showBatchEditModal = ref(false)
+const showExportModal = ref(false)
 const editingApiKey = ref(null)
 const renewingApiKey = ref(null)
 const newApiKeyData = ref(null)
@@ -2023,6 +2046,11 @@ const openRenewApiKeyModal = (apiKey) => {
   showRenewApiKeyModal.value = true
 }
 
+// 打开导出模态框
+const openExportModal = () => {
+  showExportModal.value = true
+}
+
 // 处理创建成功
 const handleCreateSuccess = (data) => {
   showCreateApiKeyModal.value = false
@@ -2377,6 +2405,12 @@ const handleQuickBindSuccess = () => {
   showQuickBindModal.value = false
   showToast('账户绑定更新成功', 'success')
   loadApiKeys() // 刷新列表
+}
+
+// 处理导出完成
+const handleExportComplete = () => {
+  showExportModal.value = false
+  showToast('数据导出完成', 'success')
 }
 
 // 格式化Token数量（使用K/M单位）

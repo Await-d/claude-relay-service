@@ -6185,6 +6185,264 @@ class RedisAdapter extends DatabaseAdapter {
       throw error
     }
   }
+
+  // ==================== 智能负载均衡支持方法 ====================
+
+  /**
+   * 记录账户使用统计（用于智能负载均衡）
+   * @param {string} accountId - 账户ID
+   * @param {Object} usageData - 使用数据
+   * @returns {Promise<boolean>} 操作成功返回true
+   */
+  async recordAccountUsage(accountId, usageData) {
+    try {
+      await this.ensureConnection()
+      const client = this.getClientSafe()
+
+      const now = Date.now()
+      const {
+        timestamp = now,
+        responseTime = null,
+        cost = null,
+        status = 'success',
+        ...extraData
+      } = usageData
+
+      // 构建使用记录
+      const usageRecord = {
+        accountId,
+        timestamp,
+        responseTime,
+        cost,
+        status,
+        ...extraData
+      }
+
+      // 使用有序集合存储使用记录，按时间戳排序
+      const usageKey = `account_usage:${accountId}`
+      await client.zadd(usageKey, timestamp, JSON.stringify(usageRecord))
+
+      // 设置过期时间（7天）
+      await client.expire(usageKey, 7 * 24 * 60 * 60)
+
+      // 清理过期数据（保留最近7天）
+      const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
+      await client.zremrangebyscore(usageKey, '-inf', sevenDaysAgo)
+
+      logger.debug(`📈 Recorded usage for account ${accountId}`, { responseTime, cost, status })
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to record account usage for ${accountId}:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * 获取指定时间窗口内的账户使用统计
+   * @param {string} accountId - 账户ID
+   * @param {number} startTime - 开始时间戳
+   * @param {number} endTime - 结束时间戳
+   * @returns {Promise<Array>} 使用统计数组
+   */
+  async getAccountUsageInTimeWindow(accountId, startTime, endTime) {
+    try {
+      await this.ensureConnection()
+      const client = this.getClientSafe()
+
+      const usageKey = `account_usage:${accountId}`
+
+      // 从有序集合中获取指定时间窗口的数据
+      const usageRecords = await client.zrangebyscore(usageKey, startTime, endTime)
+
+      const parsedRecords = usageRecords
+        .map((record) => {
+          try {
+            return JSON.parse(record)
+          } catch (parseError) {
+            logger.warn(`⚠️ Failed to parse usage record for account ${accountId}:`, parseError)
+            return null
+          }
+        })
+        .filter((record) => record !== null)
+
+      logger.debug(
+        `📊 Retrieved ${parsedRecords.length} usage records for account ${accountId} in time window`
+      )
+      return parsedRecords
+    } catch (error) {
+      logger.error(`❌ Failed to get account usage for ${accountId}:`, error)
+      // 返回空数组而不是抛出错误，以便负载均衡器可以继续工作
+      return []
+    }
+  }
+
+  /**
+   * 获取账户性能摘要统计
+   * @param {string} accountId - 账户ID
+   * @param {number} timeWindow - 时间窗口（毫秒），默认5分钟
+   * @returns {Promise<Object>} 性能统计摘要
+   */
+  async getAccountPerformanceSummary(accountId, timeWindow = 300000) {
+    try {
+      const now = Date.now()
+      const windowStart = now - timeWindow
+
+      const usageRecords = await this.getAccountUsageInTimeWindow(accountId, windowStart, now)
+
+      if (usageRecords.length === 0) {
+        return {
+          accountId,
+          timeWindow,
+          totalRequests: 0,
+          errorCount: 0,
+          avgResponseTime: 0,
+          avgCost: 0,
+          successRate: 1.0,
+          lastUsedAt: null
+        }
+      }
+
+      const totalRequests = usageRecords.length
+      const errorCount = usageRecords.filter((record) => record.status === 'error').length
+      const successfulRequests = usageRecords.filter((record) => record.status === 'success')
+
+      // 计算平均响应时间（仅成功请求）
+      const responseTimeSamples = successfulRequests
+        .filter((record) => record.responseTime && record.responseTime > 0)
+        .map((record) => record.responseTime)
+
+      const avgResponseTime =
+        responseTimeSamples.length > 0
+          ? responseTimeSamples.reduce((sum, time) => sum + time, 0) / responseTimeSamples.length
+          : 0
+
+      // 计算平均成本（仅成功请求）
+      const costSamples = successfulRequests
+        .filter((record) => record.cost && record.cost > 0)
+        .map((record) => record.cost)
+
+      const avgCost =
+        costSamples.length > 0
+          ? costSamples.reduce((sum, cost) => sum + cost, 0) / costSamples.length
+          : 0
+
+      // 计算成功率
+      const successRate = totalRequests > 0 ? (totalRequests - errorCount) / totalRequests : 1.0
+
+      // 最后使用时间
+      const lastUsedAt = Math.max(...usageRecords.map((record) => record.timestamp))
+
+      const summary = {
+        accountId,
+        timeWindow,
+        totalRequests,
+        errorCount,
+        avgResponseTime: Math.round(avgResponseTime),
+        avgCost: parseFloat(avgCost.toFixed(6)),
+        successRate: parseFloat(successRate.toFixed(4)),
+        lastUsedAt: new Date(lastUsedAt).toISOString()
+      }
+
+      logger.debug(`📊 Performance summary for account ${accountId}:`, summary)
+      return summary
+    } catch (error) {
+      logger.error(`❌ Failed to get performance summary for ${accountId}:`, error)
+      // 返回默认统计信息
+      return {
+        accountId,
+        timeWindow,
+        totalRequests: 0,
+        errorCount: 0,
+        avgResponseTime: 0,
+        avgCost: 0,
+        successRate: 1.0,
+        lastUsedAt: null
+      }
+    }
+  }
+
+  /**
+   * 批量获取多个账户的性能摘要
+   * @param {Array<string>} accountIds - 账户ID列表
+   * @param {number} timeWindow - 时间窗口（毫秒）
+   * @returns {Promise<Object>} 账户ID到性能摘要的映射
+   */
+  async getMultipleAccountPerformanceSummaries(accountIds, timeWindow = 300000) {
+    try {
+      const summaries = {}
+
+      // 并行获取所有账户的性能摘要
+      const promises = accountIds.map(async (accountId) => {
+        try {
+          const summary = await this.getAccountPerformanceSummary(accountId, timeWindow)
+          return { accountId, summary }
+        } catch (error) {
+          logger.warn(`⚠️ Failed to get performance summary for account ${accountId}:`, error)
+          return {
+            accountId,
+            summary: {
+              accountId,
+              timeWindow,
+              totalRequests: 0,
+              errorCount: 0,
+              avgResponseTime: 0,
+              avgCost: 0,
+              successRate: 1.0,
+              lastUsedAt: null
+            }
+          }
+        }
+      })
+
+      const results = await Promise.all(promises)
+
+      results.forEach(({ accountId, summary }) => {
+        summaries[accountId] = summary
+      })
+
+      logger.debug(`📊 Retrieved performance summaries for ${accountIds.length} accounts`)
+      return summaries
+    } catch (error) {
+      logger.error('❌ Failed to get multiple account performance summaries:', error)
+      // 返回空对象而不是抛出错误
+      return {}
+    }
+  }
+
+  /**
+   * 清理过期的账户使用数据
+   * @param {number} maxAge - 最大保存时间（毫秒），默认7天
+   * @returns {Promise<number>} 清理的记录数
+   */
+  async cleanupAccountUsageData(maxAge = 7 * 24 * 60 * 60 * 1000) {
+    try {
+      await this.ensureConnection()
+      const client = this.getClientSafe()
+
+      const cutoffTime = Date.now() - maxAge
+      const usageKeys = await client.keys('account_usage:*')
+
+      let totalCleaned = 0
+      for (const key of usageKeys) {
+        const cleaned = await client.zremrangebyscore(key, '-inf', cutoffTime)
+        totalCleaned += cleaned
+
+        // 如果键为空，删除它
+        const remainingCount = await client.zcard(key)
+        if (remainingCount === 0) {
+          await client.del(key)
+        }
+      }
+
+      logger.info(
+        `🧹 Cleaned up ${totalCleaned} expired usage records from ${usageKeys.length} accounts`
+      )
+      return totalCleaned
+    } catch (error) {
+      logger.error('❌ Failed to cleanup account usage data:', error)
+      return 0
+    }
+  }
 }
 
 // 导出时区辅助函数

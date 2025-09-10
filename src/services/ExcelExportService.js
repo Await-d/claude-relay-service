@@ -105,7 +105,6 @@ class ExcelExportService {
       this.processTaskQueue()
 
       return taskId
-
     } catch (error) {
       logger.error('❌ Failed to create Excel export task:', error)
       throw error
@@ -150,7 +149,7 @@ class ExcelExportService {
 
     if (task.status === 'pending') {
       // 从队列中移除
-      const queueIndex = this.taskQueue.findIndex(t => t.id === taskId)
+      const queueIndex = this.taskQueue.findIndex((t) => t.id === taskId)
       if (queueIndex !== -1) {
         this.taskQueue.splice(queueIndex, 1)
       }
@@ -201,7 +200,7 @@ class ExcelExportService {
 
     // 开始处理任务
     this.processing.set(task.id, task)
-    
+
     try {
       await this._processExportTask(task)
     } catch (error) {
@@ -211,7 +210,7 @@ class ExcelExportService {
       task.completedAt = new Date()
     } finally {
       this.processing.delete(task.id)
-      
+
       // 继续处理队列中的下一个任务
       setTimeout(() => this.processTaskQueue(), 100)
     }
@@ -224,12 +223,12 @@ class ExcelExportService {
    */
   async _processExportTask(task) {
     const startTime = Date.now()
-    
+
     try {
       task.status = 'processing'
       task.startedAt = new Date()
       task.progress = 0
-      
+
       logger.info(`📊 Starting export task: ${task.id}`)
 
       // 步骤1: 查询数据 (0-30%)
@@ -238,12 +237,12 @@ class ExcelExportService {
         task.options.keyIds,
         task.options.timeRange
       )
-      
+
       if (task.status === 'cancelling') {
         task.status = 'cancelled'
         return
       }
-      
+
       task.progress = 30
 
       // 步骤2: 查询使用统计 (30-60%)
@@ -252,12 +251,12 @@ class ExcelExportService {
         task.options.keyIds,
         task.options.timeRange
       )
-      
+
       if (task.status === 'cancelling') {
         task.status = 'cancelled'
         return
       }
-      
+
       task.progress = 60
 
       // 步骤3: 查询成本分析 (60-80%)
@@ -266,12 +265,12 @@ class ExcelExportService {
         task.options.keyIds,
         task.options.timeRange
       )
-      
+
       if (task.status === 'cancelling') {
         task.status = 'cancelled'
         return
       }
-      
+
       task.progress = 80
 
       // 步骤4: 生成Excel文件 (80-100%)
@@ -284,7 +283,7 @@ class ExcelExportService {
       }
 
       const filePath = await this.formatter.createExcelFile(exportData)
-      
+
       task.progress = 100
       task.status = 'completed'
       task.completedAt = new Date()
@@ -293,11 +292,11 @@ class ExcelExportService {
       // 生成下载信息
       const fileName = path.basename(filePath)
       const fileSize = fs.statSync(filePath).size
-      
+
       task.result = {
         downloadUrl: `/admin/api-keys/export/download/${fileName}`,
-        fileName: fileName,
-        fileSize: fileSize,
+        fileName,
+        fileSize,
         exportedCount: apiKeysData.length,
         generatedAt: new Date().toISOString()
       }
@@ -306,22 +305,23 @@ class ExcelExportService {
       this.stats.totalExports++
       this.stats.successfulExports++
       this.stats.totalRecordsExported += apiKeysData.length
-      
+
       const exportTime = Date.now() - startTime
-      this.stats.averageExportTime = 
-        (this.stats.averageExportTime * (this.stats.totalExports - 1) + exportTime) / 
+      this.stats.averageExportTime =
+        (this.stats.averageExportTime * (this.stats.totalExports - 1) + exportTime) /
         this.stats.totalExports
 
-      logger.success(`✅ Export task completed: ${task.id}, ${apiKeysData.length} records, ${exportTime}ms`)
-
+      logger.success(
+        `✅ Export task completed: ${task.id}, ${apiKeysData.length} records, ${exportTime}ms`
+      )
     } catch (error) {
       task.status = 'failed'
       task.error = error.message
       task.completedAt = new Date()
-      
+
       this.stats.totalExports++
       this.stats.failedExports++
-      
+
       logger.error(`❌ Export task failed: ${task.id}`, error)
       throw error
     }
@@ -378,8 +378,10 @@ class ExcelExportService {
     }
 
     // 日期格式验证
-    if (!moment(validated.timeRange.start).isValid() || 
-        !moment(validated.timeRange.end).isValid()) {
+    if (
+      !moment(validated.timeRange.start).isValid() ||
+      !moment(validated.timeRange.end).isValid()
+    ) {
       throw new Error('Invalid date range')
     }
 
@@ -414,7 +416,7 @@ class ExcelExportService {
 
     const totalEstimatedTime = (elapsedTime / task.progress) * 100
     const remainingTime = Math.max(0, totalEstimatedTime - elapsedTime)
-    
+
     return Math.ceil(remainingTime / 1000) // 转换为秒
   }
 
@@ -436,10 +438,13 @@ class ExcelExportService {
    */
   startCleanupTimer() {
     // 每30分钟清理一次过期文件和任务
-    setInterval(() => {
-      this.cleanupExpiredTasks()
-      this.cleanupTempFiles()
-    }, 30 * 60 * 1000)
+    setInterval(
+      () => {
+        this.cleanupExpiredTasks()
+        this.cleanupTempFiles()
+      },
+      30 * 60 * 1000
+    )
   }
 
   /**
@@ -452,9 +457,11 @@ class ExcelExportService {
 
     for (const [taskId, task] of this.tasks.entries()) {
       const taskAge = now - task.createdAt.getTime()
-      
-      if (taskAge > maxAge && 
-          (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')) {
+
+      if (
+        taskAge > maxAge &&
+        (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')
+      ) {
         this.tasks.delete(taskId)
         logger.debug(`🧹 Cleaned up expired task: ${taskId}`)
       }
@@ -478,7 +485,7 @@ class ExcelExportService {
       try {
         const filePath = path.join(this.tempDir, file)
         const stats = fs.statSync(filePath)
-        
+
         if (now - stats.mtime.getTime() > maxAge) {
           fs.unlinkSync(filePath)
           logger.debug(`🧹 Cleaned up expired file: ${file}`)
@@ -501,9 +508,10 @@ class ExcelExportService {
       activeTasks: this.tasks.size,
       processingTasks: this.processing.size,
       queuedTasks: this.taskQueue.length,
-      successRate: this.stats.totalExports > 0 
-        ? (this.stats.successfulExports / this.stats.totalExports * 100).toFixed(2) + '%'
-        : '0%'
+      successRate:
+        this.stats.totalExports > 0
+          ? `${((this.stats.successfulExports / this.stats.totalExports) * 100).toFixed(2)}%`
+          : '0%'
     }
   }
 
@@ -513,7 +521,7 @@ class ExcelExportService {
    */
   getActiveTasks() {
     const activeTasks = []
-    
+
     for (const task of this.tasks.values()) {
       if (task.status === 'pending' || task.status === 'processing') {
         activeTasks.push({
@@ -526,7 +534,7 @@ class ExcelExportService {
         })
       }
     }
-    
+
     return activeTasks.sort((a, b) => a.createdAt - b.createdAt)
   }
 
@@ -542,8 +550,8 @@ class ExcelExportService {
     const maxWaitTime = 30000 // 最多等待30秒
     const waitStart = Date.now()
 
-    while (this.processing.size > 0 && (Date.now() - waitStart) < maxWaitTime) {
-      await new Promise(resolve => setTimeout(resolve, 1000))
+    while (this.processing.size > 0 && Date.now() - waitStart < maxWaitTime) {
+      await new Promise((resolve) => setTimeout(resolve, 1000))
     }
 
     // 强制取消剩余任务
