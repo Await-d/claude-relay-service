@@ -11,7 +11,7 @@ const fs = require('fs')
 const path = require('path')
 
 const writeFileAsync = promisify(fs.writeFile)
-const readFileAsync = promisify(fs.readFile)
+const _readFileAsync = promisify(fs.readFile)
 
 const { UnifiedLogService } = require('../src/services/UnifiedLogService')
 const database = require('../src/models/database')

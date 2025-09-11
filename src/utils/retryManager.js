@@ -14,7 +14,7 @@
 
 const logger = require('./logger')
 const database = require('../models/database')
-const config = require('../../config/config')
+const _config = require('../../config/config')
 
 /**
  * 错误分类枚举
@@ -172,6 +172,7 @@ class RetryManager {
    * @private
    */
   async attemptOperation(operation, context, options) {
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       context.attempts++
 
@@ -464,7 +465,7 @@ class RetryManager {
    * 更新熔断器状态
    * @private
    */
-  updateCircuitBreaker(serviceName, success, context) {
+  updateCircuitBreaker(serviceName, success, _context) {
     if (!this.config.circuitBreaker.enabled) {
       return
     }

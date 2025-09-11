@@ -178,10 +178,10 @@ class QueryOptimizer {
         keys.forEach((key) => pipeline.hgetall(key))
 
         const results = await pipeline.exec()
-        results.forEach((result, index) => {
-          if (result[0] === null && result[1]) {
-            const keyId = keys[index].replace('apikey:', '')
-            apiKeys.push({ id: keyId, ...result[1] })
+        results.forEach((pipelineResult, _index) => {
+          if (pipelineResult[0] === null && pipelineResult[1]) {
+            const keyId = keys[_index].replace('apikey:', '')
+            apiKeys.push({ id: keyId, ...pipelineResult[1] })
           }
         })
       }
@@ -357,7 +357,7 @@ class QueryOptimizer {
    * @private
    */
   async _getBatchAccountStats(accountIds, options) {
-    const includeRealtime = options.includeRealtime !== false
+    const _includeRealtime = options.includeRealtime !== false
     const timeRange = options.timeRange || 'today'
 
     const statsPromises = accountIds.map(async (accountId) => {
@@ -385,7 +385,7 @@ class QueryOptimizer {
    * @private
    */
   async _getAccountStats(accountId, timeRange) {
-    const now = new Date()
+    const _now = new Date()
     let stats = {}
 
     switch (timeRange) {

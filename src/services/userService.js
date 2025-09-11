@@ -17,7 +17,7 @@ const { v4: uuidv4 } = require('uuid')
 const database = require('../models/database')
 const userAuth = require('../utils/userAuth')
 const logger = require('../utils/logger')
-const config = require('../../config/config')
+const _config = require('../../config/config')
 
 class UserService {
   constructor() {
@@ -769,11 +769,11 @@ class UserService {
   }
 
   /**
-   * 重置用户密码
+   * 请求重置用户密码（生成重置令牌）
    * @param {string} userId - 用户ID
    * @returns {Promise<Object>} 重置信息
    */
-  async resetPassword(userId) {
+  async requestPasswordReset(userId) {
     try {
       logger.debug('🔄 Resetting user password', { userId })
 
@@ -935,7 +935,7 @@ class UserService {
       return null
     }
 
-    const { passwordHash, ...sanitized } = user
+    const { passwordHash: _passwordHash, ...sanitized } = user
     return sanitized
   }
 
@@ -1213,7 +1213,7 @@ class UserService {
 
       // 移除敏感信息
       const cleanUsers = paginatedUsers.map((user) => {
-        const { passwordHash, salt, ...cleanUser } = user
+        const { passwordHash: _passwordHash, salt: _salt, ...cleanUser } = user
         return cleanUser
       })
 

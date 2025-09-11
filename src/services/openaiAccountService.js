@@ -806,7 +806,7 @@ module.exports = {
   // 费用统计方法
   getAccountCostStats: async (accountId, options = {}) => {
     const AccountCostService = require('./accountCostService')
-    const { getAccount } = require('./openaiAccountService')
+    const { getAccount: _localGetAccount } = require('./openaiAccountService')
 
     try {
       if (!accountId) {
@@ -823,8 +823,8 @@ module.exports = {
 
       return costStats
     } catch (error) {
-      const logger = require('../utils/logger')
-      logger.error(`❌ Failed to get cost stats for OpenAI account ${accountId}:`, error)
+      const _localLogger = require('../utils/logger')
+      _localLogger.error(`❌ Failed to get cost stats for OpenAI account ${accountId}:`, error)
       throw error
     }
   },

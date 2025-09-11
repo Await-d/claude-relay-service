@@ -12,9 +12,9 @@
 
 const path = require('path')
 const fs = require('fs')
-const crypto = require('crypto')
+const _crypto = require('crypto')
 const chalk = require('chalk')
-const ora = require('ora')
+const _ora = require('ora')
 
 // 添加项目根目录到模块搜索路径
 const projectRoot = path.resolve(__dirname, '..')
@@ -23,7 +23,7 @@ process.chdir(projectRoot)
 // 引入迁移工具
 const { UserManagementMigration } = require('./migrate-user-management')
 const database = require('../src/models/database')
-const logger = require('../src/utils/logger')
+const _logger = require('../src/utils/logger')
 
 /**
  * 用户管理迁移测试套件
@@ -337,7 +337,7 @@ class UserMigrationTestSuite {
       const client = database.getClient()
 
       // 记录迁移前状态
-      const beforeUsers = await client.keys('user:*')
+      const _beforeUsers = await client.keys('user:*')
       const beforeApiKeys = await client.keys('api_key:test_key_*')
 
       // 创建一个简单的迁移对象进行回滚测试

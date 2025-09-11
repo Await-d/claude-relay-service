@@ -802,9 +802,9 @@ class ApiKeyService {
     for (const key of apiKeys) {
       try {
         // 获取使用统计（如果可用）
-        let usageStats = null
+        let _usageStats = null
         try {
-          usageStats = await database.getUsageStats(key.id)
+          _usageStats = await database.getUsageStats(key.id)
         } catch (error) {
           logger.debug(`无法获取API Key ${key.id} 的使用统计:`, error.message)
         }

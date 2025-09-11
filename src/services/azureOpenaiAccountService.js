@@ -950,7 +950,7 @@ module.exports = {
   // 费用统计方法
   getAccountCostStats: async (accountId, options = {}) => {
     const AccountCostService = require('./accountCostService')
-    const logger = require('../utils/logger')
+    const _localLogger = require('../utils/logger')
 
     try {
       if (!accountId) {
@@ -1670,7 +1670,7 @@ function getModelRecommendations(requirements = {}) {
     needsImageGeneration = false,
     prioritySpeed = false,
     priorityCost = false,
-    maxBudget = null
+    maxBudget: _maxBudget = null
   } = requirements
 
   const models = getSupportedModels()

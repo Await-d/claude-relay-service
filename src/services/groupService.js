@@ -15,7 +15,7 @@
 const { v4: uuidv4 } = require('uuid')
 const database = require('../models/database')
 const logger = require('../utils/logger')
-const config = require('../../config/config')
+const _config = require('../../config/config')
 
 /**
  * Group Service Class

@@ -318,7 +318,7 @@ class ApiKeyExportAdapter extends UpstreamFeatureAdapter {
   selectFields(data, fields) {
     const result = {}
     fields.forEach((field) => {
-      if (data.hasOwnProperty(field)) {
+      if (Object.prototype.hasOwnProperty.call(data, field)) {
         result[field] = data[field]
       }
     })

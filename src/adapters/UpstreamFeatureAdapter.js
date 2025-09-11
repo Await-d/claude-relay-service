@@ -88,7 +88,7 @@ class UpstreamFeatureAdapter {
    * @param {Object} options 操作选项
    * @returns {Promise<any>} 适配后的输出数据
    */
-  async adapt(input, options = {}) {
+  async adapt(input, _options = {}) {
     throw new Error(`adapt method must be implemented by ${this.name}`)
   }
 
@@ -99,7 +99,7 @@ class UpstreamFeatureAdapter {
    * @param {Object} options 验证选项
    * @returns {Promise<boolean>} 验证结果
    */
-  async validate(input, options = {}) {
+  async validate(input, _options = {}) {
     // 默认实现：基本的非空验证
     return input !== null && input !== undefined
   }

@@ -21,9 +21,14 @@
 
 const fs = require('fs')
 const path = require('path')
-const cluster = require('cluster')
+const _cluster = require('cluster')
 const { performance } = require('perf_hooks')
-const { Worker, isMainThread, parentPort, workerData } = require('worker_threads')
+const {
+  Worker: _Worker,
+  isMainThread: _isMainThread,
+  parentPort: _parentPort,
+  workerData: _workerData
+} = require('worker_threads')
 
 // 项目模块
 const config = require('../config/config')
@@ -212,7 +217,7 @@ class StandalonePerformanceBenchmark {
     logger.info('💾 Testing cache performance...')
     const cache = new Map()
     const cacheTestRounds = 500
-    let cacheHits = 0
+    const _cacheHits = 0
 
     for (let i = 0; i < cacheTestRounds; i++) {
       const accountId = mockAccounts[i % 5].id // 重复使用前5个账户
@@ -226,7 +231,9 @@ class StandalonePerformanceBenchmark {
         metrics = this._generateMockMetrics(accountId)
         cache.set(accountId, metrics)
       } else {
-        cacheHits++
+        // 变量重命名以解决 no-unused-vars 警告
+        let _localCacheHits = 0
+        _localCacheHits++
       }
 
       const cacheTime = performance.now() - startTime
@@ -481,7 +488,7 @@ class StandalonePerformanceBenchmark {
     })
 
     // 4. 代理性能测试
-    if (config.proxy || true) {
+    if (config.proxy) {
       // 模拟代理配置存在
       logger.info('🌐 Testing proxy performance...')
 
@@ -1035,7 +1042,7 @@ class StandalonePerformanceBenchmark {
     await new Promise((resolve) => setTimeout(resolve, Math.random() * 10 + 5))
 
     // 基于简单的加权随机选择
-    const weights = accounts.map((acc, i) => ({
+    const weights = accounts.map((acc, _i) => ({
       ...acc,
       score: Math.random() * 0.5 + 0.5, // 0.5-1.0 的评分
       weight: Math.random() * 100

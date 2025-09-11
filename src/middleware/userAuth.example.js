@@ -150,7 +150,7 @@ router.delete(
     roles: ['admin'], // 必须是管理员
     permissions: ['users.delete'], // 并且有删除权限
     operator: 'AND', // 所有条件都必须满足
-    customCheck: async (req, res) =>
+    customCheck: async (req, _res) =>
       // 自定义检查逻辑
       // 不能删除自己的账户
       req.params.userId !== req.user.id
@@ -173,7 +173,7 @@ router.get(
     roles: ['admin'],
     permissions: ['system.read', 'admin.read'],
     operator: 'OR', // 满足任一条件即可
-    customCheck: async (req, res) => {
+    customCheck: async (_req, _res) => {
       // 额外的业务逻辑检查
       const currentHour = new Date().getHours()
       // 只在工作时间 (9-17点) 允许访问

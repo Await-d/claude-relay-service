@@ -6,7 +6,7 @@ const bedrockAccountService = require('../services/bedrockAccountService')
 const unifiedClaudeScheduler = require('../services/unifiedClaudeScheduler')
 const apiKeyService = require('../services/apiKeyService')
 const claudeAccountService = require('../services/claudeAccountService')
-const { authenticateApiKey, authenticateDual } = require('../middleware/auth')
+const { authenticateDual } = require('../middleware/auth')
 const logger = require('../utils/logger')
 const database = require('../models/database')
 const sessionHelper = require('../utils/sessionHelper')
@@ -235,8 +235,8 @@ async function handleMessagesRequest(req, res) {
         )
         try {
           // 使用claudeAccountService的组调度功能
-          const claudeAccountService = require('../services/claudeAccountService')
-          const groupAccountId = await claudeAccountService.selectAccountByGroup(req.user.id, {
+          const localClaudeAccountService = require('../services/claudeAccountService')
+          const groupAccountId = await localClaudeAccountService.selectAccountByGroup(req.user.id, {
             sessionHash,
             modelName: requestedModel
           })
@@ -255,8 +255,9 @@ async function handleMessagesRequest(req, res) {
               sessionHash,
               requestedModel
             )
-            accountId = result.accountId
-            accountType = result.accountType
+            const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+            accountId = selectedAccountId
+            accountType = selectedAccountType
           }
         } catch (groupError) {
           logger.warn(
@@ -268,8 +269,9 @@ async function handleMessagesRequest(req, res) {
             sessionHash,
             requestedModel
           )
-          accountId = result.accountId
-          accountType = result.accountType
+          const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+          accountId = selectedAccountId
+          accountType = selectedAccountType
         }
       } else {
         // API Key认证模式：使用传统的统一调度选择账号
@@ -279,8 +281,9 @@ async function handleMessagesRequest(req, res) {
           sessionHash,
           requestedModel
         )
-        accountId = result.accountId
-        accountType = result.accountType
+        const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+        accountId = selectedAccountId
+        accountType = selectedAccountType
       }
 
       // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 流式请求）
@@ -640,8 +643,8 @@ async function handleMessagesRequest(req, res) {
         )
         try {
           // 使用claudeAccountService的组调度功能
-          const claudeAccountService = require('../services/claudeAccountService')
-          const groupAccountId = await claudeAccountService.selectAccountByGroup(req.user.id, {
+          const localClaudeAccountService = require('../services/claudeAccountService')
+          const groupAccountId = await localClaudeAccountService.selectAccountByGroup(req.user.id, {
             sessionHash,
             modelName: requestedModel
           })
@@ -660,8 +663,9 @@ async function handleMessagesRequest(req, res) {
               sessionHash,
               requestedModel
             )
-            accountId = result.accountId
-            accountType = result.accountType
+            const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+            accountId = selectedAccountId
+            accountType = selectedAccountType
           }
         } catch (groupError) {
           logger.warn(
@@ -673,8 +677,9 @@ async function handleMessagesRequest(req, res) {
             sessionHash,
             requestedModel
           )
-          accountId = result.accountId
-          accountType = result.accountType
+          const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+          accountId = selectedAccountId
+          accountType = selectedAccountType
         }
       } else {
         // API Key认证模式：使用传统的统一调度选择账号
@@ -684,8 +689,9 @@ async function handleMessagesRequest(req, res) {
           sessionHash,
           requestedModel
         )
-        accountId = result.accountId
-        accountType = result.accountType
+        const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+        accountId = selectedAccountId
+        accountType = selectedAccountType
       }
 
       // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 非流式请求）
@@ -1294,8 +1300,8 @@ router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
         `👤 Using user-based account selection for count_tokens, user: ${req.user.username}`
       )
       try {
-        const claudeAccountService = require('../services/claudeAccountService')
-        const groupAccountId = await claudeAccountService.selectAccountByGroup(req.user.id, {
+        const localClaudeService = require('../services/claudeAccountService')
+        const groupAccountId = await localClaudeService.selectAccountByGroup(req.user.id, {
           sessionHash,
           modelName: requestedModel
         })
@@ -1315,8 +1321,9 @@ router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
               sessionHash,
               requestedModel
             )
-            accountId = result.accountId
-            accountType = result.accountType
+            const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+            accountId = selectedAccountId
+            accountType = selectedAccountType
           } else {
             throw new Error('No available accounts for count_tokens request')
           }
@@ -1332,8 +1339,9 @@ router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
             sessionHash,
             requestedModel
           )
-          accountId = result.accountId
-          accountType = result.accountType
+          const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+          accountId = selectedAccountId
+          accountType = selectedAccountType
         } else {
           throw new Error('No available accounts for count_tokens request')
         }
@@ -1346,8 +1354,9 @@ router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
         sessionHash,
         requestedModel
       )
-      accountId = result.accountId
-      accountType = result.accountType
+      const { accountId: selectedAccountId, accountType: selectedAccountType } = result
+      accountId = selectedAccountId
+      accountType = selectedAccountType
     } else {
       throw new Error('No authentication method available for count_tokens request')
     }

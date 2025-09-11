@@ -19,7 +19,7 @@
  */
 
 const { performance } = require('perf_hooks')
-const logger = require('../src/utils/logger')
+const _logger = require('../src/utils/logger')
 
 // 简化的收集器（用于快速检查）
 class QuickPerformanceChecker {
@@ -374,7 +374,7 @@ class QuickPerformanceChecker {
     console.log('🖥️ Checking System Performance...')
 
     const memUsage = process.memoryUsage()
-    const cpuUsage = process.cpuUsage()
+    const _cpuUsage = process.cpuUsage()
 
     const testResults = {
       memoryUsage: memUsage.heapUsed / memUsage.heapTotal,

@@ -32,12 +32,12 @@
 const fs = require('fs')
 const path = require('path')
 const EventEmitter = require('events')
-const { performance } = require('perf_hooks')
+const { performance: _performance } = require('perf_hooks')
 
 // 项目模块
-const config = require('../config/config')
+const _config = require('../config/config')
 const logger = require('../src/utils/logger')
-const database = require('../src/models/database')
+const _database = require('../src/models/database')
 
 /**
  * 监控设置和管理主控制器
@@ -1000,7 +1000,7 @@ class MonitoringSetup extends EventEmitter {
   /**
    * 📱 广播到客户端
    */
-  _broadcastToClients(event, data) {
+  _broadcastToClients(event, _data) {
     // WebSocket广播实现
     logger.debug(`📱 Broadcasting ${event} to clients`)
   }
@@ -1191,61 +1191,61 @@ class MonitoringSetup extends EventEmitter {
   }
 
   // 辅助方法占位符（需要根据实际需求实现）
-  async _initializeStorageCategory(category, config) {
+  async _initializeStorageCategory(_category, _storageConfig) {
     /* 实现存储初始化 */
   }
   async _setupDataBackup() {
     /* 实现数据备份 */
   }
-  async _storeMetricsBatch(metrics) {
+  async _storeMetricsBatch(_metrics) {
     /* 实现批量存储 */
   }
-  async _processAlertChecks(metrics) {
+  async _processAlertChecks(_metrics) {
     /* 实现告警检查处理 */
   }
-  async _updateDashboardData(metrics) {
+  async _updateDashboardData(_metrics) {
     /* 实现仪表板数据更新 */
   }
-  async _getActiveAlert(alertKey) {
+  async _getActiveAlert(_alertKey) {
     /* 实现获取活跃告警 */
   }
-  async _storeAlert(alert) {
+  async _storeAlert(_alert) {
     /* 实现告警存储 */
   }
-  async _sendAlertNotification(alert) {
+  async _sendAlertNotification(_alert) {
     /* 实现告警通知 */
   }
-  async _resolveAlert(alertKey) {
+  async _resolveAlert(_alertKey) {
     /* 实现告警解决 */
   }
-  async _updateRealTimeMetrics(data) {
+  async _updateRealTimeMetrics(_data) {
     /* 实现实时指标更新 */
   }
-  async _storeDashboardData(name, data) {
+  async _storeDashboardData(_name, _data) {
     /* 实现仪表板数据存储 */
   }
-  async _getLatestMetricValue(source) {
+  async _getLatestMetricValue(_source) {
     /* 实现最新指标值获取 */
   }
-  async _getTimeSeriesData(source, timeWindow) {
+  async _getTimeSeriesData(_source, _timeWindow) {
     /* 实现时间序列数据获取 */
   }
-  async _getGaugeValue(source) {
+  async _getGaugeValue(_source) {
     /* 实现仪表值获取 */
   }
-  async _getPieChartData(source) {
+  async _getPieChartData(_source) {
     /* 实现饼图数据获取 */
   }
-  async _getHeatmapData(source) {
+  async _getHeatmapData(_source) {
     /* 实现热力图数据获取 */
   }
-  async _getHistoricalData(category, timeRange) {
+  async _getHistoricalData(_category, _timeRange) {
     /* 实现历史数据获取 */
   }
   async _getActiveAlerts() {
     /* 实现活跃告警获取 */
   }
-  async _getDashboardData(dashboard) {
+  async _getDashboardData(_dashboard) {
     /* 实现仪表板数据获取 */
   }
 
@@ -1921,11 +1921,12 @@ async function main() {
     const command = args[0] || 'setup'
 
     switch (command) {
-      case 'setup':
+      case 'setup': {
         const config = await monitoring.setupCompleteMonitoring()
         console.log('✅ Monitoring system setup completed')
         console.log('📋 Configuration:', JSON.stringify(config, null, 2))
         break
+      }
 
       case 'start':
         await monitoring.setupCompleteMonitoring()
@@ -1939,13 +1940,14 @@ async function main() {
         })
         break
 
-      case 'test':
+      case 'test': {
         // 运行快速测试
         await monitoring._initializeCollectors()
         const testData = await monitoring._collectAllMetrics()
         console.log('📊 Test data collected:', JSON.stringify(testData, null, 2))
         await monitoring.shutdown()
         break
+      }
 
       default:
         console.log('Usage: node monitoring-setup.js [command]')

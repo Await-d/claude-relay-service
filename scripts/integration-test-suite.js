@@ -22,13 +22,13 @@ const chalk = require('chalk')
 
 // 导入核心模块
 const logger = require('../src/utils/logger')
-const config = require('../config/config')
-const database = require('../src/models/database')
+const _config = require('../config/config')
+const _database = require('../src/models/database')
 
 // 导入新功能模块
 const IntelligentLoadBalancer = require('../src/services/intelligentLoadBalancer')
 const QueryOptimizer = require('../src/utils/QueryOptimizer')
-const UpstreamFeatureAdapter = require('../src/adapters/UpstreamFeatureAdapter')
+const _UpstreamFeatureAdapter = require('../src/adapters/UpstreamFeatureAdapter')
 const ApiKeyExportAdapter = require('../src/adapters/ApiKeyExportAdapter')
 
 // 测试配置
@@ -97,7 +97,7 @@ class TestResults {
     })
   }
 
-  addSkipped(name) {
+  addSkipped(_name) {
     this.total++
     this.skipped++
   }
@@ -198,7 +198,7 @@ class MockDataGenerator {
     return keys
   }
 
-  static generateUsageStats(keyId) {
+  static generateUsageStats(_keyId) {
     return {
       totalRequests: Math.floor(Math.random() * 1000),
       totalTokens: Math.floor(Math.random() * 50000),
@@ -268,7 +268,7 @@ class MockDatabaseAdapter {
     return usageEntries
   }
 
-  async recordAccountUsage(accountId, usage) {
+  async recordAccountUsage(_accountId, _usage) {
     this.callCount++
     await this.simulateLatency(50) // 快速写入
     return true

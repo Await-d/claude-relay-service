@@ -21,7 +21,7 @@ const chalk = require('chalk')
 // 导入核心模块
 const logger = require('../src/utils/logger')
 const IntelligentLoadBalancer = require('../src/services/intelligentLoadBalancer')
-const CostCalculator = require('../src/utils/costCalculator')
+const _CostCalculator = require('../src/utils/costCalculator')
 
 // 测试配置
 const TEST_CONFIG = {
@@ -346,11 +346,11 @@ async function initializeTestEnvironment() {
 
     // 注入模拟数据库
     const databaseModule = require('../src/models/database')
-    const originalMethods = {}
+    const __originalMethods = {}
 
     // 备份原始方法
-    originalMethods.getAccountUsageInTimeWindow = databaseModule.getAccountUsageInTimeWindow
-    originalMethods.recordAccountUsage = databaseModule.recordAccountUsage
+    __originalMethods.getAccountUsageInTimeWindow = databaseModule.getAccountUsageInTimeWindow
+    __originalMethods.recordAccountUsage = databaseModule.recordAccountUsage
 
     // 注入模拟方法
     databaseModule.getAccountUsageInTimeWindow =
@@ -367,7 +367,7 @@ async function initializeTestEnvironment() {
     log.success('Test environment initialized successfully')
     log.debug(`Generated ${mockDatabase.accounts.length} test accounts`)
 
-    return { originalMethods }
+    return { __originalMethods }
   } catch (error) {
     log.error('Failed to initialize test environment:', error.message)
     throw error
@@ -509,8 +509,8 @@ async function testAlgorithmAccuracy() {
 
     // 测试3: 健康评分准确性
     log.debug('Test 3: Health score accuracy')
-    const healthyAccount = LoadBalancerTestData.generateHealthyAccount()
-    const problemAccount = LoadBalancerTestData.generateProblemAccount()
+    const _healthyAccount = LoadBalancerTestData.generateHealthyAccount()
+    const _problemAccount = LoadBalancerTestData.generateProblemAccount()
 
     const healthyMetrics = {
       totalRequests: 100,
@@ -971,7 +971,7 @@ async function runLoadBalancerTests() {
 
   try {
     // 初始化
-    const { originalMethods } = await initializeTestEnvironment()
+    const { __originalMethods } = await initializeTestEnvironment()
 
     // 运行测试套件
     if (TEST_CONFIG.scenarios.basic) {

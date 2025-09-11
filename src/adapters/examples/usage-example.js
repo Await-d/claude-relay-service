@@ -226,7 +226,7 @@ class CustomDataAdapter extends UpstreamFeatureAdapter {
     return input
   }
 
-  async validate(input, options = {}) {
+  async validate(input, _options = {}) {
     return typeof input === 'string' && input.length > 0
   }
 }

@@ -23,7 +23,7 @@ process.chdir(projectRoot)
 // 引入必要的模块
 const database = require('../src/models/database')
 const config = require('../config/config')
-const logger = require('../src/utils/logger')
+const _logger = require('../src/utils/logger')
 
 /**
  * 用户管理系统迁移验证器
@@ -139,7 +139,7 @@ class UserMigrationVerifier {
       await client.ping()
 
       // 检查数据库中的关键数据
-      const systemConfig = await client.hgetall('system_config')
+      const __systemConfig = await client.hgetall('system_config')
       const userCount = (await client.get('user_count')) || '0'
       const apiKeyCount = await client.keys('api_key:*')
 
@@ -268,13 +268,13 @@ class UserMigrationVerifier {
       const client = database.getClient()
 
       // 检查系统配置
-      const systemConfig = await client.hgetall('system_config')
+      const __systemConfig = await client.hgetall('system_config')
 
-      if (systemConfig.user_management_enabled !== 'true') {
+      if (__systemConfig.user_management_enabled !== 'true') {
         throw new Error('用户管理功能未启用')
       }
 
-      if (!systemConfig.migration_completed) {
+      if (!__systemConfig.migration_completed) {
         throw new Error('迁移完成标记缺失')
       }
 

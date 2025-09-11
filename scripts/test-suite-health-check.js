@@ -213,7 +213,7 @@ function checkTestScripts() {
       // 检查文件可读性
       const stats = fs.statSync(scriptPath)
       const isFile = stats.isFile()
-      const isReadable = fs.access !== undefined ? true : fs.constants.R_OK
+      const _isReadable = fs.access !== undefined ? true : fs.constants.R_OK
 
       if (!isFile) {
         healthCheck.addCheck(`Script: ${script.name}`, false, {

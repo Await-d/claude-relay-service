@@ -12,7 +12,7 @@
  * @version 1.0.0
  */
 
-const moment = require('moment')
+const _moment = require('moment')
 const logger = require('./logger')
 
 /**
@@ -518,26 +518,21 @@ class ExcelDataQueryAdapter {
    * 获取API Key模型使用情况
    * @private
    */
-  async _getApiKeyModelUsage(keyId, timeRange) {
-    try {
-      // 这里需要实现从数据库查询模型使用情况的逻辑
-      // 暂时返回模拟数据结构
-      return [
-        {
-          model: 'claude-3-haiku',
-          requests: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          cost: 0,
-          averageResponseTime: 0,
-          successRate: 100
-        }
-      ]
-    } catch (error) {
-      logger.warn(`⚠️ Failed to get model usage for key ${keyId}:`, error.message)
-      return []
-    }
+  async _getApiKeyModelUsage(_keyId, _timeRange) {
+    // 这里需要实现从数据库查询模型使用情况的逻辑
+    // 暂时返回模拟数据结构
+    return [
+      {
+        model: 'claude-3-haiku',
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+        averageResponseTime: 0,
+        successRate: 100
+      }
+    ]
   }
 
   /**

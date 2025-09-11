@@ -15,8 +15,8 @@
 
 const { connectionManager } = require('../src/services/connectionManager')
 const { sessionManager } = require('../src/services/sessionManager')
-const logger = require('../src/utils/logger')
-const config = require('../config/config')
+const _logger = require('../src/utils/logger')
+const _config = require('../config/config')
 
 // 🧪 测试配置
 const TEST_CONFIG = {

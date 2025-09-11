@@ -22,6 +22,7 @@ const {
 const apiRoutes = require('./routes/api')
 const adminRoutes = require('./routes/admin')
 const webRoutes = require('./routes/web')
+const authRoutes = require('./routes/auth')
 const apiStatsRoutes = require('./routes/apiStats')
 const geminiRoutes = require('./routes/geminiRoutes')
 const openaiGeminiRoutes = require('./routes/openaiGeminiRoutes')
@@ -253,6 +254,7 @@ class Application {
       this.app.use('/api', apiRoutes)
       this.app.use('/claude', apiRoutes) // /claude 路由别名，与 /api 功能相同
       this.app.use('/admin', adminRoutes)
+      this.app.use('/auth', authRoutes) // 用户认证路由
       // 使用 web 路由（包含 auth 和页面重定向）
       this.app.use('/web', webRoutes)
       this.app.use('/apiStats', apiStatsRoutes)

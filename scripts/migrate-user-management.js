@@ -12,7 +12,7 @@
 
 const path = require('path')
 const fs = require('fs')
-const crypto = require('crypto')
+const _crypto = require('crypto')
 const chalk = require('chalk')
 const ora = require('ora')
 const inquirer = require('inquirer')
@@ -834,7 +834,7 @@ class UserManagementMigration {
             await client.del(`user_email:migration@system.local`)
             break
 
-          case 'migrate_api_key':
+          case 'migrate_api_key': {
             // 恢复原始API Key数据
             const originalData = this.rollbackData.originalApiKeys.get(operation.originalKey)
             if (originalData) {
@@ -843,6 +843,7 @@ class UserManagementMigration {
             // 删除用户关联
             await client.srem(`user_api_keys:${operation.userId}`, operation.apiKeyId)
             break
+          }
 
           case 'update_system_config':
             await client.hdel(

@@ -14,8 +14,8 @@
  */
 
 const logger = require('../utils/logger')
-const database = require('../models/database')
-const config = require('../../config/config')
+const _database = require('../models/database')
+const _config = require('../../config/config')
 
 /**
  * 错误分类枚举
@@ -140,10 +140,10 @@ const SENSITIVE_PATTERNS = [
   /\b[Kk]ey\b.*?[:\s=]+\s*([A-Za-z0-9+/=_-]{16,})/g,
 
   // 数据库连接字符串
-  /mongodb:\/\/[^\/\s]+\/[^\s]*/g,
-  /redis:\/\/[^\/\s]+\/[^\s]*/g,
-  /postgres:\/\/[^\/\s]+\/[^\s]*/g,
-  /mysql:\/\/[^\/\s]+\/[^\s]*/g,
+  /mongodb:\/\/[^/\s]+\/[^\s]*/g,
+  /redis:\/\/[^/\s]+\/[^\s]*/g,
+  /postgres:\/\/[^/\s]+\/[^\s]*/g,
+  /mysql:\/\/[^/\s]+\/[^\s]*/g,
 
   // 邮箱和个人信息
   /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
@@ -207,7 +207,7 @@ class EnhancedErrorHandler {
    * @param {Object} res - Express响应对象
    * @param {Function} next - Express next函数
    */
-  async handleError(error, req, res, next) {
+  async handleError(error, req, res, _next) {
     const startTime = Date.now()
     const requestId = req.requestId || this.generateId()
 
@@ -825,7 +825,7 @@ class EnhancedErrorHandler {
    * @param {Object} analysis - 错误分析
    * @param {Object} context - 错误上下文
    */
-  updateErrorStatistics(analysis, context) {
+  updateErrorStatistics(analysis, _context) {
     const now = Date.now()
     this.errorStats.total++
 

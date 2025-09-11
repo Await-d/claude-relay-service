@@ -82,7 +82,7 @@ class RetryManager extends EventEmitter {
       successfulRetries: 0,
       failedRetries: 0,
       avgRetryDelay: 0,
-      errorTypes: new Map()
+      _errorTypes: new Map()
     }
   }
 
@@ -108,8 +108,8 @@ class RetryManager extends EventEmitter {
         attempt++
 
         // 记录错误类型
-        const errorType = this.classifyError(error)
-        this.stats.errorTypes.set(errorType, (this.stats.errorTypes.get(errorType) || 0) + 1)
+        const __errorType = this.classifyError(error)
+        this.stats._errorTypes.set(__errorType, (this.stats._errorTypes.get(__errorType) || 0) + 1)
 
         if (attempt <= this.options.maxRetries && this.shouldRetry(error)) {
           this.stats.totalRetries++
@@ -134,7 +134,7 @@ class RetryManager extends EventEmitter {
   }
 
   shouldRetry(error) {
-    const errorType = this.classifyError(error)
+    const __errorType = this.classifyError(error)
 
     // 网络错误 - 重试
     if (this.options.retryableErrors.includes(error.code)) {
@@ -218,7 +218,7 @@ class RetryManager extends EventEmitter {
       successfulRetries: 0,
       failedRetries: 0,
       avgRetryDelay: 0,
-      errorTypes: new Map()
+      _errorTypes: new Map()
     }
   }
 }
@@ -286,7 +286,7 @@ class CircuitBreaker extends EventEmitter {
     this.updateMonitoringWindow('success')
   }
 
-  onFailure(error) {
+  onFailure(_error) {
     this.stats.failedRequests++
     this.failures++
 
@@ -409,8 +409,8 @@ class ErrorSimulator {
   }
 
   generateError() {
-    const errorType = this.selectErrorType()
-    const pattern = this.errorPatterns[errorType]
+    const __errorType = this.selectErrorType()
+    const pattern = this.errorPatterns[__errorType]
 
     if (!pattern) {
       return new Error('Unknown error')
@@ -809,9 +809,9 @@ async function testErrorClassificationAndHandling() {
       error.code = errorCode
 
       const classification = retryManager.classifyError(error)
-      const shouldRetry = retryManager.shouldRetry(error)
+      const _shouldRetry = retryManager.shouldRetry(error)
 
-      if (classification.startsWith('NetworkError') && shouldRetry) {
+      if (classification.startsWith('NetworkError') && _shouldRetry) {
         networkErrorsClassified++
       }
     }
@@ -857,7 +857,7 @@ async function testErrorClassificationAndHandling() {
 
     let appErrorsClassified = 0
 
-    for (const { name, shouldRetry } of applicationErrors) {
+    for (const { name, shouldRetry: _shouldRetry } of applicationErrors) {
       const error = new Error(`Application error: ${name}`)
       error.name = name
 
@@ -878,7 +878,7 @@ async function testErrorClassificationAndHandling() {
     retryManager.reset() // 重置统计
 
     // 模拟各种错误
-    const errorTypes = [
+    const _errorTypes = [
       () => {
         const e = new Error('Network')
         e.code = 'ETIMEDOUT'
@@ -896,7 +896,7 @@ async function testErrorClassificationAndHandling() {
       }
     ]
 
-    for (const errorGen of errorTypes) {
+    for (const errorGen of _errorTypes) {
       try {
         await retryManager.executeWithRetry(errorGen)
       } catch (error) {
@@ -905,12 +905,12 @@ async function testErrorClassificationAndHandling() {
     }
 
     const stats = retryManager.getStats()
-    const statsCollectionPassed = stats.errorTypes.size >= 3 && stats.totalAttempts > 0
+    const statsCollectionPassed = stats._errorTypes.size >= 3 && stats.totalAttempts > 0
 
     testResults.addTest('ErrorHandling-StatisticsCollection', statsCollectionPassed)
     testResults.addRetryStats(stats)
 
-    log.debug(`Error statistics: ${JSON.stringify(Object.fromEntries(stats.errorTypes))}`)
+    log.debug(`Error statistics: ${JSON.stringify(Object.fromEntries(stats._errorTypes))}`)
 
     const testDuration = performance.now() - testStart
     log.success(`Error classification and handling tests completed in ${testDuration.toFixed(2)}ms`)
@@ -991,7 +991,7 @@ async function testIntegratedErrorRecoveryScenarios() {
     // 创建多个熔断器模拟不同服务
     const serviceBreakers = Array.from(
       { length: 3 },
-      (_, i) =>
+      (_, _i) =>
         new CircuitBreaker({
           failureThreshold: 3,
           recoveryTimeout: 1000
@@ -1008,7 +1008,9 @@ async function testIntegratedErrorRecoveryScenarios() {
       const breaker = serviceBreakers[serviceIndex]
 
       try {
-        const result = await breaker.execute(() => errorSimulator.simulateOperation(`cascade-${i}`))
+        const _result = await breaker.execute(() =>
+          errorSimulator.simulateOperation(`cascade-${i}`)
+        )
         cascadeResults.push({ service: serviceIndex, success: true })
       } catch (error) {
         cascadeResults.push({ service: serviceIndex, success: false, error: error.message })
@@ -1090,7 +1092,7 @@ async function testPerformanceAndStressScenarios() {
     const concurrentPromises = Array.from({ length: concurrentRequests }, async (_, i) => {
       const start = performance.now()
       try {
-        const result = await retryManager.executeWithRetry(() =>
+        const _result = await retryManager.executeWithRetry(() =>
           errorSimulator.simulateOperation(`concurrent-${i}`)
         )
         return { success: true, duration: performance.now() - start, index: i }

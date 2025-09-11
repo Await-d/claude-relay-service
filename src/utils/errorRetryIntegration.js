@@ -11,11 +11,11 @@
 const { RetryManager, ErrorType, RetryStrategy } = require('./retryManager')
 const {
   EnhancedErrorHandler,
-  ErrorCategory,
-  ErrorSeverity
+  ErrorCategory: _ErrorCategory,
+  ErrorSeverity: _ErrorSeverity
 } = require('../middleware/enhancedErrorHandler')
 const logger = require('./logger')
-const config = require('../../config/config')
+const _config = require('../../config/config')
 
 /**
  * 智能错误处理和重试集成服务
@@ -140,7 +140,7 @@ class ErrorRetryIntegration {
    * @param {Object} options - 操作选项
    * @returns {Promise} 操作结果
    */
-  async executeDatabaseOperation(dbOperation, options = {}) {
+  async executeDatabaseOperation(dbOperation, _options = {}) {
     return await this.retryManager.executeWithRetry(dbOperation, {
       operationId: `db_operation_${Date.now()}`,
       serviceName: 'database',

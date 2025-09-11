@@ -161,7 +161,8 @@
 
       <!-- 桌面端表格视图 -->
       <div v-else class="table-container hidden md:block">
-        <table class="w-full table-fixed">
+        <div class="table-scroll-wrapper relative overflow-x-auto">
+          <table class="w-full table-fixed lg:min-w-[950px] xl:min-w-full">
           <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
             <tr>
               <th class="w-[50px] px-3 py-4 text-left">
@@ -176,7 +177,7 @@
                 </div>
               </th>
               <th
-                class="w-[25%] min-w-[200px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="w-[25%] min-w-[180px] cursor-pointer px-2 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600 lg:w-[28%] lg:min-w-[220px] xl:w-[25%]"
                 @click="sortApiKeys('name')"
               >
                 名称
@@ -191,12 +192,12 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
-                class="w-[10%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                class="hidden w-[10%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 lg:table-cell"
               >
                 标签
               </th>
               <th
-                class="w-[8%] min-w-[70px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="w-[8%] min-w-[60px] cursor-pointer px-2 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600 lg:w-[9%]"
                 @click="sortApiKeys('status')"
               >
                 状态
@@ -211,9 +212,9 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
-                class="w-[17%] min-w-[140px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                class="w-[17%] min-w-[120px] px-2 py-3 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 lg:w-[22%]"
               >
-                使用统计
+                统计
                 <span
                   class="cursor-pointer rounded px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-600"
                   @click="sortApiKeys('cost')"
@@ -231,7 +232,7 @@
                 </span>
               </th>
               <th
-                class="w-[10%] min-w-[90px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="hidden w-[10%] min-w-[90px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600 xl:table-cell"
                 @click="sortApiKeys('createdAt')"
               >
                 创建时间
@@ -246,7 +247,7 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
-                class="w-[10%] min-w-[90px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="hidden w-[10%] min-w-[90px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600 lg:table-cell"
                 @click="sortApiKeys('expiresAt')"
               >
                 过期时间
@@ -261,7 +262,7 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
-                class="w-[20%] min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                class="w-[20%] min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 lg:w-[25%] xl:w-[20%]"
               >
                 操作
               </th>
@@ -373,7 +374,7 @@
                     </div>
                   </div>
                 </td>
-                <td class="px-3 py-4">
+                <td class="hidden px-3 py-4 lg:table-cell">
                   <div class="flex flex-wrap gap-1">
                     <span
                       v-for="tag in key.tags || []"
@@ -517,10 +518,10 @@
                     </div>
                   </div>
                 </td>
-                <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                <td class="hidden whitespace-nowrap px-3 py-4 text-sm text-gray-500 xl:table-cell">
                   {{ new Date(key.createdAt).toLocaleDateString() }}
                 </td>
-                <td class="whitespace-nowrap px-3 py-4 text-sm">
+                <td class="hidden whitespace-nowrap px-3 py-4 text-sm lg:table-cell">
                   <div class="inline-flex items-center gap-1.5">
                     <span v-if="key.expiresAt">
                       <span
@@ -883,6 +884,7 @@
             </template>
           </tbody>
         </table>
+        </div>
       </div>
 
       <!-- 移动端卡片视图 -->
@@ -2483,6 +2485,41 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* 表格水平滚动优化 */
+.table-scroll-wrapper {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.table-scroll-wrapper::-webkit-scrollbar {
+  height: 6px;
+}
+
+.table-scroll-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table-scroll-wrapper::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+  border-radius: 3px;
+}
+
+.table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.7);
+}
+
+/* 1024px分辨率专项优化 */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .table-container table {
+    font-size: 0.8rem;
+  }
+  
+  .table-container th,
+  .table-container td {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+}
 .tab-content {
   min-height: calc(100vh - 300px);
 }

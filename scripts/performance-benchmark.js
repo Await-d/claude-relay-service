@@ -21,14 +21,19 @@
 
 const fs = require('fs')
 const path = require('path')
-const cluster = require('cluster')
+const _cluster = require('cluster')
 const { performance } = require('perf_hooks')
-const { Worker, isMainThread, parentPort, workerData } = require('worker_threads')
+const {
+  Worker: _Worker,
+  isMainThread: _isMainThread,
+  parentPort: _parentPort,
+  workerData: _workerData
+} = require('worker_threads')
 
 // 项目模块
 const config = require('../config/config')
 const logger = require('../src/utils/logger')
-const database = require('../src/models/database')
+const _database = require('../src/models/database')
 
 // 测试目标模块
 const IntelligentLoadBalancer = require('../src/services/intelligentLoadBalancer')
@@ -221,17 +226,18 @@ class PerformanceBenchmark {
     // 3. 缓存性能测试
     logger.info('💾 Testing cache performance...')
     const cacheTestRounds = 500
-    let cacheHits = 0
+    const _cacheHits = 0
 
     for (let i = 0; i < cacheTestRounds; i++) {
       const accountId = mockAccounts[i % 5].id // 重复使用前5个账户
       const startTime = performance.now()
 
-      const metrics = await loadBalancer.getAccountMetrics(accountId)
+      const _metrics = await loadBalancer.getAccountMetrics(accountId)
       const cacheTime = performance.now() - startTime
 
       if (cacheTime < 5) {
-        cacheHits++
+        let _localCacheHits = 0
+        _localCacheHits++
       } // 假设5ms以下为缓存命中
 
       testResults.cachePerformance.push({
@@ -446,7 +452,7 @@ class PerformanceBenchmark {
     for (let i = 0; i < 100; i++) {
       const startTime = performance.now()
 
-      const agent = await connectionManager.getConnectionAgent({
+      const _agent = await connectionManager.getConnectionAgent({
         target: 'api.anthropic.com',
         forceNew: true
       })
@@ -466,7 +472,7 @@ class PerformanceBenchmark {
     for (let i = 0; i < 100; i++) {
       const startTime = performance.now()
 
-      const agent = await connectionManager.getConnectionAgent({
+      const _agent = await connectionManager.getConnectionAgent({
         target: 'api.anthropic.com',
         forceNew: false
       })
@@ -517,7 +523,7 @@ class PerformanceBenchmark {
         const startTime = performance.now()
 
         try {
-          const agent = await connectionManager.getConnectionAgent({
+          const _agent = await connectionManager.getConnectionAgent({
             target: 'api.anthropic.com',
             proxy: config.proxy,
             forceNew: true
@@ -577,7 +583,7 @@ class PerformanceBenchmark {
     for (let i = 0; i < 500; i++) {
       const startTime = performance.now()
 
-      const session = await sessionManager.createSession({
+      const _session = await sessionManager.createSession({
         userId: `user_${i}`,
         accountId: `account_${i % 10}`,
         apiKeyId: `key_${i}`,
@@ -585,11 +591,11 @@ class PerformanceBenchmark {
       })
 
       const creationTime = performance.now() - startTime
-      createdSessions.push(session.sessionId)
+      createdSessions.push(_session.sessionId)
 
       testResults.sessionCreation.push({
         iteration: i,
-        sessionId: session.sessionId,
+        sessionId: _session.sessionId,
         creationTime,
         timestamp: Date.now()
       })
@@ -607,14 +613,14 @@ class PerformanceBenchmark {
       const sessionId = createdSessions[i]
       const startTime = performance.now()
 
-      const session = await sessionManager.getSession(sessionId, false)
+      const _session = await sessionManager.getSession(sessionId, false)
       const restoreTime = performance.now() - startTime
 
       testResults.sessionRestore.push({
         iteration: i,
         sessionId,
         restoreTime,
-        restored: !!session,
+        restored: !!_session,
         timestamp: Date.now()
       })
     }
@@ -624,12 +630,12 @@ class PerformanceBenchmark {
 
     for (let i = 0; i < 100; i++) {
       const sessionId = createdSessions[i]
-      const session = await sessionManager.getSession(sessionId, false)
+      const _session = await sessionManager.getSession(sessionId, false)
 
-      if (session) {
+      if (_session) {
         const startTime = performance.now()
 
-        await sessionManager._persistSession(session)
+        await sessionManager._persistSession(_session)
         const persistenceTime = performance.now() - startTime
 
         testResults.sessionPersistence.push({
@@ -694,7 +700,7 @@ class PerformanceBenchmark {
 
       try {
         // 1. 创建会话
-        const session = await sessionManager.createSession({
+        const _session = await sessionManager.createSession({
           userId: `integration_user_${i}`,
           accountId: `integration_account_${i % 5}`,
           apiKeyId: `integration_key_${i}`
@@ -702,15 +708,15 @@ class PerformanceBenchmark {
 
         // 2. 负载均衡选择账户
         const mockAccounts = this._generateMockAccounts(5)
-        const selectedAccount = await new IntelligentLoadBalancer().selectOptimalAccount(
+        const _selectedAccount = await new IntelligentLoadBalancer().selectOptimalAccount(
           mockAccounts
         )
 
         // 3. 获取连接
-        const agent = await connectionManager.getConnectionAgent({
+        const _agent = await connectionManager.getConnectionAgent({
           target: 'api.anthropic.com',
-          sessionId: session.sessionId,
-          accountId: selectedAccount.accountId
+          sessionId: _session.sessionId,
+          accountId: _selectedAccount.accountId
         })
 
         // 4. 错误处理包装
@@ -725,8 +731,8 @@ class PerformanceBenchmark {
 
         testResults.endToEndLatency.push({
           iteration: i,
-          sessionId: session.sessionId,
-          accountId: selectedAccount.accountId,
+          sessionId: _session.sessionId,
+          accountId: _selectedAccount.accountId,
           endToEndTime,
           timestamp: Date.now()
         })
@@ -746,7 +752,7 @@ class PerformanceBenchmark {
 
         try {
           // 简化的集成流程
-          const session = await sessionManager.createSession({
+          const _session = await sessionManager.createSession({
             userId: `throughput_user_${i}`,
             accountId: `throughput_account_${i % 3}`
           })
@@ -868,19 +874,19 @@ class PerformanceBenchmark {
 
       try {
         // 完整的优化流程
-        const session = await sessionManager.createSession({
+        const _session = await sessionManager.createSession({
           userId: `comparison_user_${i}`,
           accountId: `comparison_account_${i % 5}`
         })
 
         const mockAccounts = this._generateMockAccounts(5)
-        const selectedAccount = await new IntelligentLoadBalancer().selectOptimalAccount(
+        const _selectedAccount = await new IntelligentLoadBalancer().selectOptimalAccount(
           mockAccounts
         )
 
-        const agent = await connectionManager.getConnectionAgent({
+        const _agent = await connectionManager.getConnectionAgent({
           target: 'api.anthropic.com',
-          sessionId: session.sessionId
+          sessionId: _session.sessionId
         })
 
         const totalTime = performance.now() - startTime
@@ -1014,7 +1020,7 @@ class PerformanceBenchmark {
 
       try {
         // 模拟请求处理
-        const session = await sessionManager.createSession({
+        const _session = await sessionManager.createSession({
           userId: `load_user_${workerId}_${requests.length}`,
           accountId: `load_account_${workerId % 10}`
         })
@@ -1024,7 +1030,7 @@ class PerformanceBenchmark {
 
         await connectionManager.getConnectionAgent({
           target: 'api.anthropic.com',
-          sessionId: session.sessionId
+          sessionId: _session.sessionId
         })
 
         // 模拟API调用延迟
@@ -1422,9 +1428,9 @@ class PerformanceBenchmark {
       })
     }
 
-    const connectionManager = this.results.get('connectionManager')
+    const localConnectionManager = this.results.get('connectionManager')
     if (
-      connectionManager?.connectionReuse?.efficiency <
+      localConnectionManager?.connectionReuse?.efficiency <
       this.config.thresholds.connectionManager.reuseEfficiency
     ) {
       recommendations.push({
@@ -1588,8 +1594,8 @@ class PerformanceBenchmark {
       bottlenecks.push('Load Balancer: Account selection algorithm performance')
     }
 
-    const connectionManager = this.results.get('connectionManager')
-    if (connectionManager?.connectionCreation?.avgTime > 1000) {
+    const connMgr = this.results.get('connectionManager')
+    if (connMgr?.connectionCreation?.avgTime > 1000) {
       bottlenecks.push('Connection Manager: Connection establishment latency')
     }
 

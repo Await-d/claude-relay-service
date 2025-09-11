@@ -769,8 +769,8 @@ class CostLimitService {
       }
 
       // 获取API Key信息（包含费用限制配置）
-      const database = require('../models/database')
-      const keyResult = await database.getApiKey(apiKeyId)
+      const localDatabase = require('../models/database')
+      const keyResult = await localDatabase.getApiKey(apiKeyId)
 
       if (!keyResult || Object.keys(keyResult).length === 0) {
         logger.warn(`💰 API Key not found for cost limit check: ${apiKeyId}`)

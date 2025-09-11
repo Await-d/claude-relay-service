@@ -5411,7 +5411,7 @@ class RedisAdapter extends DatabaseAdapter {
    * @param {string} platform - 平台类型 ('claude', 'gemini', 'openai', 'bedrock', 'azure_openai', 'claude-console')
    * @returns {Promise<Object>} 账户费用统计数据
    */
-  async getAccountCostStats(accountId, period = 'all', platform = 'claude') {
+  async getAccountCostStats(accountId, _period = 'all', platform = 'claude') {
     try {
       // 参数验证
       if (!accountId || typeof accountId !== 'string') {

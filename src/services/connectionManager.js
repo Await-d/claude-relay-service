@@ -19,7 +19,7 @@
  */
 
 const https = require('https')
-const http = require('http')
+const _http = require('http')
 const { Agent } = require('https')
 const { Agent: HttpAgent } = require('http')
 const { SocksProxyAgent } = require('socks-proxy-agent')
@@ -276,7 +276,7 @@ class ConnectionManager {
         timeout: this.config.connectionTimeout
       }
 
-      const req = https.request(options, (res) => {
+      const req = https.request(options, (_res) => {
         clearTimeout(timeout)
         resolve()
       })
@@ -526,7 +526,7 @@ class ConnectionManager {
       const freeSockets = agent.freeSockets || {}
 
       const totalSockets = Object.values(sockets).reduce((sum, arr) => sum + arr.length, 0)
-      const totalFreeSockets = Object.values(freeSockets).reduce((sum, arr) => sum + arr.length, 0)
+      const _totalFreeSockets = Object.values(freeSockets).reduce((sum, arr) => sum + arr.length, 0)
 
       // 如果socket数量超过限制，认为不健康
       if (totalSockets > this.config.maxSockets * 1.2) {
@@ -600,7 +600,7 @@ class ConnectionManager {
     const now = Date.now()
     const expiredKeys = []
 
-    for (const [key, agent] of this.connectionCache.entries()) {
+    for (const [key, _agent] of this.connectionCache.entries()) {
       const stats = this.connectionStats.get(key)
       if (stats && now - stats.lastActivity > 600000) {
         // 10分钟无活动
