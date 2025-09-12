@@ -554,46 +554,139 @@
                 </span>
               </td>
               <td class="table-cell">
-                <span
-                  class="inline-flex rounded-full px-2 py-1 text-xs font-semibold"
-                  :class="getStatusClass(log.statusCode)"
-                >
-                  {{ log.statusCode || 'N/A' }}
-                </span>
+                <div class="flex items-center gap-2">
+                  <span
+                    class="inline-flex rounded-full px-2 py-1 text-xs font-semibold"
+                    :class="getStatusClass(log.status || log.statusCode)"
+                  >
+                    {{ log.status || log.statusCode || 'N/A' }}
+                  </span>
+                  <!-- 状态分类指示器 -->
+                  <span 
+                    v-if="log.statusCategory"
+                    class="inline-flex items-center gap-1 text-xs"
+                    :class="{
+                      'text-green-600': log.statusCategory === 'success',
+                      'text-yellow-600': log.statusCategory === 'redirect',
+                      'text-red-600': log.statusCategory === 'client_error' || log.statusCategory === 'server_error',
+                      'text-gray-600': log.statusCategory === 'unknown'
+                    }"
+                    :title="`状态分类: ${log.statusCategory}`"
+                  >
+                    <i class="fas fa-tag"></i>
+                  </span>
+                </div>
               </td>
               <td class="table-cell">
                 <div class="flex items-center space-x-1">
                   <span class="text-sm text-gray-900 dark:text-gray-100">
-                    {{ log.responseTime ? `${log.responseTime}ms` : 'N/A' }}
+                    {{ (log.duration || log.responseTime) ? `${log.duration || log.responseTime}ms` : 'N/A' }}
                   </span>
+                  <!-- 性能等级指示器 -->
                   <i
-                    v-if="parseInt(log.responseTime) > 5000"
-                    class="fas fa-exclamation-triangle text-xs text-yellow-500"
-                    title="响应时间较慢"
+                    v-if="log.performanceLevel === 'slow' || log.performanceLevel === 'very_slow'"
+                    class="fas fa-exclamation-triangle text-xs"
+                    :class="{
+                      'text-yellow-500': log.performanceLevel === 'slow',
+                      'text-red-500': log.performanceLevel === 'very_slow'
+                    }"
+                    :title="`性能等级: ${log.performanceLevel}`"
+                  ></i>
+                  <i
+                    v-else-if="log.performanceLevel === 'fast'"
+                    class="fas fa-rocket text-xs text-green-500"
+                    title="高性能请求"
                   ></i>
                 </div>
               </td>
               <td class="table-cell">
-                <div class="text-sm">
+                <div class="text-sm space-y-1">
+                  <!-- 主要Token统计 -->
                   <div class="flex items-center space-x-1 text-blue-600 dark:text-blue-400">
                     <i class="fas fa-coins text-xs"></i>
                     <span>{{ getTokenSummary(log) }}</span>
+                    <!-- Token效率指示器 -->
+                    <span 
+                      v-if="log.tokenSummary?.efficiency && log.tokenSummary.efficiency > 0"
+                      class="text-xs text-gray-500"
+                      :title="`Token使用效率: ${log.tokenSummary.efficiency}%`"
+                    >
+                      ({{ log.tokenSummary.efficiency }}%)
+                    </span>
                   </div>
+                  
+                  <!-- 缓存Token信息 -->
                   <div
                     v-if="getCacheTokens(log) > 0"
-                    class="mt-1 text-xs text-green-600 dark:text-green-400"
+                    class="flex items-center space-x-1 text-green-600 dark:text-green-400"
                   >
                     <i class="fas fa-memory text-xs"></i>
-                    {{ getCacheTokens(log) }} 缓存
+                    <span class="text-xs">缓存: {{ getCacheTokens(log) }}</span>
+                    <!-- 缓存详情 -->
+                    <span 
+                      v-if="log.tokenSummary?.cacheCreateTokens > 0 || log.tokenSummary?.cacheReadTokens > 0"
+                      class="text-xs text-gray-500"
+                      :title="`缓存创建: ${log.tokenSummary?.cacheCreateTokens || 0}, 缓存读取: ${log.tokenSummary?.cacheReadTokens || 0}`"
+                    >
+                      (C:{{ log.tokenSummary?.cacheCreateTokens || 0 }} R:{{ log.tokenSummary?.cacheReadTokens || 0 }})
+                    </span>
+                  </div>
+                  
+                  <!-- 数据完整性指示器 -->
+                  <div 
+                    v-if="log.dataCompleteness && log.dataCompleteness.completenessScore"
+                    class="flex items-center space-x-1"
+                  >
+                    <i 
+                      class="fas text-xs"
+                      :class="{
+                        'fa-check-circle text-green-500': parseInt(log.dataCompleteness.completenessScore) >= 80,
+                        'fa-exclamation-triangle text-yellow-500': parseInt(log.dataCompleteness.completenessScore) >= 50,
+                        'fa-times-circle text-red-500': parseInt(log.dataCompleteness.completenessScore) < 50
+                      }"
+                      :title="`数据完整性: ${log.dataCompleteness.completenessScore}%`"
+                    ></i>
+                    <span class="text-xs text-gray-500">{{ log.dataCompleteness.completenessScore }}%</span>
                   </div>
                 </div>
               </td>
               <td class="table-cell">
-                <div class="text-sm font-medium">
-                  <span v-if="getLogCost(log) > 0" class="text-green-600 dark:text-green-400">
-                    ${{ formatCost(getLogCost(log)) }}
-                  </span>
-                  <span v-else class="text-gray-400">-</span>
+                <div class="text-sm space-y-1">
+                  <!-- 主要成本显示 -->
+                  <div class="font-medium">
+                    <span v-if="getLogCost(log) > 0" class="text-green-600 dark:text-green-400">
+                      ${{ formatCost(getLogCost(log)) }}
+                    </span>
+                    <span v-else class="text-gray-400">-</span>
+                  </div>
+                  
+                  <!-- 费用详情 -->
+                  <div 
+                    v-if="log.costDetails && (log.costDetails.costPerToken || log.costDetails.currency)"
+                    class="text-xs text-gray-500"
+                    :title="`单价: $${log.costDetails.costPerToken || 'N/A'}/token, 货币: ${log.costDetails.currency || 'USD'}`"
+                  >
+                    <i class="fas fa-info-circle"></i>
+                    {{ log.costDetails.currency || 'USD' }}
+                    <span v-if="log.costDetails.costPerToken">
+                      @${{ (log.costDetails.costPerToken * 1000).toFixed(6) }}/1k
+                    </span>
+                  </div>
+                  
+                  <!-- 费用效率指示器 -->
+                  <div 
+                    v-if="getLogCost(log) > 0 && log.tokenSummary?.totalTokens"
+                    class="text-xs"
+                    :class="{
+                      'text-green-600': (getLogCost(log) / log.tokenSummary.totalTokens * 1000) < 0.01,
+                      'text-yellow-600': (getLogCost(log) / log.tokenSummary.totalTokens * 1000) >= 0.01 && (getLogCost(log) / log.tokenSummary.totalTokens * 1000) < 0.05,
+                      'text-red-600': (getLogCost(log) / log.tokenSummary.totalTokens * 1000) >= 0.05
+                    }"
+                    :title="`成本效率: $${(getLogCost(log) / log.tokenSummary.totalTokens * 1000).toFixed(4)}/1k tokens`"
+                  >
+                    <i class="fas fa-chart-line"></i>
+                    ${{ (getLogCost(log) / log.tokenSummary.totalTokens * 1000).toFixed(4) }}/1k
+                  </div>
                 </div>
               </td>
               <td class="table-cell">

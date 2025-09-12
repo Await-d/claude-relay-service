@@ -216,7 +216,8 @@ import dayjs from 'dayjs'
 import axios from 'axios'
 
 // Props & Emits
-const _props = defineProps({
+// eslint-disable-next-line no-unused-vars
+const props = defineProps({
   apiKeys: {
     type: Array,
     default: () => []
@@ -268,7 +269,8 @@ const quickRanges = [
 ]
 
 // 计算属性
-const _canExport = computed(() => {
+// eslint-disable-next-line no-unused-vars
+const canExport = computed(() => {
   return (
     exportConfig.value.startDate &&
     exportConfig.value.endDate &&

@@ -213,7 +213,7 @@ class ExcelExporter {
    * @param {Array} data 格式化后的数据
    * @param {Object} config 配置
    */
-  async exportToCSV(data, _config) {
+  async exportToCSV(data) {
     try {
       if (data.length === 0) {
         throw new Error('没有可导出的数据')

@@ -6186,6 +6186,38 @@ class RedisAdapter extends DatabaseAdapter {
     }
   }
 
+  /**
+   * 获取所有分组
+   * @returns {Promise<Array>} 分组列表
+   */
+  async getAllGroups() {
+    const keys = await this.client.keys('group:*')
+    const groups = []
+    
+    for (const key of keys) {
+      // 跳过非分组key (如group_name:*)
+      if (!key.startsWith('group:') || key.includes('group_name:')) {
+        continue
+      }
+
+      const groupData = await this.client.hgetall(key)
+      if (groupData && Object.keys(groupData).length > 0) {
+        groups.push({
+          id: key.replace('group:', ''),
+          ...groupData,
+          permissions: JSON.parse(groupData.permissions || '[]'),
+          assignedAccounts: JSON.parse(groupData.assignedAccounts || '{}'),
+          scheduling: JSON.parse(groupData.scheduling || '{}'),
+          isActive: groupData.isActive === 'true',
+          createdAt: groupData.createdAt,
+          updatedAt: groupData.updatedAt
+        })
+      }
+    }
+    
+    return groups
+  }
+
   // ==================== 智能负载均衡支持方法 ====================
 
   /**

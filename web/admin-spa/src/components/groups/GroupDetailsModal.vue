@@ -552,7 +552,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+// import { computed } from 'vue' // 未使用，暂时注释
 
 const props = defineProps({
   visible: {
@@ -565,7 +565,8 @@ const props = defineProps({
   }
 })
 
-const _emit = defineEmits(['close', 'edit', 'manage-members', 'assign-accounts'])
+// eslint-disable-next-line no-unused-vars
+const emit = defineEmits(['close', 'edit', 'manage-members', 'assign-accounts'])
 
 // Methods
 const formatDate = (dateString) => {

@@ -127,7 +127,8 @@
 import { ref, computed, watch, onMounted } from 'vue'
 
 // Props
-const _props = defineProps({
+// eslint-disable-next-line no-unused-vars
+const props = defineProps({
   loading: {
     type: Boolean,
     default: false

@@ -36,16 +36,19 @@ export const useAuthStore = defineStore('auth', () => {
     loginError.value = ''
 
     try {
-      // 使用新的认证API端点
-      const result = await apiClient.post('/auth/login', credentials)
+      // 使用管理员认证API端点
+      const result = await apiClient.post('/web/auth/login', credentials)
 
-      if (result.success && result.data) {
-        const {
-          sessionToken: token,
-          sessionId: id,
-          expiresAt: expiry,
-          user: userData
-        } = result.data
+      if (result.success && result.token) {
+        // 传统web登录响应格式适配
+        const token = result.token
+        const id = result.token // sessionId就是token
+        const expiry = result.expiresIn ? new Date(Date.now() + result.expiresIn).toISOString() : null
+        const userData = {
+          username: result.username,
+          id: result.username,
+          role: 'admin'
+        }
 
         // 更新状态
         sessionToken.value = token

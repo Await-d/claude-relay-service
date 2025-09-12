@@ -296,7 +296,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
+// onMounted 未使用，暂时移除
 import { apiClient } from '@/config/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 

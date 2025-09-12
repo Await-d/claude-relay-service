@@ -433,7 +433,7 @@ const formatDate = (dateString) => {
 const loadGroups = async () => {
   loading.value = true
   try {
-    const result = await apiClient.get('/admin/user-groups')
+    const result = await apiClient.get('/admin/groups')
     if (result.success) {
       groups.value = result.data || []
     } else {
@@ -492,7 +492,7 @@ const saveGroup = async () => {
     let result
     if (showEditModal.value) {
       // 编辑用户组
-      result = await apiClient.put(`/admin/user-groups/${editingGroup.value.id}`, {
+      result = await apiClient.put(`/admin/groups/${editingGroup.value.id}`, {
         name: groupForm.name,
         description: groupForm.description || null,
         status: groupForm.status,
@@ -500,7 +500,7 @@ const saveGroup = async () => {
       })
     } else {
       // 创建用户组
-      result = await apiClient.post('/admin/user-groups', {
+      result = await apiClient.post('/admin/groups', {
         name: groupForm.name,
         description: groupForm.description || null,
         status: groupForm.status,
@@ -530,7 +530,7 @@ const deleteGroup = async (group) => {
   }
 
   try {
-    const result = await apiClient.delete(`/admin/user-groups/${group.id}`)
+    const result = await apiClient.delete(`/admin/groups/${group.id}`)
 
     if (result.success) {
       showToast('用户组删除成功', 'success')
@@ -556,7 +556,7 @@ const manageMembers = async (group) => {
 const loadGroupMembers = async (groupId) => {
   loadingMembers.value = true
   try {
-    const result = await apiClient.get(`/admin/user-groups/${groupId}/members`)
+    const result = await apiClient.get(`/admin/groups/${groupId}/members`)
     if (result.success) {
       groupMembers.value = result.data || []
     }
@@ -574,7 +574,7 @@ const addMember = async () => {
 
   addingMember.value = true
   try {
-    const result = await apiClient.post(`/admin/user-groups/${selectedGroup.value.id}/members`, {
+    const result = await apiClient.post(`/admin/groups/${selectedGroup.value.id}/members`, {
       userId: selectedUserId.value
     })
 
@@ -601,7 +601,7 @@ const removeMember = async (userId) => {
 
   try {
     const result = await apiClient.delete(
-      `/admin/user-groups/${selectedGroup.value.id}/members/${userId}`
+      `/admin/groups/${selectedGroup.value.id}/members/${userId}`
     )
 
     if (result.success) {
