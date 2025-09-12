@@ -748,7 +748,8 @@ class ClaudeAccountService {
 
       // 使用CostCalculator计算费用
       const costResult = CostCalculator.calculateCost(usage, model)
-      const totalCost = costResult.costs.total
+      // 处理不同返回结构的兼容性
+      const totalCost = costResult.costs ? costResult.costs.total : costResult.totalCost || 0
 
       if (totalCost <= 0) {
         logger.debug(

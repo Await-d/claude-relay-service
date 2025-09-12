@@ -566,7 +566,8 @@ class ApiKeyService {
 
           // 记录账户级别的费用统计
           if (costInfo.totalCost > 0) {
-            await database.incrementAccountCost(accountId, costInfo.totalCost)
+            const safeModel = (model && model.trim()) || 'unknown'
+            await database.incrementAccountCost(accountId, costInfo.totalCost, safeModel)
             logger.database(
               `💰 Recorded account cost: ${accountId} - $${costInfo.totalCost.toFixed(6)} (API Key: ${keyId}, Model: ${model})`
             )

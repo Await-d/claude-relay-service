@@ -18,7 +18,7 @@ const router = express.Router()
 
 // 💰 统一账户费用记录函数
 const recordAccountCostAsync = async (accountId, usageData, model) => {
-  if (!accountId || !usageData || !model) {
+  if (!accountId || !usageData || !model || (typeof model === 'string' && model.trim() === '')) {
     return
   }
 
@@ -364,7 +364,8 @@ async function handleMessagesRequest(req, res) {
               }
 
               const cacheReadTokens = usageData.cache_read_input_tokens || 0
-              const model = usageData.model || 'unknown'
+              const model = (usageData.model && usageData.model.trim()) || 
+                           (req.body.model && req.body.model.trim()) || 'unknown'
 
               // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
               const { accountId: usageAccountId } = usageData
@@ -473,7 +474,8 @@ async function handleMessagesRequest(req, res) {
               }
 
               const cacheReadTokens = usageData.cache_read_input_tokens || 0
-              const model = usageData.model || 'unknown'
+              const model = (usageData.model && usageData.model.trim()) || 
+                           (req.body.model && req.body.model.trim()) || 'unknown'
 
               // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
               const usageAccountId = usageData.accountId
@@ -830,7 +832,10 @@ async function handleMessagesRequest(req, res) {
           const outputTokens = jsonData.usage.output_tokens || 0
           const cacheCreateTokens = jsonData.usage.cache_creation_input_tokens || 0
           const cacheReadTokens = jsonData.usage.cache_read_input_tokens || 0
-          const model = jsonData.model || req.body.model || 'unknown'
+          const model =
+            (jsonData.model && jsonData.model.trim()) ||
+            (req.body.model && req.body.model.trim()) ||
+            'unknown'
 
           // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
           const { accountId: responseAccountId } = response
