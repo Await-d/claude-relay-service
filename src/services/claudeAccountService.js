@@ -762,7 +762,7 @@ class ClaudeAccountService {
       await database.incrementAccountCost(accountId, totalCost, model)
 
       logger.debug(
-        `💰 Recorded cost for account ${accountId}: $${totalCost.toFixed(6)} (${model}, ${costResult.usage.totalTokens} tokens)`
+        `💰 Recorded cost for account ${accountId}: $${totalCost.toFixed(6)} (${model}, ${costResult.usage?.totalTokens || 0} tokens)`
       )
 
       return {

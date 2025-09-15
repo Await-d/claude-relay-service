@@ -557,7 +557,7 @@ class UnifiedClaudeScheduler {
       if (
         account.isActive === true &&
         account.status === 'active' &&
-        account.accountType === 'shared' &&
+        (account.accountType === 'shared' || account.accountType === 'group') &&
         this._isSchedulable(account.schedulable)
       ) {
         // 检查是否可调度
