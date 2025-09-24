@@ -1526,6 +1526,32 @@ class ClaudeRelayService {
     })
   }
 
+  // 🛠️ 统一的错误处理方法
+  async _handleServerError(accountId, statusCode, _sessionHash = null, context = '') {
+    try {
+      await claudeAccountService.recordServerError(accountId, statusCode)
+      const errorCount = await claudeAccountService.getServerErrorCount(accountId)
+
+      // 根据错误类型设置不同的阈值和日志前缀
+      const isTimeout = statusCode === 504
+      const threshold = 3 // 统一使用3次阈值
+      const prefix = context ? `${context} ` : ''
+
+      logger.warn(
+        `⏱️ ${prefix}${isTimeout ? 'Timeout' : 'Server'} error for account ${accountId}, error count: ${errorCount}/${threshold}`
+      )
+
+      if (errorCount > threshold) {
+        const errorTypeLabel = isTimeout ? 'timeout' : '5xx'
+        // ⚠️ 只记录5xx/504告警，不再自动停止调度，避免上游抖动导致误停
+        logger.error(
+          `❌ ${prefix}Account ${accountId} exceeded ${errorTypeLabel} error threshold (${errorCount} errors), please investigate upstream stability`
+        )
+      }
+    } catch (handlingError) {
+      logger.error(`❌ Failed to handle ${context} server error:`, handlingError)
+    }
+  }
   // 🔄 重试逻辑
   async _retryRequest(requestFunc, maxRetries = 3) {
     let lastError
