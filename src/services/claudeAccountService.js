@@ -1444,11 +1444,22 @@ class ClaudeAccountService {
         throw new Error('Account not found')
       }
 
+      const accountKey = `claude:account:${accountId}`
+
       // 清除限流状态
       delete accountData.rateLimitedAt
       delete accountData.rateLimitStatus
       delete accountData.rateLimitEndAt // 清除限流结束时间
       await database.setClaudeAccount(accountId, accountData)
+
+      // 显式删除Redis中的限流字段，避免旧标记阻止账号恢复调度
+      await redis.client.hdel(
+        accountKey,
+        'rateLimitedAt',
+        'rateLimitStatus',
+        'rateLimitEndAt',
+        'rateLimitAutoStopped'
+      )
 
       logger.success(`✅ Rate limit removed for account: ${accountData.name} (${accountId})`)
       return { success: true }
