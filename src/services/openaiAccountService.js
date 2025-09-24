@@ -535,13 +535,17 @@ async function getAllAccounts() {
         // 添加限流状态信息（统一格式）
         rateLimitStatus: rateLimitInfo
           ? {
+              status: rateLimitInfo.status,
               isRateLimited: rateLimitInfo.isRateLimited,
               rateLimitedAt: rateLimitInfo.rateLimitedAt,
+              rateLimitResetAt: rateLimitInfo.rateLimitResetAt,
               minutesRemaining: rateLimitInfo.minutesRemaining
             }
           : {
+              status: 'normal',
               isRateLimited: false,
               rateLimitedAt: null,
+              rateLimitResetAt: null,
               minutesRemaining: 0
             }
       })
@@ -690,23 +694,22 @@ async function getAccountRateLimitInfo(accountId) {
     return null
   }
 
-  if (account.rateLimitStatus === 'limited' && account.rateLimitedAt) {
-    const limitedAt = new Date(account.rateLimitedAt).getTime()
+  const status = account.rateLimitStatus || 'normal'
+  const rateLimitedAt = account.rateLimitedAt || null
+  const rateLimitResetAt = account.rateLimitResetAt || null
+
+  if (status === 'limited') {
     const now = Date.now()
-    const limitDuration = 60 * 60 * 1000 // 1小时
-    const remainingTime = Math.max(0, limitedAt + limitDuration - now)
+    let remainingTime = 0
 
-    return {
-      isRateLimited: remainingTime > 0,
-      rateLimitedAt: account.rateLimitedAt,
-      minutesRemaining: Math.ceil(remainingTime / (60 * 1000))
+    if (rateLimitResetAt) {
+      const resetAt = new Date(rateLimitResetAt).getTime()
+      remainingTime = Math.max(0, resetAt - now)
+    } else if (rateLimitedAt) {
+      const limitedAt = new Date(rateLimitedAt).getTime()
+      const limitDuration = 60 * 60 * 1000 // 默认1小时
+      remainingTime = Math.max(0, limitedAt + limitDuration - now)
     }
-  }
-
-  return {
-    isRateLimited: false,
-    rateLimitedAt: null,
-    minutesRemaining: 0
   }
 }
 
