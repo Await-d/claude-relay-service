@@ -55,6 +55,10 @@ class ClaudeCodeValidator {
       return false
     }
 
+    if (model.startsWith('claude-3-5-haiku')) {
+      return true
+    }
+
     const systemEntries = Array.isArray(body.system) ? body.system : []
     const system0Text = systemEntries?.[0]?.text
     const system1Text = systemEntries?.[1]?.text
