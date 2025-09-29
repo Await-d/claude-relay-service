@@ -1,11 +1,6 @@
 const logger = require('../../utils/logger')
 const { CLIENT_DEFINITIONS } = require('../clientDefinitions')
-import {
-  haikuSystemPrompt,
-  claudeOtherSystemPrompt1,
-  claudeOtherSystemPrompt2
-} from '../../utils/contents'
-import { simple as similaritySimple } from '../../utils/text-similarity'
+const { bestSimilarityByTemplates, SYSTEM_PROMPT_THRESHOLD } = require('../../utils/contents')
 
 /**
  * Claude Code CLI 验证器
@@ -55,41 +50,18 @@ class ClaudeCodeValidator {
       return false
     }
 
-    if (model.startsWith('claude-3-5-haiku')) {
-      return true
-    }
-
     const systemEntries = Array.isArray(body.system) ? body.system : []
-    const system0Text = systemEntries?.[0]?.text
-    const system1Text = systemEntries?.[1]?.text
-
-    if (model.startsWith('claude-3-5-haiku')) {
-      const messages = Array.isArray(body.messages) ? body.messages : []
-      const isSingleUserMessage =
-        messages.length === 1 && messages.every((item) => item?.role === 'user')
-
-      if (!isSingleUserMessage) {
+    for (const entry of systemEntries) {
+      const rawText = typeof entry?.text === 'string' ? entry.text : ''
+      const { bestScore } = bestSimilarityByTemplates(rawText)
+      if (bestScore < SYSTEM_PROMPT_THRESHOLD) {
+        logger.error(
+          `Claude system prompt similarity below threshold: score=${bestScore.toFixed(4)}, threshold=${SYSTEM_PROMPT_THRESHOLD}, prompt=${rawText}`
+        )
         return false
       }
-
-      const similarity = similaritySimple(system0Text, haikuSystemPrompt, 0.9)
-      if (!similarity.passed) {
-        return false
-      }
-      return
     }
-
-    const sys0 = similaritySimple(system0Text, claudeOtherSystemPrompt1, 0.9)
-    if (!sys0.passed) {
-      return false
-    }
-
-    const sys1 = similaritySimple(system1Text, claudeOtherSystemPrompt2, 0.5)
-    if (!sys1.passed) {
-      return false
-    }
-
-    return false
+    return true
   }
 
   /**
@@ -103,8 +75,11 @@ class ClaudeCodeValidator {
       const path = req.path || ''
 
       // 1. 先检查是否是 Claude Code 的 User-Agent
-      // 格式: claude-cli/1.0.86 (external, cli)
-      const claudeCodePattern = /^claude-cli\/[\d\.]+([-\w]*)?\s+\(external,\s*cli\)$/i
+      // 格式: claude-cli/1.0.86 (external, cli) sdk-cli sdk-py
+
+      const claudeCodePattern =
+        /^claude-cli\/[\d.]+(?:[-\w]*)?\s+\(external,\s*(?:cli|sdk-[a-z]+)\)$/i
+
       if (!claudeCodePattern.test(userAgent)) {
         // 不是 Claude Code 的请求，此验证器不处理
         return false
