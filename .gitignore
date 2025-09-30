@@ -12,6 +12,7 @@ pnpm-debug.log*
 
 # Claude specific directories
 .claude/
+.serena/
 
 # MCP configuration (local only)
 .mcp.json
