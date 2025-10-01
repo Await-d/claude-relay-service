@@ -5,10 +5,83 @@
         class="mb-3 flex items-center text-xl font-bold text-gray-900 dark:text-gray-100 sm:mb-4 sm:text-2xl"
       >
         <i class="fas fa-graduation-cap mr-2 text-blue-600 sm:mr-3" />
-        Claude Code 使用教程
+        Claude Relay 客户端接入教程
       </h3>
       <p class="text-sm text-gray-600 dark:text-gray-400 sm:text-lg">
-        跟着这个教程，你可以轻松在自己的电脑上安装并使用 Claude Code。
+        跟着本指南，你可以在本地配置 Claude Code、Codex CLI 或 Gemini CLI，通过 Claude Relay Service 快速接入多平台模型服务。
+      </p>
+    </div>
+
+    <!-- 通用准备事项 -->
+    <div class="mb-4 flex flex-col gap-4 sm:mb-8 lg:flex-row">
+      <div
+        class="flex-1 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 shadow-sm dark:border-gray-700 dark:from-gray-800 dark:to-gray-900 sm:p-6"
+      >
+        <h4 class="mb-3 flex items-center text-base font-semibold text-blue-900 dark:text-blue-200 sm:text-lg">
+          <i class="fas fa-list-check mr-2 text-blue-500" />
+          开始之前请确认
+        </h4>
+        <ul class="space-y-2 text-sm text-blue-900 dark:text-blue-100 sm:text-base">
+          <li>• Claude Relay Service 已在本地或服务器上启动，并可访问管理后台。</li>
+          <li>• 管理后台中已创建至少一个有效的 API Key（建议使用 <code class="rounded bg-white/60 px-1 dark:bg-gray-700">cr_</code> 前缀密钥）。</li>
+          <li>• 已记录服务对外地址（如 <code class="rounded bg-white/60 px-1 dark:bg-gray-700">http://192.168.1.2:3000</code>）。</li>
+          <li>• 目标机器已安装 Node.js 18 或更高版本。</li>
+        </ul>
+      </div>
+      <div
+        class="flex-1 rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-teal-50 p-4 shadow-sm dark:border-gray-700 dark:from-gray-800 dark:to-gray-900 sm:p-6"
+      >
+        <h4 class="mb-3 flex items-center text-base font-semibold text-emerald-900 dark:text-emerald-200 sm:text-lg">
+          <i class="fas fa-network-wired mr-2 text-emerald-500" />
+          通用连接参数
+        </h4>
+        <div class="space-y-3 text-sm text-emerald-900 dark:text-emerald-100 sm:text-base">
+          <p>
+            Relay 服务默认暴露三个协议兼容入口，后续教程会引用这些地址：
+          </p>
+          <ul class="space-y-1">
+            <li>
+              • Claude Code / Anthropic SDK：
+              <code class="rounded bg-white/70 px-2 py-1 text-sm dark:bg-gray-800">{{ currentBaseUrl }}</code>
+            </li>
+            <li>
+              • Codex / OpenAI 兼容客户端：
+              <code class="rounded bg-white/70 px-2 py-1 text-sm dark:bg-gray-800">{{ openaiBaseUrl }}</code>
+            </li>
+            <li>
+              • Gemini CLI / Google GenAI：
+              <code class="rounded bg-white/70 px-2 py-1 text-sm dark:bg-gray-800">{{ geminiBaseUrl }}</code>
+            </li>
+          </ul>
+          <p class="text-xs text-emerald-700 dark:text-emerald-300 sm:text-sm">
+            使用自定义域名或反向代理时，只需替换上述地址前缀即可。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 快速验证 -->
+    <div class="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:mb-8 sm:p-6">
+      <h4 class="mb-3 flex items-center text-base font-semibold text-gray-800 dark:text-gray-200 sm:text-lg">
+        <i class="fas fa-terminal mr-2 text-gray-500" />
+        首次接入快速校验
+      </h4>
+      <p class="mb-3 text-sm text-gray-600 dark:text-gray-300 sm:text-base">
+        在继续之前，可以先用以下命令确认服务和 API Key 均可用（将 <code class="rounded bg-gray-100 px-1 dark:bg-gray-700">YOUR_API_KEY</code> 替换为实际密钥）：
+      </p>
+      <div class="overflow-x-auto rounded-xl bg-gray-900 p-4 font-mono text-xs text-green-400 sm:text-sm">
+        <div class="mb-3 text-gray-300"># 1. 健康检查</div>
+        <div class="whitespace-nowrap text-gray-300">curl -s {{ currentBaseUrl }}/../health | jq</div>
+        <div class="mt-4 mb-3 text-gray-300"># 2. 验证 Claude Relay API Key</div>
+        <div class="whitespace-nowrap text-gray-300">
+          curl -s {{ currentBaseUrl }}/v1/messages \
+          -H "Authorization: Bearer YOUR_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{"model":"claude-3-opus-20240229","messages":[{"role":"user","content":"ping"}]}' | jq
+        </div>
+      </div>
+      <p class="mt-3 text-xs text-gray-600 dark:text-gray-400 sm:text-sm">
+        若返回错误，请在管理后台确认密钥授权的模型范围或检查代理、防火墙配置。
       </p>
     </div>
 
