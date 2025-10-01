@@ -117,6 +117,8 @@ router.post('/messages', authenticateApiKey, async (req, res) => {
     })
 
     // 发送请求到 Gemini
+    const integrationType = account.integrationType || 'oauth'
+
     const geminiResponse = await sendGeminiRequest({
       messages,
       model,
@@ -128,7 +130,11 @@ router.post('/messages', authenticateApiKey, async (req, res) => {
       apiKeyId: apiKeyData.id,
       signal: abortController.signal,
       projectId: account.projectId,
-      accountId: account.id
+      accountId: account.id,
+      integrationType,
+      baseUrl: account.baseUrl,
+      apiKey: account.apiKey,
+      userAgent: account.userAgent
     })
 
     if (stream) {
@@ -227,7 +233,16 @@ router.get('/models', authenticateApiKey, async (req, res) => {
     }
 
     // 获取模型列表
-    const models = await getAvailableModels(account.accessToken, account.proxy)
+    const integrationType = account.integrationType || 'oauth'
+    const models = await getAvailableModels({
+      integrationType,
+      accessToken: account.accessToken,
+      proxy: account.proxy,
+      projectId: account.projectId,
+      baseUrl: account.baseUrl,
+      apiKey: account.apiKey,
+      userAgent: account.userAgent
+    })
 
     res.json({
       object: 'list',
@@ -319,7 +334,19 @@ async function handleLoadCodeAssist(req, res) {
       requestedModel
     )
     const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      throw new Error('Gemini account not found')
+    }
     const { accessToken, refreshToken, projectId } = account
+    const integrationType = account.integrationType || 'oauth'
+    if (integrationType === 'third_party') {
+      return res.status(400).json({
+        error: {
+          message: 'Third-party Gemini accounts do not support Code Assist endpoints',
+          type: 'unsupported_operation'
+        }
+      })
+    }
 
     const { metadata, cloudaicompanionProject } = req.body
 
@@ -376,7 +403,19 @@ async function handleOnboardUser(req, res) {
       requestedModel
     )
     const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      throw new Error('Gemini account not found')
+    }
     const { accessToken, refreshToken, projectId } = account
+    const integrationType = account.integrationType || 'oauth'
+    if (integrationType === 'third_party') {
+      return res.status(400).json({
+        error: {
+          message: 'Third-party Gemini accounts do not support onboarding endpoints',
+          type: 'unsupported_operation'
+        }
+      })
+    }
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
     logger.info(`OnboardUser request (${version})`, {
@@ -460,7 +499,22 @@ async function handleCountTokens(req, res) {
       sessionHash,
       model
     )
-    const { accessToken, refreshToken } = await geminiAccountService.getAccount(accountId)
+    const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      throw new Error('Gemini account not found')
+    }
+
+    const integrationType = account.integrationType || 'oauth'
+    if (integrationType === 'third_party') {
+      return res.status(400).json({
+        error: {
+          message: 'Third-party Gemini accounts do not support countTokens endpoint',
+          type: 'unsupported_operation'
+        }
+      })
+    }
+
+    const { accessToken, refreshToken } = account
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
     logger.info(`CountTokens request (${version})`, {
@@ -534,6 +588,18 @@ async function handleGenerateContent(req, res) {
       model
     )
     const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      throw new Error('Gemini account not found')
+    }
+    const integrationType = account.integrationType || 'oauth'
+    if (integrationType === 'third_party') {
+      return res.status(400).json({
+        error: {
+          message: 'Third-party Gemini accounts do not support generateContent endpoint',
+          type: 'unsupported_operation'
+        }
+      })
+    }
     const { accessToken, refreshToken } = account
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
@@ -659,6 +725,18 @@ async function handleStreamGenerateContent(req, res) {
       model
     )
     const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      throw new Error('Gemini account not found')
+    }
+    const integrationType = account.integrationType || 'oauth'
+    if (integrationType === 'third_party') {
+      return res.status(400).json({
+        error: {
+          message: 'Third-party Gemini accounts do not support streaming generateContent',
+          type: 'unsupported_operation'
+        }
+      })
+    }
     const { accessToken, refreshToken } = account
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'

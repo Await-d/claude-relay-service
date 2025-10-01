@@ -144,7 +144,13 @@ const config = {
     apiVersion: process.env.CLAUDE_API_VERSION || '2023-06-01',
     betaHeader:
       process.env.CLAUDE_BETA_HEADER ||
-      'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14'
+      'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
+    unifiedUserAgent: {
+      enabled: process.env.CLAUDE_USE_UNIFIED_UA === 'true',
+      cacheTTLSeconds: parseInt(process.env.CLAUDE_UA_CACHE_TTL) || 90000,
+      cacheKey: process.env.CLAUDE_UA_CACHE_KEY || 'claude_code_user_agent:daily',
+      defaultValue: process.env.CLAUDE_UA_DEFAULT || 'claude-cli/1.0.119 (external, cli)'
+    }
   },
 
   // ☁️ Bedrock API配置

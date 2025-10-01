@@ -6,6 +6,8 @@ const { authenticateApiKey } = require('../middleware/auth')
 const claudeAccountService = require('../services/claudeAccountService')
 const unifiedOpenAIScheduler = require('../services/unifiedOpenAIScheduler')
 const openaiAccountService = require('../services/openaiAccountService')
+const openaiResponsesAccountService = require('../services/openaiResponsesAccountService')
+const openaiResponsesRelayService = require('../services/openaiResponsesRelayService')
 const apiKeyService = require('../services/apiKeyService')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
@@ -34,19 +36,26 @@ async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel =
       throw new Error('No available OpenAI account found')
     }
 
-    // 获取账户详情
-    const account = await openaiAccountService.getAccount(result.accountId)
-    if (!account || !account.accessToken) {
-      throw new Error(`OpenAI account ${result.accountId} has no valid accessToken`)
+    let accessToken = null
+    let account = null
+
+    if (result.accountType === 'openai') {
+      account = await openaiAccountService.getAccount(result.accountId)
+      if (!account || !account.accessToken) {
+        throw new Error(`OpenAI account ${result.accountId} has no valid accessToken`)
+      }
+
+      accessToken = claudeAccountService._decryptSensitiveData(account.accessToken)
+      if (!accessToken) {
+        throw new Error('Failed to decrypt OpenAI accessToken')
+      }
+    } else if (result.accountType === 'openai-responses') {
+      account = await openaiResponsesAccountService.getAccount(result.accountId)
+      if (!account) {
+        throw new Error(`OpenAI-Responses account ${result.accountId} not found`)
+      }
     }
 
-    // 解密 accessToken
-    const accessToken = claudeAccountService._decryptSensitiveData(account.accessToken)
-    if (!accessToken) {
-      throw new Error('Failed to decrypt OpenAI accessToken')
-    }
-
-    // 解析代理配置
     let proxy = null
     if (account.proxy) {
       try {
@@ -60,7 +69,7 @@ async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel =
     return {
       accessToken,
       accountId: result.accountId,
-      accountName: account.name,
+      accountType: result.accountType || 'openai',
       proxy,
       account
     }
@@ -95,6 +104,9 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     }
 
     const isStream = req.body?.stream !== false // 默认为流式（兼容现有行为）
+    const sessionHash = sessionId
+      ? crypto.createHash('sha256').update(sessionId).digest('hex')
+      : null
 
     // 判断是否为 Codex CLI 的请求
     const isCodexCLI = req.body?.instructions?.startsWith(
@@ -128,13 +140,15 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     }
 
     // 使用调度器选择账户
-    const {
-      accessToken,
-      accountId,
-      accountName: _accountName,
-      proxy,
-      account
-    } = await getOpenAIAuthToken(apiKeyData, sessionId, requestedModel)
+    const { accessToken, accountId, accountType, proxy, account } = await getOpenAIAuthToken(
+      apiKeyData,
+      sessionId,
+      requestedModel
+    )
+    if (accountType === 'openai-responses') {
+      await openaiResponsesRelayService.handleRequest(req, res, account, apiKeyData)
+      return
+    }
     // 基于白名单构造上游所需的请求头，确保键为小写且值受控
     const incoming = req.headers || {}
 
@@ -188,6 +202,140 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
         axiosConfig
       )
     }
+
+    const collectStreamPayload = async (stream) => {
+      if (!stream || typeof stream.on !== 'function') {
+        return null
+      }
+
+      return await new Promise((resolve) => {
+        const chunks = []
+        const finish = () => resolve(Buffer.concat(chunks).toString())
+        stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+        stream.on('end', finish)
+        stream.on('error', (err) => {
+          logger.error('⚠️ Failed to collect OpenAI stream payload:', err)
+          resolve(null)
+        })
+        setTimeout(finish, 5000)
+      })
+    }
+
+    const handleRateLimit = async () => {
+      let errorData = null
+      try {
+        if (isStream && upstream.data && typeof upstream.data.on === 'function') {
+          const payload = await collectStreamPayload(upstream.data)
+          if (payload) {
+            try {
+              errorData = JSON.parse(payload)
+            } catch (parseError) {
+              logger.error('Failed to parse OpenAI 429 stream payload:', parseError)
+              logger.debug('Raw 429 payload:', payload)
+            }
+          }
+        } else {
+          errorData = upstream.data
+        }
+      } catch (error) {
+        logger.error('⚠️ Failed to inspect OpenAI 429 response:', error)
+      }
+
+      const resetsInSeconds = parseInt(errorData?.error?.resets_in_seconds ?? 0, 10) || null
+
+      await unifiedOpenAIScheduler.markAccountRateLimited(
+        accountId,
+        'openai',
+        sessionHash,
+        resetsInSeconds
+      )
+
+      const payload = errorData || {
+        error: {
+          type: 'usage_limit_reached',
+          message: 'The usage limit has been reached',
+          resets_in_seconds: resetsInSeconds
+        }
+      }
+
+      if (isStream) {
+        if (upstream.data && typeof upstream.data.destroy === 'function') {
+          upstream.data.destroy()
+        }
+        res.status(429)
+        res.setHeader('Content-Type', 'text/event-stream')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.setHeader('Connection', 'keep-alive')
+        res.setHeader('X-Accel-Buffering', 'no')
+        res.write(`data: ${JSON.stringify(payload)}\n\n`)
+        res.end()
+      } else {
+        res.status(429).json(payload)
+      }
+    }
+
+    const handleUnauthorized = async () => {
+      let errorData = null
+      try {
+        if (isStream && upstream.data && typeof upstream.data.on === 'function') {
+          const payload = await collectStreamPayload(upstream.data)
+          if (payload) {
+            try {
+              errorData = JSON.parse(payload)
+            } catch (parseError) {
+              logger.error('Failed to parse OpenAI 401 stream payload:', parseError)
+              logger.debug('Raw 401 payload:', payload)
+            }
+          }
+        } else {
+          errorData = upstream.data
+        }
+      } catch (error) {
+        logger.error('⚠️ Failed to inspect OpenAI 401 response:', error)
+      }
+
+      let reason = 'OpenAI账号认证失败（401错误）'
+      const messageCandidate =
+        (typeof errorData === 'string' && errorData.trim()) ||
+        errorData?.error?.message ||
+        errorData?.message ||
+        null
+
+      if (messageCandidate) {
+        reason = `OpenAI账号认证失败（401错误）：${messageCandidate.trim()}`
+      }
+
+      await unifiedOpenAIScheduler.markAccountUnauthorized(accountId, 'openai', sessionHash, reason)
+
+      if (isStream) {
+        if (upstream.data && typeof upstream.data.destroy === 'function') {
+          upstream.data.destroy()
+        }
+        res.status(401)
+        res.setHeader('Content-Type', 'text/event-stream')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.setHeader('Connection', 'keep-alive')
+        res.setHeader('X-Accel-Buffering', 'no')
+        res.write(
+          `data: ${JSON.stringify({ error: { type: 'unauthorized', message: reason } })}\n\n`
+        )
+        res.end()
+      } else {
+        res.status(401).json({ error: { type: 'unauthorized', message: reason } })
+      }
+    }
+
+    if (upstream.status === 429) {
+      await handleRateLimit()
+      return
+    }
+
+    if (upstream.status === 401) {
+      await handleUnauthorized()
+      return
+    }
+
+    res.status(upstream.status)
     res.status(upstream.status)
 
     if (isStream) {

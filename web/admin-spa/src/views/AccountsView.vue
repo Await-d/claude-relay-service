@@ -87,14 +87,23 @@
             </div>
           </div>
 
-          <!-- 添加账户按钮 -->
-          <button
-            class="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-green-500 to-green-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-green-600 hover:to-green-700 hover:shadow-lg sm:w-auto"
-            @click.stop="openCreateAccountModal"
-          >
-            <i class="fas fa-plus"></i>
-            <span>添加账户</span>
-          </button>
+          <!-- 操作按钮 -->
+          <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+            <button
+              class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-500 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-purple-600 hover:to-indigo-600 hover:shadow-lg sm:flex-none"
+              @click.stop="showBulkImportModal = true"
+            >
+              <i class="fas fa-file-import"></i>
+              <span>批量导入</span>
+            </button>
+            <button
+              class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-green-500 to-green-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-green-600 hover:to-green-700 hover:shadow-lg sm:flex-none"
+              @click.stop="openCreateAccountModal"
+            >
+              <i class="fas fa-plus"></i>
+              <span>添加账户</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1144,6 +1153,13 @@
       @success="handleEditSuccess"
     />
 
+    <BulkImportModal
+      v-if="showBulkImportModal"
+      :show="showBulkImportModal"
+      @close="showBulkImportModal = false"
+      @imported="handleBulkImportSuccess"
+    />
+
     <!-- 确认弹窗 -->
     <ConfirmModal
       :cancel-text="confirmOptions.cancelText"
@@ -1239,6 +1255,7 @@ const groupOptions = computed(() => {
 // 模态框状态
 const showCreateAccountModal = ref(false)
 const showEditAccountModal = ref(false)
+const showBulkImportModal = ref(false)
 const editingAccount = ref(null)
 
 // 计算排序后的账户列表
@@ -1774,6 +1791,12 @@ const handleEditSuccess = () => {
   showToast('账户更新成功', 'success')
   // 清空分组成员缓存，因为账户类型和分组可能发生变化
   groupMembersLoaded.value = false
+  loadAccounts()
+}
+
+const handleBulkImportSuccess = () => {
+  // 导入完成后刷新列表，保持分组状态一致
+  clearCache()
   loadAccounts()
 }
 

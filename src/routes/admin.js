@@ -1741,6 +1741,12 @@ router.put('/claude-accounts/:accountId', authenticateAdmin, async (req, res) =>
       return res.status(400).json({ error: 'Priority must be a number between 1 and 100' })
     }
 
+    if (updates.integrationType && !['oauth', 'third_party'].includes(updates.integrationType)) {
+      return res
+        .status(400)
+        .json({ error: 'Invalid integration type. Must be "oauth" or "third_party"' })
+    }
+
     // 验证accountType的有效性
     if (updates.accountType && !['shared', 'dedicated', 'group'].includes(updates.accountType)) {
       return res
@@ -2825,6 +2831,17 @@ router.post('/gemini-accounts', authenticateAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Account name is required' })
     }
 
+    if (
+      accountData.integrationType &&
+      !['oauth', 'third_party'].includes(accountData.integrationType)
+    ) {
+      return res
+        .status(400)
+        .json({ error: 'Invalid integration type. Must be "oauth" or "third_party"' })
+    }
+
+    const integrationType = accountData.integrationType || 'oauth'
+
     // 验证accountType的有效性
     if (
       accountData.accountType &&
@@ -2839,6 +2856,17 @@ router.post('/gemini-accounts', authenticateAdmin, async (req, res) => {
     if (accountData.accountType === 'group' && !accountData.groupId) {
       return res.status(400).json({ error: 'Group ID is required for group type accounts' })
     }
+
+    if (integrationType === 'third_party') {
+      if (!accountData.baseUrl || !accountData.baseUrl.trim()) {
+        return res.status(400).json({ error: 'Base URL is required for third-party accounts' })
+      }
+      if (!accountData.apiKey || !accountData.apiKey.trim()) {
+        return res.status(400).json({ error: 'API key is required for third-party accounts' })
+      }
+    }
+
+    accountData.integrationType = integrationType
 
     const newAccount = await geminiAccountService.createAccount(accountData)
 
@@ -2878,6 +2906,21 @@ router.put('/gemini-accounts/:accountId', authenticateAdmin, async (req, res) =>
     if (!currentAccount) {
       return res.status(404).json({ error: 'Account not found' })
     }
+
+    const nextIntegrationType = updates.integrationType || currentAccount.integrationType || 'oauth'
+    if (nextIntegrationType === 'third_party') {
+      const nextBaseUrl = updates.baseUrl !== undefined ? updates.baseUrl : currentAccount.baseUrl
+      const nextApiKey = updates.apiKey !== undefined ? updates.apiKey : currentAccount.apiKey
+
+      if (!nextBaseUrl || !nextBaseUrl.toString().trim()) {
+        return res.status(400).json({ error: 'Base URL is required for third-party accounts' })
+      }
+      if (!nextApiKey || !nextApiKey.toString().trim()) {
+        return res.status(400).json({ error: 'API key is required for third-party accounts' })
+      }
+    }
+
+    updates.integrationType = nextIntegrationType
 
     // 处理分组的变更
     if (updates.accountType !== undefined) {
@@ -5277,6 +5320,285 @@ router.post('/openai-accounts/exchange-code', authenticateAdmin, async (req, res
       error: error.message
     })
   }
+})
+
+// 批量导入第三方账户（OpenAI / Claude / Gemini）
+router.post('/accounts/bulk-import', authenticateAdmin, async (req, res) => {
+  const { accounts } = req.body || {}
+
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Accounts payload must be a non-empty array'
+    })
+  }
+
+  const toNumber = (value, defaultValue) => {
+    if (value === undefined || value === null || value === '') {
+      return defaultValue
+    }
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : defaultValue
+  }
+
+  const toBoolean = (value, defaultValue = true) => {
+    if (value === undefined || value === null) {
+      return defaultValue
+    }
+    if (typeof value === 'string') {
+      return !['false', '0', 'no'].includes(value.toLowerCase())
+    }
+    return Boolean(value)
+  }
+
+  const results = []
+
+  for (let index = 0; index < accounts.length; index += 1) {
+    const entry = accounts[index]
+
+    if (!entry || !entry.platform) {
+      results.push({
+        index,
+        success: false,
+        message: 'Missing platform field'
+      })
+      continue
+    }
+
+    const platform = String(entry.platform).toLowerCase()
+
+    try {
+      switch (platform) {
+        case 'openai': {
+          const name = entry.name?.trim()
+          if (!name) {
+            throw new Error('OpenAI account requires a name')
+          }
+
+          const openaiOauthInput = entry.openaiOauth || {}
+          const openaiOauth = {
+            idToken: openaiOauthInput.idToken || entry.idToken || '',
+            accessToken: openaiOauthInput.accessToken || entry.accessToken || '',
+            refreshToken: openaiOauthInput.refreshToken || entry.refreshToken || '',
+            expires_in: toNumber(openaiOauthInput.expires_in || entry.expiresIn, 3600)
+          }
+
+          if (!openaiOauth.accessToken && !openaiOauth.refreshToken) {
+            throw new Error('OpenAI account requires accessToken or refreshToken')
+          }
+
+          const accountType = entry.accountType || 'shared'
+          const priority = toNumber(entry.priority, 50)
+
+          const accountData = {
+            name,
+            description: entry.description || '',
+            accountType,
+            groupId: entry.groupId || null,
+            priority,
+            rateLimitDuration:
+              entry.rateLimitDuration !== undefined && entry.rateLimitDuration !== null
+                ? toNumber(entry.rateLimitDuration, 60)
+                : undefined,
+            openaiOauth,
+            accountInfo: entry.accountInfo || {},
+            proxy: entry.proxy || null,
+            isActive: toBoolean(entry.isActive, true),
+            schedulable: toBoolean(entry.schedulable, true),
+            schedulingStrategy: entry.schedulingStrategy,
+            schedulingWeight: toNumber(entry.schedulingWeight, 1),
+            sequentialOrder: toNumber(entry.sequentialOrder, 1)
+          }
+
+          const createdAccount = await openaiAccountService.createAccount(accountData)
+
+          if (accountType === 'group' && entry.groupId) {
+            try {
+              await accountGroupService.addAccountToGroup(
+                createdAccount.id,
+                entry.groupId,
+                'openai'
+              )
+            } catch (groupError) {
+              logger.warn('Failed to add OpenAI account to group:', groupError.message)
+            }
+          }
+
+          results.push({
+            index,
+            success: true,
+            platform: 'openai',
+            id: createdAccount.id,
+            name: createdAccount.name
+          })
+          break
+        }
+
+        case 'claude': {
+          const name = entry.name?.trim()
+          if (!name) {
+            throw new Error('Claude account requires a name')
+          }
+
+          const accountType = entry.accountType || 'shared'
+          const priority = toNumber(entry.priority, 50)
+
+          let claudeAiOauth = entry.claudeAiOauth || null
+          if (!claudeAiOauth && (entry.accessToken || entry.refreshToken)) {
+            claudeAiOauth = {
+              accessToken: entry.accessToken || '',
+              refreshToken: entry.refreshToken || '',
+              expiresAt: entry.expiresAt
+                ? new Date(entry.expiresAt).toISOString()
+                : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+              scopes: entry.scopes || ['user:profile']
+            }
+          }
+
+          if (!claudeAiOauth && !entry.refreshToken) {
+            throw new Error('Claude account requires refreshToken or claudeAiOauth data')
+          }
+
+          const claudePayload = {
+            name,
+            description: entry.description || '',
+            email: entry.email || '',
+            password: entry.password || '',
+            refreshToken: entry.refreshToken || '',
+            claudeAiOauth,
+            proxy: entry.proxy || null,
+            isActive: toBoolean(entry.isActive, true),
+            accountType,
+            platform: entry.platformVariant || 'claude',
+            priority,
+            schedulable: toBoolean(entry.schedulable, true),
+            subscriptionInfo: entry.subscriptionInfo || null,
+            schedulingStrategy: entry.schedulingStrategy || 'least_recent',
+            schedulingWeight: toNumber(entry.schedulingWeight, 1),
+            sequentialOrder: toNumber(entry.sequentialOrder, 1),
+            autoStopOnWarning: toBoolean(entry.autoStopOnWarning, false)
+          }
+
+          const createdAccount = await claudeAccountService.createAccount(claudePayload)
+
+          if (accountType === 'group' && entry.groupId) {
+            try {
+              await accountGroupService.addAccountToGroup(
+                createdAccount.id,
+                entry.groupId,
+                'claude'
+              )
+            } catch (groupError) {
+              logger.warn('Failed to add Claude account to group:', groupError.message)
+            }
+          }
+
+          results.push({
+            index,
+            success: true,
+            platform: 'claude',
+            id: createdAccount.id,
+            name: createdAccount.name
+          })
+          break
+        }
+
+        case 'gemini': {
+          const name = entry.name?.trim()
+          if (!name) {
+            throw new Error('Gemini account requires a name')
+          }
+
+          const accountType = entry.accountType || 'shared'
+          const priority = toNumber(entry.priority, 50)
+          const integrationType = entry.integrationType || 'third_party'
+
+          const geminiPayload = {
+            name,
+            description: entry.description || '',
+            accountType,
+            priority,
+            schedulingStrategy: entry.schedulingStrategy || 'least_recent',
+            schedulingWeight: toNumber(entry.schedulingWeight, 1),
+            sequentialOrder: toNumber(entry.sequentialOrder, 1),
+            proxy: entry.proxy || null,
+            supportedModels: entry.supportedModels || [],
+            projectId: entry.projectId || '',
+            schedulable: toBoolean(entry.schedulable, true),
+            integrationType,
+            baseUrl: entry.baseUrl || entry.baseApi || '',
+            apiKey: entry.apiKey || '',
+            userAgent: entry.userAgent || ''
+          }
+
+          if (integrationType === 'third_party') {
+            if (!geminiPayload.baseUrl) {
+              throw new Error('Gemini third-party account requires baseUrl')
+            }
+            if (!geminiPayload.apiKey) {
+              throw new Error('Gemini third-party account requires apiKey')
+            }
+          } else {
+            // OAuth/手动 Token 模式下，允许传递 accessToken 等字段
+            geminiPayload.geminiOauth = entry.geminiOauth || null
+            geminiPayload.accessToken = entry.accessToken || ''
+            geminiPayload.refreshToken = entry.refreshToken || ''
+            geminiPayload.expiresAt = entry.expiresAt || ''
+          }
+
+          const createdAccount = await geminiAccountService.createAccount(geminiPayload)
+
+          if (accountType === 'group' && entry.groupId) {
+            try {
+              await accountGroupService.addAccountToGroup(
+                createdAccount.id,
+                entry.groupId,
+                'gemini'
+              )
+            } catch (groupError) {
+              logger.warn('Failed to add Gemini account to group:', groupError.message)
+            }
+          }
+
+          results.push({
+            index,
+            success: true,
+            platform: 'gemini',
+            id: createdAccount.id,
+            name: createdAccount.name
+          })
+          break
+        }
+
+        default:
+          throw new Error(`Unsupported platform: ${platform}`)
+      }
+    } catch (error) {
+      logger.error(`Bulk import failed for platform ${platform}:`, error)
+      results.push({
+        index,
+        success: false,
+        platform,
+        name: entry?.name,
+        message: error.message || 'Unknown error'
+      })
+    }
+  }
+
+  const successCount = results.filter((item) => item.success).length
+  const failureCount = results.length - successCount
+
+  const summary = {
+    total: results.length,
+    success: successCount,
+    failed: failureCount
+  }
+
+  return res.status(failureCount > 0 && successCount === 0 ? 400 : 200).json({
+    success: failureCount === 0,
+    summary,
+    results
+  })
 })
 
 // 获取所有 OpenAI 账户

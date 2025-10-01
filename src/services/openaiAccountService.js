@@ -655,14 +655,79 @@ function isRateLimited(account) {
 }
 
 // 设置账户限流状态
-async function setAccountRateLimited(accountId, isLimited) {
+async function setAccountRateLimited(accountId, isLimited, resetsInSeconds = null) {
   const updates = {
     rateLimitStatus: isLimited ? 'limited' : 'normal',
-    rateLimitedAt: isLimited ? new Date().toISOString() : null
+    rateLimitedAt: isLimited ? new Date().toISOString() : null,
+    schedulable: isLimited ? 'false' : 'true'
+  }
+
+  if (isLimited) {
+    const hasReset = Number.isFinite(resetsInSeconds) && resetsInSeconds > 0
+    const resetSeconds = hasReset ? resetsInSeconds : 60 * 60
+    updates.rateLimitResetAt = new Date(Date.now() + resetSeconds * 1000).toISOString()
+  } else {
+    updates.rateLimitResetAt = null
   }
 
   await updateAccount(accountId, updates)
-  logger.info(`Set rate limit status for OpenAI account ${accountId}: ${updates.rateLimitStatus}`)
+  logger.info(
+    `Set rate limit status for OpenAI account ${accountId}: ${updates.rateLimitStatus}, schedulable: ${updates.schedulable}`
+  )
+}
+
+async function markAccountUnauthorized(accountId, reason = 'OpenAI账号认证失败（401错误）') {
+  const account = await getAccount(accountId)
+  if (!account) {
+    throw new Error('Account not found')
+  }
+
+  const now = new Date().toISOString()
+  const currentCount = parseInt(account.unauthorizedCount || '0', 10)
+  const unauthorizedCount = Number.isFinite(currentCount) ? currentCount + 1 : 1
+
+  await updateAccount(accountId, {
+    status: 'unauthorized',
+    schedulable: 'false',
+    errorMessage: reason,
+    unauthorizedAt: now,
+    unauthorizedCount: unauthorizedCount.toString()
+  })
+
+  logger.warn(`🚫 Marked OpenAI account ${account.name || accountId} as unauthorized: ${reason}`)
+
+  try {
+    const webhookNotifier = require('../utils/webhookNotifier')
+    await webhookNotifier.sendAccountAnomalyNotification({
+      accountId,
+      accountName: account.name || accountId,
+      platform: 'openai',
+      status: 'unauthorized',
+      errorCode: 'OPENAI_UNAUTHORIZED',
+      reason,
+      timestamp: now
+    })
+  } catch (error) {
+    logger.error('Failed to send unauthorized webhook notification:', error)
+  }
+}
+
+async function resetAccountStatus(accountId) {
+  const account = await getAccount(accountId)
+  if (!account) {
+    throw new Error('Account not found')
+  }
+
+  await updateAccount(accountId, {
+    status: account.accessToken ? 'active' : 'created',
+    schedulable: 'true',
+    errorMessage: null,
+    rateLimitedAt: null,
+    rateLimitStatus: 'normal',
+    rateLimitResetAt: null
+  })
+
+  logger.info(`✅ Reset OpenAI account status for ${accountId}`)
 }
 
 // 切换账户调度状态
@@ -710,6 +775,24 @@ async function getAccountRateLimitInfo(accountId) {
       const limitDuration = 60 * 60 * 1000 // 默认1小时
       remainingTime = Math.max(0, limitedAt + limitDuration - now)
     }
+
+    const minutesRemaining = remainingTime > 0 ? Math.ceil(remainingTime / (60 * 1000)) : 0
+
+    return {
+      status,
+      isRateLimited: minutesRemaining > 0,
+      rateLimitedAt,
+      rateLimitResetAt,
+      minutesRemaining
+    }
+  }
+
+  return {
+    status,
+    isRateLimited: false,
+    rateLimitedAt,
+    rateLimitResetAt,
+    minutesRemaining: 0
   }
 }
 
@@ -799,6 +882,8 @@ module.exports = {
   refreshAccountToken,
   isTokenExpired,
   setAccountRateLimited,
+  markAccountUnauthorized,
+  resetAccountStatus,
   toggleSchedulable,
   getAccountRateLimitInfo,
   updateAccountUsage,

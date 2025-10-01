@@ -1453,7 +1453,8 @@ class ClaudeAccountService {
       await database.setClaudeAccount(accountId, accountData)
 
       // 显式删除Redis中的限流字段，避免旧标记阻止账号恢复调度
-      await redis.client.hdel(
+      const client = database.getClientSafe()
+      await client.hdel(
         accountKey,
         'rateLimitedAt',
         'rateLimitStatus',

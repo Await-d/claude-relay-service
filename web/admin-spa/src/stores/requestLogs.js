@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiClient } from '@/config/api'
 import { showToast } from '@/utils/toast'
+import { normalizeTokenDetails } from '@/utils/tokenUtils'
 
 export const useRequestLogsStore = defineStore('requestLogs', () => {
   // State
@@ -65,6 +66,41 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
   const configLoading = ref(false)
   const configSaving = ref(false)
 
+  const normalizeLogTokens = (log) => {
+    if (!log || typeof log !== 'object') {
+      return log
+    }
+
+    const normalizedTokenDetails = normalizeTokenDetails(
+      log.tokenDetails || log.tokenSummary || log.usage || {}
+    )
+
+    log.tokenDetails = normalizedTokenDetails
+
+    const calculatedEfficiency =
+      normalizedTokenDetails.totalTokens > 0
+        ? Number(
+            (
+              (normalizedTokenDetails.outputTokens /
+                normalizedTokenDetails.totalTokens) *
+              100
+            ).toFixed(2)
+          )
+        : 0
+
+    log.tokenSummary = {
+      ...(log.tokenSummary || {}),
+      totalTokens: normalizedTokenDetails.totalTokens,
+      inputTokens: normalizedTokenDetails.inputTokens,
+      outputTokens: normalizedTokenDetails.outputTokens,
+      cacheCreateTokens: normalizedTokenDetails.cacheCreateTokens,
+      cacheReadTokens: normalizedTokenDetails.cacheReadTokens,
+      efficiency: log.tokenSummary?.efficiency ?? calculatedEfficiency
+    }
+
+    return log
+  }
+
   // 日志去重和合并工具函数
   const mergeLogsByRequest = (logsList) => {
     if (!Array.isArray(logsList) || logsList.length === 0) {
@@ -102,7 +138,9 @@ export const useRequestLogsStore = defineStore('requestLogs', () => {
       }
     })
 
-    return Array.from(logMap.values()).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    return Array.from(logMap.values())
+      .map((log) => normalizeLogTokens(log))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
   }
 
   // 合并两个日志条目

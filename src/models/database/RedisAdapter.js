@@ -6193,7 +6193,7 @@ class RedisAdapter extends DatabaseAdapter {
   async getAllGroups() {
     const keys = await this.client.keys('group:*')
     const groups = []
-    
+
     for (const key of keys) {
       // 跳过非分组key (如group_name:*)
       if (!key.startsWith('group:') || key.includes('group_name:')) {
@@ -6214,7 +6214,7 @@ class RedisAdapter extends DatabaseAdapter {
         })
       }
     }
-    
+
     return groups
   }
 

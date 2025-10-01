@@ -152,6 +152,33 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
+  const bulkImportAccounts = async (accountsPayload = []) => {
+    if (!Array.isArray(accountsPayload) || accountsPayload.length === 0) {
+      throw new Error('请提供至少一条账户记录')
+    }
+
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await apiClient.post('/admin/accounts/bulk-import', {
+        accounts: accountsPayload
+      })
+
+      if (!response || !response.summary) {
+        throw new Error(response?.message || '批量导入失败')
+      }
+
+      await fetchAllAccounts()
+      return response
+    } catch (err) {
+      error.value = err.message
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   // 创建Claude账户
   const createClaudeAccount = async (data) => {
     loading.value = true
@@ -758,6 +785,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     fetchOpenAIAccounts,
     fetchAzureOpenAIAccounts,
     fetchAllAccounts,
+    bulkImportAccounts,
     createClaudeAccount,
     createClaudeConsoleAccount,
     createBedrockAccount,

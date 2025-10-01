@@ -231,15 +231,18 @@ class UnifiedGeminiScheduler {
         (account.accountType === 'shared' || !account.accountType) && // 兼容旧数据
         this._isSchedulable(account.schedulable)
       ) {
+        const integrationType = account.integrationType || 'oauth'
         // 检查是否可调度
 
         // 检查token是否过期
-        const isExpired = geminiAccountService.isTokenExpired(account)
-        if (isExpired && !account.refreshToken) {
-          logger.warn(
-            `⚠️ Gemini account ${account.name} token expired and no refresh token available`
-          )
-          continue
+        if (integrationType !== 'third_party') {
+          const isExpired = geminiAccountService.isTokenExpired(account)
+          if (isExpired && !account.refreshToken) {
+            logger.warn(
+              `⚠️ Gemini account ${account.name} token expired and no refresh token available`
+            )
+            continue
+          }
         }
 
         // 检查模型支持
@@ -264,6 +267,7 @@ class UnifiedGeminiScheduler {
             ...account,
             accountId: account.id,
             accountType: 'gemini',
+            integrationType,
             priority: parseInt(account.priority) || 50, // 默认优先级50
             lastUsedAt: account.lastUsedAt || '0',
             // 包含调度策略字段
@@ -848,13 +852,16 @@ class UnifiedGeminiScheduler {
           account.status !== 'error' &&
           this._isSchedulable(account.schedulable)
         ) {
+          const integrationType = account.integrationType || 'oauth'
           // 检查token是否过期
-          const isExpired = geminiAccountService.isTokenExpired(account)
-          if (isExpired && !account.refreshToken) {
-            logger.warn(
-              `⚠️ Gemini account ${account.name} in group token expired and no refresh token available`
-            )
-            continue
+          if (integrationType !== 'third_party') {
+            const isExpired = geminiAccountService.isTokenExpired(account)
+            if (isExpired && !account.refreshToken) {
+              logger.warn(
+                `⚠️ Gemini account ${account.name} in group token expired and no refresh token available`
+              )
+              continue
+            }
           }
 
           // 检查模型支持

@@ -12,6 +12,12 @@ const logger = require('../utils/logger')
 const config = require('../../config/config')
 const claudeCodeHeadersService = require('./claudeCodeHeadersService')
 const modelUtils = require('../utils/modelUtils')
+const database = require('../models/database')
+
+const DEFAULT_UNIFIED_USER_AGENT = 'claude-cli/1.0.119 (external, cli)'
+const UNIFIED_UA_CACHE_KEY = 'claude_code_user_agent:daily'
+const UNIFIED_UA_CACHE_TTL = 90000 // 25 小时
+const CLAUDE_CODE_UA_PATTERN = /^claude-cli\/[\d.]+/i
 
 class ClaudeRelayService {
   constructor() {
@@ -640,6 +646,8 @@ class ClaudeRelayService {
     requestOptions = {}
   ) {
     const url = new URL(this.claudeApiUrl)
+    const account = await claudeAccountService.getAccount(accountId)
+    const unifiedUA = await this.captureAndGetUnifiedUserAgent(clientHeaders, account)
 
     // 获取过滤后的客户端 headers
     const filteredHeaders = this._filterClientHeaders(clientHeaders)
@@ -662,6 +670,14 @@ class ClaudeRelayService {
         }
       })
     }
+
+    const defaultUserAgent =
+      config.claude?.unifiedUserAgent?.defaultValue || DEFAULT_UNIFIED_USER_AGENT
+    const clientProvidedUA = finalHeaders['user-agent'] || finalHeaders['User-Agent']
+    const effectiveUserAgent = unifiedUA || clientProvidedUA || defaultUserAgent
+
+    finalHeaders['user-agent'] = effectiveUserAgent
+    delete finalHeaders['User-Agent']
 
     return new Promise((resolve, reject) => {
       // 支持自定义路径（如 count_tokens）
@@ -687,9 +703,13 @@ class ClaudeRelayService {
         timeout: config.proxy.timeout
       }
 
-      // 如果客户端没有提供 User-Agent，使用默认值
-      if (!options.headers['User-Agent'] && !options.headers['user-agent']) {
-        options.headers['User-Agent'] = 'claude-cli/1.0.57 (external, cli)'
+      if (!options.headers['user-agent']) {
+        options.headers['user-agent'] = defaultUserAgent
+      }
+      options.headers['User-Agent'] = options.headers['user-agent']
+
+      if (unifiedUA) {
+        logger.debug(`🔗 Using unified Claude Code User-Agent: ${unifiedUA}`)
       }
 
       // 使用自定义的 betaHeader 或默认值
@@ -856,6 +876,8 @@ class ClaudeRelayService {
       // 获取有效的访问token
       const accessToken = await claudeAccountService.getValidAccessToken(accountId)
 
+      const account = await claudeAccountService.getAccount(accountId)
+
       // 处理请求体（传递 clientHeaders 以判断是否需要设置 Claude Code 系统提示词）
       let processedBody = this._processRequestBody(requestBody, clientHeaders)
 
@@ -903,7 +925,8 @@ class ClaudeRelayService {
         sessionHash,
         streamTransformer,
         options,
-        sessionId // 传递sessionId
+        sessionId, // 传递sessionId
+        account
       )
     } catch (error) {
       logger.error('❌ Claude stream relay with usage capture failed:', error)
@@ -924,7 +947,8 @@ class ClaudeRelayService {
     sessionHash,
     streamTransformer = null,
     requestOptions = {},
-    sessionId = null
+    sessionId = null,
+    account = null
   ) {
     // 获取过滤后的客户端 headers
     const filteredHeaders = this._filterClientHeaders(clientHeaders)
@@ -948,6 +972,15 @@ class ClaudeRelayService {
       })
     }
 
+    const unifiedUA = await this.captureAndGetUnifiedUserAgent(clientHeaders, account)
+    const defaultUserAgent =
+      config.claude?.unifiedUserAgent?.defaultValue || DEFAULT_UNIFIED_USER_AGENT
+    const clientProvidedUA = finalHeaders['user-agent'] || finalHeaders['User-Agent']
+    const effectiveUserAgent = unifiedUA || clientProvidedUA || defaultUserAgent
+
+    finalHeaders['user-agent'] = effectiveUserAgent
+    delete finalHeaders['User-Agent']
+
     return new Promise((resolve, reject) => {
       const url = new URL(this.claudeApiUrl)
 
@@ -966,9 +999,13 @@ class ClaudeRelayService {
         timeout: config.proxy.timeout
       }
 
-      // 如果客户端没有提供 User-Agent，使用默认值
-      if (!options.headers['User-Agent'] && !options.headers['user-agent']) {
-        options.headers['User-Agent'] = 'claude-cli/1.0.57 (external, cli)'
+      if (!options.headers['user-agent']) {
+        options.headers['user-agent'] = defaultUserAgent
+      }
+      options.headers['User-Agent'] = options.headers['user-agent']
+
+      if (unifiedUA) {
+        logger.debug(`🔗 Using unified Claude Code User-Agent (stream): ${unifiedUA}`)
       }
 
       // 使用自定义的 betaHeader 或默认值
@@ -1577,7 +1614,6 @@ class ClaudeRelayService {
   async recordUnauthorizedError(accountId) {
     try {
       const key = `claude_account:${accountId}:401_errors`
-      const database = require('../models/database')
 
       // 增加错误计数，设置5分钟过期时间
       await database.client.incr(key)
@@ -1593,7 +1629,6 @@ class ClaudeRelayService {
   async getUnauthorizedErrorCount(accountId) {
     try {
       const key = `claude_account:${accountId}:401_errors`
-      const database = require('../models/database')
 
       const count = await database.client.get(key)
       return parseInt(count) || 0
@@ -1607,13 +1642,100 @@ class ClaudeRelayService {
   async clearUnauthorizedErrors(accountId) {
     try {
       const key = `claude_account:${accountId}:401_errors`
-      const database = require('../models/database')
 
       await database.client.del(key)
       logger.info(`✅ Cleared 401 error count for account ${accountId}`)
     } catch (error) {
       logger.error(`❌ Failed to clear 401 errors for account ${accountId}:`, error)
     }
+  }
+
+  // 🔧 动态捕获并统一 Claude Code User-Agent
+  async captureAndGetUnifiedUserAgent(clientHeaders, account) {
+    const unifiedConfig = config.claude?.unifiedUserAgent
+    if (!unifiedConfig?.enabled) {
+      return null
+    }
+
+    if (account && account.useUnifiedUserAgent === 'false') {
+      return null
+    }
+
+    try {
+      const client =
+        typeof database.getClientSafe === 'function' ? await database.getClientSafe() : null
+
+      if (!client || typeof client.get !== 'function') {
+        return null
+      }
+
+      const cacheKey = unifiedConfig.cacheKey || UNIFIED_UA_CACHE_KEY
+      const ttl = unifiedConfig.cacheTTLSeconds || UNIFIED_UA_CACHE_TTL
+      const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
+      let cachedUA = await client.get(cacheKey)
+
+      if (clientUA && CLAUDE_CODE_UA_PATTERN.test(clientUA)) {
+        const shouldUpdate = !cachedUA || this.compareClaudeCodeVersions(clientUA, cachedUA)
+
+        if (shouldUpdate) {
+          await client.set(cacheKey, clientUA, 'EX', ttl)
+          logger.info(`📱 Unified Claude Code User-Agent captured: ${clientUA}`)
+          cachedUA = clientUA
+        } else {
+          await client.expire(cacheKey, ttl)
+        }
+      }
+
+      return cachedUA || null
+    } catch (error) {
+      logger.warn(`⚠️ Failed to capture unified User-Agent: ${error.message}`)
+      return null
+    }
+  }
+
+  compareClaudeCodeVersions(newUA, cachedUA) {
+    try {
+      const newVersionMatch = newUA?.match(/claude-cli\/([\d.]+(?:[a-zA-Z0-9-]*)?)/i)
+      const cachedVersionMatch = cachedUA?.match(/claude-cli\/([\d.]+(?:[a-zA-Z0-9-]*)?)/i)
+
+      if (!newVersionMatch || !cachedVersionMatch) {
+        logger.warn(
+          `⚠️ Unable to parse Claude Code versions: new=${newUA || 'unknown'}, cached=${cachedUA || 'unknown'}`
+        )
+        return true
+      }
+
+      const comparison = this.compareSemanticVersions(newVersionMatch[1], cachedVersionMatch[1])
+      return comparison > 0
+    } catch (error) {
+      logger.warn(`⚠️ Error comparing Claude Code versions, defaulting to update: ${error.message}`)
+      return true
+    }
+  }
+
+  compareSemanticVersions(version1, version2) {
+    const segments1 = String(version1 || '').split('.')
+    const segments2 = String(version2 || '').split('.')
+    const maxLength = Math.max(segments1.length, segments2.length)
+
+    for (let i = 0; i < maxLength; i++) {
+      const num1 = parseInt(segments1[i] || '0', 10)
+      const num2 = parseInt(segments2[i] || '0', 10)
+
+      if (Number.isNaN(num1) || Number.isNaN(num2)) {
+        continue
+      }
+
+      if (num1 > num2) {
+        return 1
+      }
+
+      if (num1 < num2) {
+        return -1
+      }
+    }
+
+    return 0
   }
 
   // 🎯 健康检查

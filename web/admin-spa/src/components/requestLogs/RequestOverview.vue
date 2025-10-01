@@ -335,6 +335,8 @@
 </template>
 
 <script setup>
+import { normalizeTokenDetails } from '@/utils/tokenUtils'
+
 // Props
 const props = defineProps({
   log: {
@@ -457,12 +459,12 @@ const getPerformanceBadgeColor = (responseTime) => {
 }
 
 const getTokenSummary = () => {
-  const tokenDetails = props.log.tokenDetails || {}
-  const input = tokenDetails.input_tokens || 0
-  const output = tokenDetails.output_tokens || 0
-  const cacheCreate = tokenDetails.cache_creation_input_tokens || 0
-  const cacheRead = tokenDetails.cache_read_input_tokens || 0
-  const total = input + output + cacheCreate + cacheRead
+  const tokenDetails = normalizeTokenDetails(props.log.tokenDetails || {})
+  const input = tokenDetails.inputTokens || 0
+  const output = tokenDetails.outputTokens || 0
+  const cacheCreate = tokenDetails.cacheCreateTokens || 0
+  const cacheRead = tokenDetails.cacheReadTokens || 0
+  const total = tokenDetails.totalTokens || input + output + cacheCreate + cacheRead
 
   const efficiency = input > 0 ? (output / input).toFixed(2) : '0.00'
 

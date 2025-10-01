@@ -7,7 +7,7 @@
           <div>
             <p class="text-sm font-medium text-blue-700 dark:text-blue-300">输入Token</p>
             <p class="text-2xl font-bold text-blue-900 dark:text-blue-100">
-              {{ formatNumber(tokenDetails?.input_tokens || 0) }}
+              {{ formatNumber(normalizedTokens.inputTokens || 0) }}
             </p>
           </div>
           <i class="fas fa-sign-in-alt text-2xl text-blue-500"></i>
@@ -22,7 +22,7 @@
           <div>
             <p class="text-sm font-medium text-green-700 dark:text-green-300">输出Token</p>
             <p class="text-2xl font-bold text-green-900 dark:text-green-100">
-              {{ formatNumber(tokenDetails?.output_tokens || 0) }}
+              {{ formatNumber(normalizedTokens.outputTokens || 0) }}
             </p>
           </div>
           <i class="fas fa-sign-out-alt text-2xl text-green-500"></i>
@@ -37,7 +37,7 @@
           <div>
             <p class="text-sm font-medium text-purple-700 dark:text-purple-300">缓存创建</p>
             <p class="text-2xl font-bold text-purple-900 dark:text-purple-100">
-              {{ formatNumber(tokenDetails?.cache_creation_input_tokens || 0) }}
+              {{ formatNumber(normalizedTokens.cacheCreateTokens || 0) }}
             </p>
           </div>
           <i class="fas fa-save text-2xl text-purple-500"></i>
@@ -52,7 +52,7 @@
           <div>
             <p class="text-sm font-medium text-orange-700 dark:text-orange-300">缓存读取</p>
             <p class="text-2xl font-bold text-orange-900 dark:text-orange-100">
-              {{ formatNumber(tokenDetails?.cache_read_input_tokens || 0) }}
+              {{ formatNumber(normalizedTokens.cacheReadTokens || 0) }}
             </p>
           </div>
           <i class="fas fa-download text-2xl text-orange-500"></i>
@@ -111,7 +111,7 @@
               <tr>
                 <td class="py-2 text-sm text-gray-900 dark:text-gray-100">输入Token</td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
-                  {{ formatNumber(tokenDetails?.input_tokens || 0) }}
+                  {{ formatNumber(normalizedTokens.inputTokens || 0) }}
                 </td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
                   ${{ formatCost(costDetails?.inputCost || 0) }}
@@ -123,7 +123,7 @@
               <tr>
                 <td class="py-2 text-sm text-gray-900 dark:text-gray-100">输出Token</td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
-                  {{ formatNumber(tokenDetails?.output_tokens || 0) }}
+                  {{ formatNumber(normalizedTokens.outputTokens || 0) }}
                 </td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
                   ${{ formatCost(costDetails?.outputCost || 0) }}
@@ -135,7 +135,7 @@
               <tr>
                 <td class="py-2 text-sm text-gray-900 dark:text-gray-100">缓存创建</td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
-                  {{ formatNumber(tokenDetails?.cache_creation_input_tokens || 0) }}
+                  {{ formatNumber(normalizedTokens.cacheCreateTokens || 0) }}
                 </td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
                   ${{ formatCost(costDetails?.cacheCreateCost || 0) }}
@@ -147,7 +147,7 @@
               <tr>
                 <td class="py-2 text-sm text-gray-900 dark:text-gray-100">缓存读取</td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
-                  {{ formatNumber(tokenDetails?.cache_read_input_tokens || 0) }}
+                  {{ formatNumber(normalizedTokens.cacheReadTokens || 0) }}
                 </td>
                 <td class="py-2 text-right text-sm text-gray-900 dark:text-gray-100">
                   ${{ formatCost(costDetails?.cacheReadCost || 0) }}
@@ -237,6 +237,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
+import { normalizeTokenDetails } from '@/utils/tokenUtils'
 
 // Props
 const props = defineProps({
@@ -255,26 +256,11 @@ const tokenChart = ref(null)
 let chartInstance = null
 
 // Computed
-const hasTokenData = computed(() => {
-  const tokens = props.tokenDetails || {}
-  return (
-    (tokens.input_tokens || 0) +
-      (tokens.output_tokens || 0) +
-      (tokens.cache_creation_input_tokens || 0) +
-      (tokens.cache_read_input_tokens || 0) >
-    0
-  )
-})
+const normalizedTokens = computed(() => normalizeTokenDetails(props.tokenDetails))
 
-const getTotalTokens = () => {
-  const tokens = props.tokenDetails || {}
-  return (
-    (tokens.input_tokens || 0) +
-    (tokens.output_tokens || 0) +
-    (tokens.cache_creation_input_tokens || 0) +
-    (tokens.cache_read_input_tokens || 0)
-  )
-}
+const hasTokenData = computed(() => normalizedTokens.value.totalTokens > 0)
+
+const getTotalTokens = () => normalizedTokens.value.totalTokens
 
 // Methods
 const formatNumber = (num) => {
@@ -295,24 +281,15 @@ const getTokenPercentage = (type) => {
   const total = getTotalTokens()
   if (total === 0) return '0.0'
 
-  const tokens = props.tokenDetails || {}
-  let value = 0
-
-  switch (type) {
-    case 'input':
-      value = tokens.input_tokens || 0
-      break
-    case 'output':
-      value = tokens.output_tokens || 0
-      break
-    case 'cache_create':
-      value = tokens.cache_creation_input_tokens || 0
-      break
-    case 'cache_read':
-      value = tokens.cache_read_input_tokens || 0
-      break
+  const tokens = normalizedTokens.value
+  const valueMap = {
+    input: tokens.inputTokens,
+    output: tokens.outputTokens,
+    cache_create: tokens.cacheCreateTokens,
+    cache_read: tokens.cacheReadTokens
   }
 
+  const value = valueMap[type] ?? 0
   return ((value / total) * 100).toFixed(1)
 }
 
@@ -324,18 +301,18 @@ const getAverageCostPerToken = () => {
 }
 
 const getCacheHitRatio = () => {
-  const tokens = props.tokenDetails || {}
-  const cacheTokens = tokens.cache_read_input_tokens || 0
+  const tokens = normalizedTokens.value
+  const cacheTokens = tokens.cacheReadTokens || 0
   const totalInputTokens =
-    (tokens.input_tokens || 0) + (tokens.cache_creation_input_tokens || 0) + cacheTokens
+    (tokens.inputTokens || 0) + (tokens.cacheCreateTokens || 0) + cacheTokens
   if (totalInputTokens === 0) return '0.0'
   return ((cacheTokens / totalInputTokens) * 100).toFixed(1)
 }
 
 const getTokenEfficiency = () => {
-  const tokens = props.tokenDetails || {}
-  const inputTokens = tokens.input_tokens || 0
-  const outputTokens = tokens.output_tokens || 0
+  const tokens = normalizedTokens.value
+  const inputTokens = tokens.inputTokens || 0
+  const outputTokens = tokens.outputTokens || 0
   if (inputTokens === 0) return 'N/A'
   const ratio = outputTokens / inputTokens
   return ratio.toFixed(2)
@@ -350,18 +327,29 @@ const getEfficiencyColor = () => {
 }
 
 const createTokenChart = () => {
-  if (!tokenChart.value || !hasTokenData.value) return
+  if (!tokenChart.value) {
+    return
+  }
 
-  const tokens = props.tokenDetails || {}
+  if (chartInstance) {
+    chartInstance.destroy()
+    chartInstance = null
+  }
+
+  if (!hasTokenData.value) {
+    return
+  }
+
+  const tokens = normalizedTokens.value
   const data = {
     labels: ['输入Token', '输出Token', '缓存创建', '缓存读取'],
     datasets: [
       {
         data: [
-          tokens.input_tokens || 0,
-          tokens.output_tokens || 0,
-          tokens.cache_creation_input_tokens || 0,
-          tokens.cache_read_input_tokens || 0
+          tokens.inputTokens || 0,
+          tokens.outputTokens || 0,
+          tokens.cacheCreateTokens || 0,
+          tokens.cacheReadTokens || 0
         ],
         backgroundColor: [
           '#3B82F6', // blue
@@ -394,10 +382,6 @@ const createTokenChart = () => {
     }
   })
 
-  if (chartInstance) {
-    chartInstance.destroy()
-  }
-
   chartInstance = new Chart(tokenChart.value, {
     type: 'doughnut',
     data: filteredData,
@@ -427,12 +411,10 @@ onMounted(() => {
 })
 
 watch(
-  () => props.tokenDetails,
+  () => normalizedTokens.value,
   () => {
     nextTick(() => {
-      if (hasTokenData.value) {
-        createTokenChart()
-      }
+      createTokenChart()
     })
   },
   { deep: true }

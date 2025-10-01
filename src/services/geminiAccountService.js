@@ -329,14 +329,36 @@ async function createAccount(accountData) {
   const id = uuidv4()
   const now = new Date().toISOString()
 
-  // 处理凭证数据
-  let geminiOauth = null
+  const integrationType = accountData.integrationType || 'oauth'
+  const isThirdParty = integrationType === 'third_party'
+
+  // 第三方账户所需字段
+  let normalizedBaseUrl = ''
+  let encryptedApiKey = ''
+  const userAgent = accountData.userAgent || ''
+
+  if (isThirdParty) {
+    if (!accountData.baseUrl || !accountData.baseUrl.trim()) {
+      throw new Error('Base URL is required for third-party Gemini account')
+    }
+    if (!accountData.apiKey || !accountData.apiKey.trim()) {
+      throw new Error('API key is required for third-party Gemini account')
+    }
+
+    normalizedBaseUrl = accountData.baseUrl.trim()
+    if (normalizedBaseUrl.endsWith('/')) {
+      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1)
+    }
+    encryptedApiKey = encrypt(accountData.apiKey.trim())
+  }
+
+  // 处理 OAuth 凭证数据
+  let geminiOauth = ''
   let accessToken = ''
   let refreshToken = ''
   let expiresAt = ''
 
-  if (accountData.geminiOauth || accountData.accessToken) {
-    // 如果提供了完整的 OAuth 数据
+  if (!isThirdParty && (accountData.geminiOauth || accountData.accessToken)) {
     if (accountData.geminiOauth) {
       geminiOauth =
         typeof accountData.geminiOauth === 'string'
@@ -352,17 +374,15 @@ async function createAccount(accountData) {
       refreshToken = oauthData.refresh_token || ''
       expiresAt = oauthData.expiry_date ? new Date(oauthData.expiry_date).toISOString() : ''
     } else {
-      // 如果只提供了 access token
       ;({ accessToken } = accountData)
       refreshToken = accountData.refreshToken || ''
 
-      // 构造完整的 OAuth 数据
       geminiOauth = JSON.stringify({
         access_token: accessToken,
         refresh_token: refreshToken,
         scope: accountData.scope || OAUTH_SCOPES.join(' '),
         token_type: accountData.tokenType || 'Bearer',
-        expiry_date: accountData.expiryDate || Date.now() + 3600000 // 默认1小时
+        expiry_date: accountData.expiryDate || Date.now() + 3600000
       })
 
       expiresAt = new Date(accountData.expiryDate || Date.now() + 3600000).toISOString()
@@ -371,40 +391,45 @@ async function createAccount(accountData) {
 
   const account = {
     id,
-    platform: 'gemini', // 标识为 Gemini 账户
+    platform: 'gemini',
     name: accountData.name || 'Gemini Account',
     description: accountData.description || '',
     accountType: accountData.accountType || 'shared',
+    integrationType,
     isActive: 'true',
     status: 'active',
 
     // 调度相关
     schedulable: accountData.schedulable !== undefined ? String(accountData.schedulable) : 'true',
-    priority: accountData.priority || 50, // 调度优先级 (1-100，数字越小优先级越高)
-    // 新增调度策略字段
-    schedulingStrategy: accountData.schedulingStrategy || 'least_recent', // 调度策略
-    schedulingWeight: accountData.schedulingWeight || 1, // 调度权重 (1-10)
-    sequentialOrder: accountData.sequentialOrder || 1, // 顺序调度的顺序号
-    roundRobinIndex: 0, // 轮询索引，初始为0
-    usageCount: 0, // 使用计数，初始为0
-    lastScheduledAt: '', // 最后调度时间，初始为空
+    priority: accountData.priority || 50,
+    schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
+    schedulingWeight: accountData.schedulingWeight || 1,
+    sequentialOrder: accountData.sequentialOrder || 1,
+    roundRobinIndex: 0,
+    usageCount: 0,
+    lastScheduledAt: '',
 
     // OAuth 相关字段（加密存储）
     geminiOauth: geminiOauth ? encrypt(geminiOauth) : '',
     accessToken: accessToken ? encrypt(accessToken) : '',
     refreshToken: refreshToken ? encrypt(refreshToken) : '',
     expiresAt,
-    // 只有OAuth方式才有scopes，手动添加的没有
-    scopes: accountData.geminiOauth ? accountData.scopes || OAUTH_SCOPES.join(' ') : '',
+    scopes:
+      !isThirdParty && accountData.geminiOauth ? accountData.scopes || OAUTH_SCOPES.join(' ') : '',
+
+    // 第三方账户字段
+    baseUrl: isThirdParty ? normalizedBaseUrl : accountData.baseUrl || '',
+    apiKey: encryptedApiKey,
+    userAgent,
 
     // 代理设置
     proxy: accountData.proxy ? JSON.stringify(accountData.proxy) : '',
 
-    // 项目 ID（Google Cloud/Workspace 账号需要）
+    // 项目 ID（仅 OAuth 账户使用）
     projectId: accountData.projectId || '',
 
     // 支持的模型列表（可选）
-    supportedModels: accountData.supportedModels || [], // 空数组表示支持所有模型
+    supportedModels: accountData.supportedModels || [],
 
     // 时间戳
     createdAt: now,
@@ -413,18 +438,15 @@ async function createAccount(accountData) {
     lastRefreshAt: ''
   }
 
-  // 保存到 Redis
   const client = database.getClientSafe()
   await client.hset(`${GEMINI_ACCOUNT_KEY_PREFIX}${id}`, account)
 
-  // 如果是共享账户，添加到共享账户集合
   if (account.accountType === 'shared') {
     await client.sadd(SHARED_GEMINI_ACCOUNTS_KEY, id)
   }
 
   logger.info(`Created Gemini account: ${id}`)
 
-  // 返回时解析代理配置
   const returnAccount = { ...account }
   if (returnAccount.proxy) {
     try {
@@ -432,6 +454,10 @@ async function createAccount(accountData) {
     } catch (e) {
       returnAccount.proxy = null
     }
+  }
+
+  if (isThirdParty) {
+    returnAccount.apiKey = '***'
   }
 
   return returnAccount
@@ -455,6 +481,9 @@ async function getAccount(accountId) {
   }
   if (accountData.refreshToken) {
     accountData.refreshToken = decrypt(accountData.refreshToken)
+  }
+  if (accountData.apiKey) {
+    accountData.apiKey = decrypt(accountData.apiKey)
   }
 
   // 解析代理配置
@@ -491,6 +520,22 @@ async function updateAccount(accountId, updates) {
   // 处理代理设置
   if (updates.proxy !== undefined) {
     updates.proxy = updates.proxy ? JSON.stringify(updates.proxy) : ''
+  }
+
+  if (updates.baseUrl !== undefined) {
+    if (updates.baseUrl) {
+      let normalizedBaseUrl = updates.baseUrl.trim()
+      if (normalizedBaseUrl.endsWith('/')) {
+        normalizedBaseUrl = normalizedBaseUrl.slice(0, -1)
+      }
+      updates.baseUrl = normalizedBaseUrl
+    } else {
+      updates.baseUrl = ''
+    }
+  }
+
+  if (updates.apiKey !== undefined) {
+    updates.apiKey = updates.apiKey ? encrypt(updates.apiKey.trim()) : ''
   }
 
   // 处理 schedulable 字段，确保正确转换为字符串存储
@@ -666,9 +711,13 @@ async function getAllAccounts() {
       // 不解密敏感字段，只返回基本信息
       accounts.push({
         ...accountData,
+        integrationType: accountData.integrationType || 'oauth',
         geminiOauth: accountData.geminiOauth ? '[ENCRYPTED]' : '',
         accessToken: accountData.accessToken ? '[ENCRYPTED]' : '',
         refreshToken: accountData.refreshToken ? '[ENCRYPTED]' : '',
+        apiKey: accountData.apiKey ? '[ENCRYPTED]' : '',
+        baseUrl: accountData.baseUrl || '',
+        userAgent: accountData.userAgent || '',
         // 添加 scopes 字段用于判断认证方式
         // 处理空字符串和默认值的情况
         scopes:
@@ -1096,6 +1145,10 @@ function selectAccountLeastRecent(accounts) {
 
 // 检查 token 是否过期
 function isTokenExpired(account) {
+  if ((account.integrationType || 'oauth') === 'third_party') {
+    return false
+  }
+
   if (!account.expiresAt) {
     return true
   }
@@ -1128,6 +1181,19 @@ async function refreshAccountToken(accountId) {
     account = await getAccount(accountId)
     if (!account) {
       throw new Error('Account not found')
+    }
+
+    if ((account.integrationType || 'oauth') === 'third_party') {
+      logger.info(
+        `🔄 Skip token refresh for third-party Gemini account: ${account.name} (${accountId})`
+      )
+      return {
+        access_token: '',
+        refresh_token: '',
+        expiry_date: Date.now(),
+        scope: '',
+        token_type: 'api_key'
+      }
     }
 
     if (!account.refreshToken) {

@@ -1068,6 +1068,7 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRequestLogsStore } from '@/stores/requestLogs'
 import { showToast } from '@/utils/toast'
+import { normalizeTokenDetails } from '@/utils/tokenUtils'
 
 // 导入组件
 import RequestOverview from '@/components/requestLogs/RequestOverview.vue'
@@ -1619,15 +1620,45 @@ const showLogDetails = async (log) => {
           return {}
         }
 
+        const tokenDetailsRaw =
+          parseJSONSafe(detailedLog.tokenDetails) ||
+          detailedLog.usage ||
+          detailedLog.tokenSummary ||
+          {}
+        const normalizedTokenDetails = normalizeTokenDetails(tokenDetailsRaw)
+
+        const normalizedCostDetails = parseJSONSafe(detailedLog.costDetails) || {
+          totalCost: detailedLog.cost || 0,
+          currency: 'USD'
+        }
+
+        const mergedTokenSummary = {
+          totalTokens: normalizedTokenDetails.totalTokens,
+          inputTokens: normalizedTokenDetails.inputTokens,
+          outputTokens: normalizedTokenDetails.outputTokens,
+          cacheCreateTokens: normalizedTokenDetails.cacheCreateTokens,
+          cacheReadTokens: normalizedTokenDetails.cacheReadTokens,
+          efficiency:
+            detailedLog.tokenSummary?.efficiency ??
+            (normalizedTokenDetails.totalTokens > 0
+              ? (
+                  (normalizedTokenDetails.outputTokens /
+                    normalizedTokenDetails.totalTokens) *
+                  100
+                ).toFixed(2)
+              : 0)
+        }
+
         // 合并详细信息到当前日志对象
         selectedLog.value = {
           ...log,
           ...detailedLog,
           // 确保数据结构正确
-          tokenDetails: parseJSONSafe(detailedLog.tokenDetails) || detailedLog.usage || {},
-          costDetails: parseJSONSafe(detailedLog.costDetails) || {
-            totalCost: detailedLog.cost || 0,
-            currency: 'USD'
+          tokenDetails: normalizedTokenDetails,
+          costDetails: normalizedCostDetails,
+          tokenSummary: {
+            ...(detailedLog.tokenSummary || {}),
+            ...mergedTokenSummary
           },
           // 重要：确保headers是对象格式而不是字符串
           requestHeaders: parseJSONSafe(detailedLog.requestHeaders),
