@@ -5,6 +5,7 @@ const claudeConsoleAccountService = require('../services/claudeConsoleAccountSer
 const bedrockAccountService = require('../services/bedrockAccountService')
 const geminiAccountService = require('../services/geminiAccountService')
 const openaiAccountService = require('../services/openaiAccountService')
+const openaiResponsesAccountService = require('../services/openaiResponsesAccountService')
 const azureOpenaiAccountService = require('../services/azureOpenaiAccountService')
 const accountGroupService = require('../services/accountGroupService')
 const groupService = require('../services/groupService')
@@ -26,6 +27,51 @@ const config = require('../../config/config')
 const ProxyHelper = require('../utils/proxyHelper')
 
 const router = express.Router()
+
+// 获取用户列表（用于 API Key 分配等）
+router.get('/users', authenticateAdmin, async (req, res) => {
+  try {
+    const { role, isActive } = req.query
+    const options = { limit: 1000 }
+
+    if (role) {
+      options.role = role
+    }
+
+    if (isActive !== undefined) {
+      options.isActive = isActive === 'true'
+    } else {
+      options.isActive = true
+    }
+
+    const result = await userService.getAllUsers(options)
+    const users = Array.isArray(result?.users) ? result.users : []
+
+    const formatted = users.map((user) => ({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName || user.username,
+      email: user.email,
+      role: user.role
+    }))
+
+    const withAdmin = [
+      {
+        id: 'admin',
+        username: 'admin',
+        displayName: 'Admin',
+        email: '',
+        role: 'admin'
+      },
+      ...formatted
+    ]
+
+    return res.json({ success: true, data: withAdmin })
+  } catch (error) {
+    logger.error('❌ Failed to fetch users list:', error)
+    return res.status(500).json({ error: 'Failed to fetch users list', message: error.message })
+  }
+})
 
 // 🔑 API Keys 管理
 
@@ -5941,6 +5987,27 @@ router.put(
 // 🌐 Azure OpenAI 账户管理
 
 // 获取所有 Azure OpenAI 账户
+router.get('/openai-responses-accounts', authenticateAdmin, async (req, res) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true'
+    const accounts = await openaiResponsesAccountService.getAllAccounts(includeInactive)
+
+    const normalized = accounts.map((account) => ({
+      ...account,
+      platform: 'openai-responses',
+      schedulable: account.schedulable !== false && account.schedulable !== 'false',
+      isActive: account.isActive !== false && account.isActive !== 'false'
+    }))
+
+    return res.json({ success: true, data: normalized })
+  } catch (error) {
+    logger.error('❌ Failed to fetch OpenAI Responses accounts:', error)
+    return res
+      .status(500)
+      .json({ error: 'Failed to fetch OpenAI Responses accounts', message: error.message })
+  }
+})
+
 router.get('/azure-openai-accounts', authenticateAdmin, async (req, res) => {
   try {
     const accounts = await azureOpenaiAccountService.getAllAccounts()
@@ -8308,6 +8375,32 @@ router.put('/groups/:id/scheduling', authenticateAdmin, async (req, res) => {
       error: 'Failed to update scheduling configuration',
       message: error.message
     })
+  }
+})
+
+// 重置 OpenAI Responses 账户状态（清除限流/异常）
+router.post('/openai-responses-accounts/:id/reset-status', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const result = await openaiResponsesAccountService.resetAccountStatus(id)
+    logger.success(`✅ Reset OpenAI Responses account status: ${id}`)
+    return res.json({ success: true, data: result })
+  } catch (error) {
+    logger.error('❌ Failed to reset OpenAI Responses account status:', error)
+    return res.status(500).json({ error: 'Failed to reset status', message: error.message })
+  }
+})
+
+// 重置 OpenAI Responses 账户的每日使用量
+router.post('/openai-responses-accounts/:id/reset-usage', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    await openaiResponsesAccountService.resetDailyUsage(id)
+    logger.success(`✅ Reset OpenAI Responses account usage: ${id}`)
+    return res.json({ success: true, message: 'Daily usage reset successfully' })
+  } catch (error) {
+    logger.error('❌ Failed to reset OpenAI Responses account usage:', error)
+    return res.status(500).json({ error: 'Failed to reset usage', message: error.message })
   }
 })
 

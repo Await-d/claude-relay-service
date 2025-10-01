@@ -62,9 +62,11 @@ class WebhookConfigService {
         'feishu',
         'slack',
         'discord',
+        'telegram',
+        'custom',
         'bark',
         'iyuu',
-        'custom'
+        'smtp'
       ]
 
       for (const platform of config.platforms) {
@@ -73,14 +75,22 @@ class WebhookConfigService {
         }
 
         // 特殊平台验证处理
-        if (platform.type === 'bark') {
-          this.validateBarkConfig(platform)
-        } else if (platform.type === 'iyuu') {
-          this.validateIYUUConfig(platform)
+        if (['bark', 'smtp', 'telegram'].includes(platform.type)) {
+          // 这些平台不强制要求 URL
         } else {
           if (!platform.url || !this.isValidUrl(platform.url)) {
             throw new Error(`无效的webhook URL: ${platform.url}`)
           }
+        }
+
+        if (platform.type === 'bark') {
+          this.validateBarkConfig(platform)
+        } else if (platform.type === 'iyuu') {
+          this.validateIYUUConfig(platform)
+        } else if (platform.type === 'telegram') {
+          this.validateTelegramConfig(platform)
+        } else if (platform.type === 'smtp') {
+          this.validateSMTPConfig(platform)
         }
 
         // 验证平台特定的配置
@@ -121,11 +131,17 @@ class WebhookConfigService {
           logger.warn('⚠️ Discord webhook URL格式可能不正确')
         }
         break
+      case 'telegram':
+        // Telegram 配置已单独验证
+        break
       case 'bark':
         // Bark配置已在 validateBarkConfig 中验证
         break
       case 'iyuu':
         // IYUU配置已在 validateIYUUConfig 中验证
+        break
+      case 'smtp':
+        // SMTP 配置已在 validateSMTPConfig 中验证
         break
       case 'custom':
         // 自定义webhook，用户自行负责格式
@@ -169,6 +185,7 @@ class WebhookConfigService {
     if (platform.sound) {
       const validSounds = [
         'alarm',
+        'alert',
         'anticipate',
         'bell',
         'birdsong',
@@ -208,7 +225,7 @@ class WebhookConfigService {
     }
 
     if (platform.level) {
-      const validLevels = ['passive', 'active', 'critical']
+      const validLevels = ['passive', 'active', 'critical', 'timeSensitive']
       if (!validLevels.includes(platform.level)) {
         throw new Error(`Bark中断级别必须是: ${validLevels.join(', ')}`)
       }
@@ -247,6 +264,61 @@ class WebhookConfigService {
     })
   }
 
+  validateTelegramConfig(platform) {
+    if (!platform.botToken || typeof platform.botToken !== 'string') {
+      throw new Error('Telegram 平台必须提供机器人 Token')
+    }
+
+    if (!platform.chatId) {
+      throw new Error('Telegram 平台必须提供 Chat ID')
+    }
+
+    if (platform.apiBaseUrl && !this.isValidUrl(platform.apiBaseUrl)) {
+      throw new Error('Telegram API 基础地址格式无效')
+    }
+
+    if (platform.proxyUrl && !this.isValidUrl(platform.proxyUrl)) {
+      throw new Error('Telegram 代理地址格式无效')
+    }
+  }
+
+  validateSMTPConfig(platform) {
+    if (!platform.host) {
+      throw new Error('SMTP 平台必须提供 host')
+    }
+
+    if (!platform.port) {
+      throw new Error('SMTP 平台必须提供 port')
+    }
+
+    if (!platform.username) {
+      throw new Error('SMTP 平台必须提供用户名 (username)')
+    }
+
+    if (!platform.password) {
+      throw new Error('SMTP 平台必须提供密码 (password)')
+    }
+
+    if (!platform.to) {
+      throw new Error('SMTP 平台必须提供接收邮箱 (to)')
+    }
+
+    if (platform.port < 1 || platform.port > 65535) {
+      throw new Error('SMTP 端口必须在 1-65535 之间')
+    }
+
+    const emails = Array.isArray(platform.to) ? platform.to : [platform.to]
+    for (const email of emails) {
+      if (!this.isValidEmailAddress(email)) {
+        throw new Error(`无效的接收邮箱格式: ${email}`)
+      }
+    }
+
+    if (platform.from && !this.isValidEmailAddress(platform.from)) {
+      throw new Error(`无效的发送邮箱格式: ${platform.from}`)
+    }
+  }
+
   /**
    * 验证URL格式
    */
@@ -257,6 +329,24 @@ class WebhookConfigService {
     } catch {
       return false
     }
+  }
+
+  isValidEmailAddress(value) {
+    if (!value) {
+      return false
+    }
+
+    const extractEmail = (input) => {
+      if (typeof input !== 'string') {
+        return ''
+      }
+      const match = input.match(/<([^>]+)>/)
+      return match ? match[1] : input
+    }
+
+    const email = extractEmail(value).trim()
+    const simpleEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return simpleEmailRegex.test(email)
   }
 
   /**
@@ -271,7 +361,8 @@ class WebhookConfigService {
         quotaWarning: true, // 配额警告
         systemError: true, // 系统错误
         securityAlert: true, // 安全警报
-        test: true // 测试通知
+        test: true, // 测试通知
+        rateLimitRecovery: true
       },
       retrySettings: {
         maxRetries: 3,
@@ -296,7 +387,7 @@ class WebhookConfigService {
       platform.createdAt = new Date().toISOString()
 
       // 验证平台配置
-      this.validatePlatformConfig(platform)
+      this.validateConfig({ platforms: [platform] })
 
       // 添加到配置
       config.platforms = config.platforms || []
@@ -331,7 +422,7 @@ class WebhookConfigService {
       }
 
       // 验证更新后的配置
-      this.validatePlatformConfig(config.platforms[index])
+      this.validateConfig({ platforms: [config.platforms[index]] })
 
       await this.saveConfig(config)
 

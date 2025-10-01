@@ -278,6 +278,47 @@ class UserService {
   // ==================== 用户CRUD操作 ====================
 
   /**
+   * 获取用户列表
+   * @param {Object} options - 过滤选项
+   * @param {string} [options.role] - 角色过滤
+   * @param {boolean} [options.isActive] - 活跃状态过滤
+   * @param {number} [options.limit] - 返回数量限制
+   * @returns {Promise<{success: boolean, users: Array, total: number}>}
+   */
+  async getAllUsers(options = {}) {
+    try {
+      const filters = {}
+
+      if (options.role) {
+        filters.role = options.role
+      }
+
+      if (typeof options.isActive === 'boolean') {
+        filters.isActive = options.isActive
+      }
+
+      if (options.limit !== undefined) {
+        const parsedLimit = Number(options.limit)
+        if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
+          filters.limit = parsedLimit
+        }
+      }
+
+      const result = await database.getAllUsers(filters)
+      const users = (result?.users || []).map((user) => this._sanitizeUserData(user))
+
+      return {
+        success: true,
+        users,
+        total: result?.total ?? users.length
+      }
+    } catch (error) {
+      logger.error('❌ Failed to get all users:', error)
+      throw error
+    }
+  }
+
+  /**
    * 创建用户
    * @param {Object} userData - 用户数据
    * @returns {Promise<Object>} 创建的用户信息

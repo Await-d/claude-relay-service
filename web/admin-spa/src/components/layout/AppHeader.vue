@@ -43,6 +43,17 @@
           <ThemeToggle mode="dropdown" />
         </div>
 
+        <!-- Session 状态指示器 -->
+        <div
+          v-if="sessionToken"
+          class="hidden items-center gap-1.5 rounded-lg px-2 py-1 sm:flex"
+          :class="sessionStatusClass"
+          :title="sessionStatusText"
+        >
+          <i class="text-xs" :class="sessionStatusIcon" />
+          <span class="hidden text-xs font-medium md:inline">{{ sessionStatusShortText }}</span>
+        </div>
+
         <!-- 分隔线 -->
         <div
           class="h-8 w-px bg-gradient-to-b from-transparent via-gray-300 to-transparent opacity-50 dark:via-gray-600"
@@ -326,13 +337,28 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import LogoTitle from '@/components/common/LogoTitle.vue'
 import ThemeToggle from '@/components/common/ThemeToggle.vue'
+
+// Props
+const props = defineProps({
+  sessionToken: {
+    type: String,
+    default: ''
+  },
+  expiresAt: {
+    type: [String, Number],
+    default: null
+  }
+})
+
+// Emits
+const emit = defineEmits(['logout'])
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -343,6 +369,105 @@ const currentUser = computed(() => authStore.user || { username: 'Admin' })
 // OEM设置
 const oemSettings = computed(() => authStore.oemSettings || {})
 const oemLoading = computed(() => authStore.oemLoading)
+
+// Session 状态计算
+const currentTime = ref(Date.now())
+const refreshThreshold = 5 * 60 * 1000 // 5 minutes
+
+const expiryTimestamp = computed(() => {
+  if (!props.expiresAt) return null
+  if (typeof props.expiresAt === 'string') {
+    return new Date(props.expiresAt).getTime()
+  }
+  return props.expiresAt
+})
+
+const timeUntilExpiry = computed(() => {
+  if (!expiryTimestamp.value) return 0
+  return Math.max(0, expiryTimestamp.value - currentTime.value)
+})
+
+const isExpired = computed(() => {
+  return timeUntilExpiry.value <= 0
+})
+
+const needsRefresh = computed(() => {
+  return timeUntilExpiry.value > 0 && timeUntilExpiry.value <= refreshThreshold
+})
+
+const sessionStatus = computed(() => {
+  if (!props.sessionToken) return 'none'
+  if (isExpired.value) return 'expired'
+  if (needsRefresh.value) return 'expiring'
+  return 'active'
+})
+
+const sessionStatusClass = computed(() => {
+  switch (sessionStatus.value) {
+    case 'active':
+      return 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
+    case 'expiring':
+      return 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400'
+    case 'expired':
+      return 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+    default:
+      return 'bg-gray-50 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+  }
+})
+
+const sessionStatusIcon = computed(() => {
+  switch (sessionStatus.value) {
+    case 'active':
+      return 'fas fa-check-circle'
+    case 'expiring':
+      return 'fas fa-clock'
+    case 'expired':
+      return 'fas fa-times-circle'
+    default:
+      return 'fas fa-question-circle'
+  }
+})
+
+const sessionStatusText = computed(() => {
+  switch (sessionStatus.value) {
+    case 'active':
+      return '会话正常'
+    case 'expiring':
+      return `会话即将过期 (${formatTime(timeUntilExpiry.value)})`
+    case 'expired':
+      return '会话已过期'
+    default:
+      return '未登录'
+  }
+})
+
+const sessionStatusShortText = computed(() => {
+  switch (sessionStatus.value) {
+    case 'active':
+      return '已连接'
+    case 'expiring':
+      return '即将过期'
+    case 'expired':
+      return '已过期'
+    default:
+      return '离线'
+  }
+})
+
+// 格式化时间
+const formatTime = (ms) => {
+  const seconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+
+  if (hours > 0) {
+    return `${hours}小时${minutes % 60}分钟`
+  } else if (minutes > 0) {
+    return `${minutes}分钟`
+  } else {
+    return `${seconds}秒`
+  }
+}
 
 // 版本信息
 const versionInfo = ref({
@@ -491,6 +616,8 @@ const logout = () => {
     authStore.logout()
     router.push('/login')
     showToast('已安全退出', 'success')
+    // 通知父组件
+    emit('logout')
   }
   userMenuOpen.value = false
 }
@@ -521,6 +648,23 @@ const handleClickOutside = (event) => {
   }
 }
 
+// Session 时钟定时器
+let clockTimer = null
+
+const startClock = () => {
+  if (clockTimer) return
+  clockTimer = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 1000)
+}
+
+const stopClock = () => {
+  if (clockTimer) {
+    clearInterval(clockTimer)
+    clockTimer = null
+  }
+}
+
 onMounted(() => {
   checkForUpdates()
 
@@ -529,12 +673,40 @@ onMounted(() => {
     checkForUpdates()
   }, 3600000) // 1小时
 
+  // 启动 session 时钟
+  if (props.sessionToken) {
+    startClock()
+  }
+
   document.addEventListener('click', handleClickOutside)
 })
 
 onUnmounted(() => {
+  // 清理时钟定时器
+  stopClock()
+
   document.removeEventListener('click', handleClickOutside)
 })
+
+watch(
+  () => props.sessionToken,
+  (newToken) => {
+    if (newToken) {
+      startClock()
+    } else {
+      stopClock()
+    }
+  }
+)
+
+watch(
+  () => props.expiresAt,
+  () => {
+    if (props.sessionToken) {
+      currentTime.value = Date.now()
+    }
+  }
+)
 </script>
 
 <style scoped>

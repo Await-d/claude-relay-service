@@ -71,6 +71,24 @@ class LRUCache {
   }
 
   /**
+   * 删除指定键
+   * @param {string} key - 缓存键
+   * @returns {boolean} 是否删除成功
+   */
+  delete(key) {
+    return this.cache.delete(key)
+  }
+
+  /**
+   * 判断是否包含指定键
+   * @param {string} key - 缓存键
+   * @returns {boolean}
+   */
+  has(key) {
+    return this.cache.has(key)
+  }
+
+  /**
    * 清理过期项
    */
   cleanup() {
@@ -100,6 +118,49 @@ class LRUCache {
     this.misses = 0
     this.evictions = 0
     console.log(`🗑️ LRU Cache: Cleared ${size} items`)
+  }
+
+  /**
+   * 返回一个 entries 迭代器，值为缓存存储的实际数据
+   * @returns {IterableIterator<[string, *]>}
+   */
+  entries() {
+    const iterator = this.cache.entries()
+    return {
+      [Symbol.iterator]() {
+        return {
+          next() {
+            const { value, done } = iterator.next()
+            if (done) {
+              return { value: undefined, done: true }
+            }
+            const [key, item] = value
+            return { value: [key, item.value], done: false }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 返回一个 values 迭代器，值为缓存存储的实际数据
+   * @returns {IterableIterator<*>}
+   */
+  values() {
+    const iterator = this.cache.values()
+    return {
+      [Symbol.iterator]() {
+        return {
+          next() {
+            const { value, done } = iterator.next()
+            if (done) {
+              return { value: undefined, done: true }
+            }
+            return { value: value.value, done: false }
+          }
+        }
+      }
+    }
   }
 
   /**

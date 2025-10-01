@@ -1,7 +1,12 @@
 const axios = require('axios')
 const crypto = require('crypto')
+const nodemailer = require('nodemailer')
+const { HttpsProxyAgent } = require('https-proxy-agent')
+const { SocksProxyAgent } = require('socks-proxy-agent')
 const logger = require('../utils/logger')
 const webhookConfigService = require('./webhookConfigService')
+const { getISOStringWithTimezone } = require('../utils/dateHelper')
+const appConfig = require('../../config/config')
 
 class WebhookService {
   constructor() {
@@ -11,10 +16,17 @@ class WebhookService {
       feishu: this.sendToFeishu.bind(this),
       slack: this.sendToSlack.bind(this),
       discord: this.sendToDiscord.bind(this),
+      telegram: this.sendToTelegram.bind(this),
+      custom: this.sendToCustom.bind(this),
       bark: this.sendToBark.bind(this),
       iyuu: this.sendToIYUU.bind(this),
-      custom: this.sendToCustom.bind(this)
+      smtp: this.sendToSMTP.bind(this)
     }
+    this.timezone = appConfig.system?.timezone || 'Asia/Shanghai'
+  }
+
+  getLocalizedTimestamp(date = new Date()) {
+    return date.toLocaleString('zh-CN', { timeZone: this.timezone })
   }
 
   /**
@@ -200,6 +212,109 @@ class WebhookService {
   }
 
   /**
+   * Telegram Bot 通知
+   */
+  async sendToTelegram(platform, type, data) {
+    if (!platform.botToken) {
+      throw new Error('Telegram 配置缺少 botToken')
+    }
+
+    if (!platform.chatId) {
+      throw new Error('Telegram 配置缺少 chatId')
+    }
+
+    const title = this.getNotificationTitle(type)
+    const timestamp = this.getLocalizedTimestamp()
+    const details = this.buildNotificationDetails(data)
+
+    const lines = details.map(
+      (detail) => `<b>${this.escapeHtml(detail.label)}</b>: ${this.escapeHtml(detail.value)}`
+    )
+
+    const htmlMessage = `
+<b>${this.escapeHtml(title)}</b>
+
+<b>服务</b>: Claude Relay Service
+<b>时间</b>: ${this.escapeHtml(timestamp)}
+
+${lines.join('\n')}
+    `.trim()
+
+    const apiBase = platform.apiBaseUrl || 'https://api.telegram.org'
+    const url = `${apiBase.replace(/\/$/, '')}/bot${platform.botToken}/sendMessage`
+    const payload = {
+      chat_id: platform.chatId,
+      text: htmlMessage,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    }
+
+    if (platform.messageThreadId) {
+      payload.message_thread_id = platform.messageThreadId
+    }
+
+    const axiosConfig = this.getProxyAxiosConfig(platform.proxyUrl)
+
+    await this.sendHttpRequest(url, payload, platform.timeout || 10000, axiosConfig)
+  }
+
+  /**
+   * SMTP 邮件通知
+   */
+  async sendToSMTP(platform, type, data) {
+    if (!platform.host) {
+      throw new Error('SMTP 配置缺少 host')
+    }
+    if (!platform.port) {
+      throw new Error('SMTP 配置缺少 port')
+    }
+    if (!platform.to) {
+      throw new Error('SMTP 配置缺少收件人 (to)')
+    }
+
+    const transportOptions = {
+      host: platform.host,
+      port: platform.port,
+      secure:
+        typeof platform.secure === 'boolean' ? platform.secure : Number(platform.port) === 465,
+      auth: platform.username
+        ? {
+            user: platform.username,
+            pass: platform.password
+          }
+        : undefined,
+      tls: platform.rejectUnauthorized === false ? { rejectUnauthorized: false } : undefined
+    }
+
+    if (platform.proxyUrl) {
+      transportOptions.proxy = platform.proxyUrl
+    }
+
+    const transporter = nodemailer.createTransport(transportOptions)
+
+    const title = this.getNotificationTitle(type)
+    const html = this.formatMessageForEmail(type, data)
+    const text = this.formatMessageForEmailText(type, data)
+
+    const mailOptions = {
+      from: platform.from || platform.username,
+      to: this.normalizeRecipients(platform.to),
+      subject: title.replace(/^([\p{Emoji}\p{Extended_Pictographic}]+\s*)/u, ''),
+      text,
+      html
+    }
+
+    if (platform.cc) {
+      mailOptions.cc = this.normalizeRecipients(platform.cc)
+    }
+    if (platform.bcc) {
+      mailOptions.bcc = this.normalizeRecipients(platform.bcc)
+    }
+
+    await transporter.sendMail(mailOptions)
+  }
+
+  /**
    * Bark推送 - iOS推送通知服务
    */
   async sendToBark(platform, type, data) {
@@ -340,7 +455,7 @@ class WebhookService {
 
     // 添加服务信息
     lines.push('**服务**: Claude Relay Service')
-    lines.push(`**时间**: ${new Date().toLocaleString('zh-CN')}`)
+    lines.push(`**时间**: ${this.getLocalizedTimestamp()}`)
     lines.push('')
 
     // 添加详细信息
@@ -422,7 +537,7 @@ class WebhookService {
     const payload = {
       type,
       service: 'claude-relay-service',
-      timestamp: new Date().toISOString(),
+      timestamp: getISOStringWithTimezone(new Date()),
       data
     }
 
@@ -432,14 +547,20 @@ class WebhookService {
   /**
    * 发送HTTP请求
    */
-  async sendHttpRequest(url, payload, timeout) {
-    const response = await axios.post(url, payload, {
+  async sendHttpRequest(url, payload, timeout, extraConfig = {}) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'claude-relay-service/2.0',
+      ...(extraConfig.headers || {})
+    }
+
+    const axiosConfig = {
       timeout,
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'claude-relay-service/2.0'
-      }
-    })
+      ...extraConfig,
+      headers
+    }
+
+    const response = await axios.post(url, payload, axiosConfig)
 
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -516,11 +637,8 @@ class WebhookService {
     const title = this.getNotificationTitle(type)
     const details = this.formatNotificationDetails(data)
 
-    return (
-      `## ${title}\n\n` +
-      `> **服务**: Claude Relay Service\n` +
-      `> **时间**: ${new Date().toLocaleString('zh-CN')}\n\n${details}`
-    )
+    const timestamp = this.getLocalizedTimestamp()
+    return `## ${title}\n\n> **服务**: Claude Relay Service\n> **时间**: ${timestamp}\n\n${details}`
   }
 
   /**
@@ -529,10 +647,8 @@ class WebhookService {
   formatMessageForDingTalk(type, data) {
     const details = this.formatNotificationDetails(data)
 
-    return (
-      `#### 服务: Claude Relay Service\n` +
-      `#### 时间: ${new Date().toLocaleString('zh-CN')}\n\n${details}`
-    )
+    const timestamp = this.getLocalizedTimestamp()
+    return `#### 服务: Claude Relay Service\n#### 时间: ${timestamp}\n\n${details}`
   }
 
   /**
@@ -547,9 +663,10 @@ class WebhookService {
    */
   formatMessageForSlack(type, data) {
     const title = this.getNotificationTitle(type)
+    const timestamp = this.getLocalizedTimestamp()
     const details = this.formatNotificationDetails(data)
 
-    return `*${title}*\n${details}`
+    return `*${title}*\n服务: Claude Relay Service\n时间: ${timestamp}\n\n${details}`
   }
 
   /**
@@ -610,7 +727,7 @@ class WebhookService {
     }
 
     // 添加时间戳
-    lines.push(`时间: ${new Date().toLocaleString('zh-CN')}`)
+    lines.push(`时间: ${this.getLocalizedTimestamp()}`)
 
     return lines.join('\n')
   }
@@ -690,84 +807,153 @@ class WebhookService {
       quotaWarning: '📊 配额警告',
       systemError: '❌ 系统错误',
       securityAlert: '🔒 安全警报',
+      rateLimitRecovery: '🎉 限流恢复通知',
       test: '🧪 测试通知'
     }
 
     return titles[type] || '📢 系统通知'
   }
 
+  buildNotificationDetails(data = {}) {
+    const details = []
+
+    if (data.accountName) {
+      details.push({ label: '账号', value: data.accountName })
+    }
+
+    if (data.platform) {
+      details.push({ label: '平台', value: data.platform })
+    }
+
+    if (data.platforms && Array.isArray(data.platforms) && data.platforms.length > 0) {
+      details.push({ label: '涉及平台', value: data.platforms.join(', ') })
+    }
+
+    if (data.totalAccounts !== undefined) {
+      details.push({ label: '涉及账户数', value: String(data.totalAccounts) })
+    }
+
+    if (data.status) {
+      const color = this.getStatusColor(data.status)
+      details.push({ label: '状态', value: data.status, color })
+    }
+
+    if (data.errorCode) {
+      details.push({ label: '错误代码', value: data.errorCode, isCode: true })
+    }
+
+    if (data.reason) {
+      details.push({ label: '原因', value: data.reason })
+    }
+
+    if (data.message) {
+      details.push({ label: '消息', value: data.message })
+    }
+
+    if (data.quota) {
+      const quotaLine = `${data.quota.remaining}/${data.quota.total}`
+      details.push({ label: '剩余配额', value: quotaLine })
+      if (data.quota.percentage !== undefined) {
+        details.push({ label: '使用率', value: `${data.quota.percentage}%` })
+      }
+    }
+
+    if (data.usage !== undefined) {
+      details.push({ label: '使用率', value: `${data.usage}%` })
+    }
+
+    if (data.metadata && typeof data.metadata === 'object') {
+      Object.entries(data.metadata).forEach(([key, value]) => {
+        details.push({
+          label: key,
+          value: typeof value === 'object' ? JSON.stringify(value) : value
+        })
+      })
+    }
+
+    return details
+  }
+
+  getStatusColor(status) {
+    const colors = {
+      error: '#dc3545',
+      unauthorized: '#fd7e14',
+      blocked: '#6f42c1',
+      disabled: '#6c757d',
+      active: '#28a745',
+      warning: '#ffc107',
+      recovered: '#28a745'
+    }
+
+    return colors[status] || '#007bff'
+  }
+
   /**
    * 格式化通知详情
    */
   formatNotificationDetails(data) {
-    const lines = []
-
-    if (data.accountName) {
-      lines.push(`**账号**: ${data.accountName}`)
-    }
-
-    if (data.platform) {
-      lines.push(`**平台**: ${data.platform}`)
-    }
-
-    if (data.status) {
-      lines.push(`**状态**: ${data.status}`)
-    }
-
-    if (data.errorCode) {
-      lines.push(`**错误代码**: ${data.errorCode}`)
-    }
-
-    if (data.reason) {
-      lines.push(`**原因**: ${data.reason}`)
-    }
-
-    if (data.message) {
-      lines.push(`**消息**: ${data.message}`)
-    }
-
-    if (data.quota) {
-      lines.push(`**剩余配额**: ${data.quota.remaining}/${data.quota.total}`)
-    }
-
-    if (data.usage) {
-      lines.push(`**使用率**: ${data.usage}%`)
-    }
-
-    return lines.join('\n')
+    const details = this.buildNotificationDetails(data)
+    return details.map((detail) => `**${detail.label}**: ${detail.value}`).join('\n')
   }
 
   /**
    * 格式化Discord字段
    */
   formatNotificationFields(data) {
-    const fields = []
+    const details = this.buildNotificationDetails(data)
+    return details.map((detail) => ({
+      name: detail.label,
+      value: String(detail.value),
+      inline: detail.value && String(detail.value).length <= 32
+    }))
+  }
 
-    if (data.accountName) {
-      fields.push({ name: '账号', value: data.accountName, inline: true })
-    }
+  formatMessageForEmail(type, data) {
+    const title = this.getNotificationTitle(type)
+    const timestamp = this.getLocalizedTimestamp()
+    const details = this.buildNotificationDetails(data)
 
-    if (data.platform) {
-      fields.push({ name: '平台', value: data.platform, inline: true })
-    }
+    const detailHtml = details
+      .map((detail) => {
+        const label = this.escapeHtml(detail.label)
+        const value = this.escapeHtml(detail.value)
+        if (detail.color) {
+          return `<p><strong>${label}:</strong> <span style="color: ${detail.color};">${value}</span></p>`
+        }
+        if (detail.isCode) {
+          return `<p><strong>${label}:</strong> <code style="background: #f1f3f4; padding: 2px 6px; border-radius: 4px;">${value}</code></p>`
+        }
+        return `<p><strong>${label}:</strong> ${value}</p>`
+      })
+      .join('\n')
 
-    if (data.status) {
-      fields.push({ name: '状态', value: data.status, inline: true })
-    }
+    return `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; background: #f6f8fb; padding: 24px;">
+  <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); overflow: hidden;">
+    <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; padding: 20px 24px;">
+      <h2 style="margin: 0; font-size: 20px; font-weight: 600;">${this.escapeHtml(title)}</h2>
+      <p style="margin: 6px 0 0; opacity: 0.85;">Claude Relay Service</p>
+    </div>
+    <div style="padding: 24px;">
+      ${detailHtml || '<p>暂无更多详情</p>'}
+    </div>
+    <div style="padding: 16px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 13px; color: #475569;">
+      <p style="margin: 0 0 8px;"><strong>发送时间:</strong> ${this.escapeHtml(timestamp)}</p>
+      <p style="margin: 0;">此邮件由 Claude Relay Service 自动发送，请勿直接回复。</p>
+    </div>
+  </div>
+</div>
+    `.trim()
+  }
 
-    if (data.errorCode) {
-      fields.push({ name: '错误代码', value: data.errorCode, inline: false })
-    }
+  formatMessageForEmailText(type, data) {
+    const title = this.getNotificationTitle(type)
+    const timestamp = this.getLocalizedTimestamp()
+    const details = this.buildNotificationDetails(data)
 
-    if (data.reason) {
-      fields.push({ name: '原因', value: data.reason, inline: false })
-    }
+    const body = details.map((detail) => `${detail.label}: ${detail.value}`).join('\n')
 
-    if (data.message) {
-      fields.push({ name: '消息', value: data.message, inline: false })
-    }
-
-    return fields
+    return `${title}\n=====================================\n服务: Claude Relay Service\n时间: ${timestamp}\n\n${body}\n\n此邮件由系统自动发送，请勿回复。`
   }
 
   /**
@@ -779,6 +965,7 @@ class WebhookService {
       quotaWarning: 'yellow',
       systemError: 'red',
       securityAlert: 'red',
+      rateLimitRecovery: 'green',
       test: 'blue'
     }
 
@@ -794,6 +981,7 @@ class WebhookService {
       quotaWarning: ':chart_with_downwards_trend:',
       systemError: ':x:',
       securityAlert: ':lock:',
+      rateLimitRecovery: ':tada:',
       test: ':test_tube:'
     }
 
@@ -809,10 +997,60 @@ class WebhookService {
       quotaWarning: 0xffeb3b, // 黄色
       systemError: 0xf44336, // 红色
       securityAlert: 0xf44336, // 红色
+      rateLimitRecovery: 0x4caf50, // 绿色
       test: 0x2196f3 // 蓝色
     }
 
     return colors[type] || 0x9e9e9e // 灰色
+  }
+
+  normalizeRecipients(value) {
+    if (!value) {
+      return undefined
+    }
+
+    if (Array.isArray(value)) {
+      return value.join(', ')
+    }
+
+    if (typeof value === 'string') {
+      return value
+        .split(/[;,]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join(', ')
+    }
+
+    return value
+  }
+
+  escapeHtml(value) {
+    if (value === undefined || value === null) {
+      return ''
+    }
+
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  getProxyAxiosConfig(proxyUrl) {
+    if (!proxyUrl) {
+      return {}
+    }
+
+    const agent = /^socks/i.test(proxyUrl)
+      ? new SocksProxyAgent(proxyUrl)
+      : new HttpsProxyAgent(proxyUrl)
+
+    return {
+      httpsAgent: agent,
+      httpAgent: agent,
+      proxy: false
+    }
   }
 
   /**
@@ -822,7 +1060,7 @@ class WebhookService {
     try {
       const testData = {
         message: 'Claude Relay Service webhook测试',
-        timestamp: new Date().toISOString()
+        timestamp: getISOStringWithTimezone(new Date())
       }
 
       await this.sendToPlatform(platform, 'test', testData, { maxRetries: 1, retryDelay: 1000 })

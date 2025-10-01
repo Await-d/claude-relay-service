@@ -58,6 +58,17 @@ class PricingService {
       'claude-haiku-3': 0.0000016,
       'claude-haiku-3-5': 0.0000016
     }
+
+    this.longContextPricing = {
+      'claude-sonnet-4-20250514[1m]': {
+        input: 0.000006,
+        output: 0.0000225
+      },
+      'claude-sonnet-4-20250514[1M]': {
+        input: 0.000006,
+        output: 0.0000225
+      }
+    }
   }
 
   // 初始化价格服务
@@ -253,16 +264,21 @@ class PricingService {
     // 尝试直接匹配
     if (this.pricingData[modelName]) {
       logger.debug(`💰 Found exact pricing match for ${modelName}`)
-      return this.pricingData[modelName]
+      return this.ensureCachePricing(this.pricingData[modelName])
     }
 
-    // 对于带有[1M]后缀的模型，尝试使用基础模型定价
-    if (modelName.endsWith('[1M]')) {
-      const baseModel = modelName.replace(/\[1M\]$/, '')
+    // 对于带有 1M 后缀的模型，尝试使用基础模型定价（兼容大小写）
+    if (/\[1m\]$/i.test(modelName)) {
+      const baseModel = modelName.replace(/\[1m\]$/i, '')
       if (this.pricingData[baseModel]) {
         logger.debug(`💰 Found pricing for ${modelName} using base model: ${baseModel}`)
-        return this.pricingData[baseModel]
+        return this.ensureCachePricing(this.pricingData[baseModel])
       }
+    }
+
+    if (modelName === 'gpt-5-codex' && this.pricingData['gpt-5']) {
+      logger.info('💰 Using gpt-5 pricing as fallback for gpt-5-codex')
+      return this.ensureCachePricing(this.pricingData['gpt-5'])
     }
 
     // 对于Bedrock区域前缀模型（如 us.anthropic.claude-sonnet-4-20250514-v1:0），
@@ -274,7 +290,7 @@ class PricingService {
         logger.debug(
           `💰 Found pricing for ${modelName} by removing region prefix: ${withoutRegion}`
         )
-        return this.pricingData[withoutRegion]
+        return this.ensureCachePricing(this.pricingData[withoutRegion])
       }
     }
 
@@ -285,7 +301,7 @@ class PricingService {
       const normalizedKey = key.toLowerCase().replace(/[_-]/g, '')
       if (normalizedKey.includes(normalizedModel) || normalizedModel.includes(normalizedKey)) {
         logger.debug(`💰 Found pricing for ${modelName} using fuzzy match: ${key}`)
-        return value
+        return this.ensureCachePricing(value)
       }
     }
 
@@ -297,7 +313,7 @@ class PricingService {
       for (const [key, value] of Object.entries(this.pricingData)) {
         if (key.includes(coreModel) || key.replace('anthropic.', '').includes(coreModel)) {
           logger.debug(`💰 Found pricing for ${modelName} using Bedrock core model match: ${key}`)
-          return value
+          return this.ensureCachePricing(value)
         }
       }
     }
@@ -357,10 +373,31 @@ class PricingService {
   }
 
   // 计算使用费用
-  calculateCost(usage, modelName) {
-    const pricing = this.getModelPricing(modelName)
+  calculateCost(usage = {}, modelName) {
+    const pricing = this.ensureCachePricing(this.getModelPricing(modelName))
 
-    if (!pricing) {
+    const findLongContextPricing = (name) => {
+      if (!name) {
+        return null
+      }
+      if (this.longContextPricing[name]) {
+        return this.longContextPricing[name]
+      }
+      const lowerName = name.toLowerCase()
+      return this.longContextPricing[lowerName] || null
+    }
+
+    const longContextPricing = findLongContextPricing(modelName)
+    const totalInputTokens =
+      (usage.input_tokens || 0) +
+      (usage.cache_creation_input_tokens || 0) +
+      (usage.cache_read_input_tokens || 0)
+
+    const isLongContextModel = !!modelName && /\[1m\]$/i.test(modelName)
+    const isLongContextRequest = isLongContextModel && totalInputTokens > 200000
+    const useLongContextPricing = isLongContextRequest && !!longContextPricing
+
+    if (!pricing && !useLongContextPricing) {
       return {
         inputCost: 0,
         outputCost: 0,
@@ -369,42 +406,57 @@ class PricingService {
         ephemeral5mCost: 0,
         ephemeral1hCost: 0,
         totalCost: 0,
-        hasPricing: false
+        hasPricing: false,
+        isLongContextRequest: false
       }
     }
 
-    const inputCost = (usage.input_tokens || 0) * (pricing.input_cost_per_token || 0)
-    const outputCost = (usage.output_tokens || 0) * (pricing.output_cost_per_token || 0)
-    const cacheReadCost =
-      (usage.cache_read_input_tokens || 0) * (pricing.cache_read_input_token_cost || 0)
+    let inputCost = 0
+    let outputCost = 0
 
-    // 处理缓存创建费用：
-    // 1. 如果有详细的 cache_creation 对象，使用它
-    // 2. 否则使用总的 cache_creation_input_tokens（向后兼容）
+    if (useLongContextPricing) {
+      const resolvedLongPricing =
+        longContextPricing || this.longContextPricing[Object.keys(this.longContextPricing)[0]]
+
+      if (resolvedLongPricing) {
+        logger.info(
+          `💰 Using 1M context pricing for ${modelName}: input=$${resolvedLongPricing.input}/token, output=$${resolvedLongPricing.output}/token`
+        )
+        inputCost = (usage.input_tokens || 0) * resolvedLongPricing.input
+        outputCost = (usage.output_tokens || 0) * resolvedLongPricing.output
+      }
+    } else {
+      inputCost = (usage.input_tokens || 0) * (pricing?.input_cost_per_token || 0)
+      outputCost = (usage.output_tokens || 0) * (pricing?.output_cost_per_token || 0)
+    }
+
+    const cacheReadCost =
+      (usage.cache_read_input_tokens || 0) * (pricing?.cache_read_input_token_cost || 0)
+
     let ephemeral5mCost = 0
     let ephemeral1hCost = 0
     let cacheCreateCost = 0
 
     if (usage.cache_creation && typeof usage.cache_creation === 'object') {
-      // 有详细的缓存创建数据
       const ephemeral5mTokens = usage.cache_creation.ephemeral_5m_input_tokens || 0
       const ephemeral1hTokens = usage.cache_creation.ephemeral_1h_input_tokens || 0
 
-      // 5分钟缓存使用标准的 cache_creation_input_token_cost
-      ephemeral5mCost = ephemeral5mTokens * (pricing.cache_creation_input_token_cost || 0)
+      ephemeral5mCost = ephemeral5mTokens * (pricing?.cache_creation_input_token_cost || 0)
 
-      // 1小时缓存使用硬编码的价格
       const ephemeral1hPrice = this.getEphemeral1hPricing(modelName)
       ephemeral1hCost = ephemeral1hTokens * ephemeral1hPrice
 
-      // 总的缓存创建费用
       cacheCreateCost = ephemeral5mCost + ephemeral1hCost
     } else if (usage.cache_creation_input_tokens) {
-      // 旧格式，所有缓存创建 tokens 都按 5 分钟价格计算（向后兼容）
       cacheCreateCost =
-        (usage.cache_creation_input_tokens || 0) * (pricing.cache_creation_input_token_cost || 0)
+        (usage.cache_creation_input_tokens || 0) * (pricing?.cache_creation_input_token_cost || 0)
       ephemeral5mCost = cacheCreateCost
     }
+
+    const totalCost = inputCost + outputCost + cacheCreateCost + cacheReadCost
+
+    const resolvedLongPricing =
+      longContextPricing || this.longContextPricing[Object.keys(this.longContextPricing)[0]]
 
     return {
       inputCost,
@@ -413,13 +465,18 @@ class PricingService {
       cacheReadCost,
       ephemeral5mCost,
       ephemeral1hCost,
-      totalCost: inputCost + outputCost + cacheCreateCost + cacheReadCost,
-      hasPricing: true,
+      totalCost,
+      hasPricing: !!pricing || useLongContextPricing,
+      isLongContextRequest,
       pricing: {
-        input: pricing.input_cost_per_token || 0,
-        output: pricing.output_cost_per_token || 0,
-        cacheCreate: pricing.cache_creation_input_token_cost || 0,
-        cacheRead: pricing.cache_read_input_token_cost || 0,
+        input: useLongContextPricing
+          ? resolvedLongPricing?.input || 0
+          : pricing?.input_cost_per_token || 0,
+        output: useLongContextPricing
+          ? resolvedLongPricing?.output || 0
+          : pricing?.output_cost_per_token || 0,
+        cacheCreate: pricing?.cache_creation_input_token_cost || 0,
+        cacheRead: pricing?.cache_read_input_token_cost || 0,
         ephemeral1h: this.getEphemeral1hPricing(modelName)
       }
     }

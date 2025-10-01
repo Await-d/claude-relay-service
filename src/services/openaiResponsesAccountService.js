@@ -349,22 +349,53 @@ class OpenAIResponsesAccountService {
   }
 
   async resetAccountStatus(accountId) {
-    const account = await this.getAccount(accountId)
-    if (!account) {
+    const client = database.getClientSafe()
+    const key = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
+    const account = await client.hgetall(key)
+
+    if (!account || !account.id) {
       throw new Error('Account not found')
     }
 
-    await this.updateAccount(accountId, {
-      status: account.apiKey ? 'active' : 'created',
-      schedulable: 'true',
+    await client.hset(key, {
+      status: 'active',
       errorMessage: '',
-      rateLimitedAt: '',
-      rateLimitStatus: '',
-      rateLimitResetAt: '',
-      rateLimitDuration: ''
+      schedulable: 'true',
+      isActive: 'true'
     })
 
+    await client.hdel(
+      key,
+      'rateLimitedAt',
+      'rateLimitStatus',
+      'rateLimitResetAt',
+      'quotaStoppedAt',
+      'unauthorizedAt',
+      'unauthorizedCount'
+    )
+
+    try {
+      const webhookNotifier = require('../utils/webhookNotifier')
+      await webhookNotifier.sendAccountAnomalyNotification({
+        accountId,
+        accountName: account.name || accountId,
+        platform: 'openai-responses',
+        status: 'recovered',
+        errorCode: 'STATUS_RESET',
+        reason: 'Account status manually reset',
+        timestamp: new Date().toISOString()
+      })
+    } catch (error) {
+      logger.warn('Failed to send OpenAI-Responses status reset webhook:', error)
+    }
+
     logger.info(`Reset OpenAI-Responses account status for ${accountId}`)
+
+    return {
+      success: true,
+      accountId,
+      accountName: account.name || accountId
+    }
   }
 
   _getRateLimitInfo(accountData) {
@@ -454,6 +485,27 @@ class OpenAIResponsesAccountService {
 
     if (accountData.accountType === 'shared') {
       await client.sadd(this.SHARED_ACCOUNTS_KEY, accountId)
+    }
+  }
+
+  async resetDailyUsage(accountId) {
+    const client = database.getClientSafe()
+    const key = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
+    const account = await client.hgetall(key)
+
+    if (!account || !account.id) {
+      throw new Error('Account not found')
+    }
+
+    await client.hset(key, {
+      dailyUsage: '0',
+      lastResetDate: database.getDateStringInTimezone(),
+      quotaStoppedAt: ''
+    })
+
+    return {
+      success: true,
+      accountId
     }
   }
 }

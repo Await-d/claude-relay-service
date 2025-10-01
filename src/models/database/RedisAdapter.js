@@ -5698,6 +5698,62 @@ class RedisAdapter extends DatabaseAdapter {
   }
 
   /**
+   * 获取所有用户
+   * @param {Object} [options={}] - 过滤选项
+   * @param {string} [options.role] - 按角色过滤
+   * @param {boolean} [options.isActive] - 按活跃状态过滤
+   * @param {number} [options.limit=1000] - 返回数量上限
+   * @returns {Promise<{users: Array, total: number}>}
+   */
+  async getAllUsers(options = {}) {
+    try {
+      const client = this.getClientSafe()
+      const { role, isActive, limit } = options
+      const max = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : null
+
+      const keys = await client.keys('user:*')
+      const users = []
+
+      for (const key of keys) {
+        if (!key.startsWith('user:')) {
+          continue
+        }
+
+        const userId = key.replace('user:', '')
+        const user = await this.getUserById(userId)
+        if (!user) {
+          continue
+        }
+
+        if (role && user.role !== role) {
+          continue
+        }
+
+        if (typeof isActive === 'boolean' && user.isActive !== isActive) {
+          continue
+        }
+
+        users.push({
+          ...user,
+          id: userId
+        })
+
+        if (max && users.length >= max) {
+          break
+        }
+      }
+
+      return {
+        users,
+        total: users.length
+      }
+    } catch (error) {
+      logger.error('❌ Failed to get all users:', error)
+      throw error
+    }
+  }
+
+  /**
    * 更新用户信息
    * @param {string} userId - 用户ID
    * @param {Object} updateData - 更新数据

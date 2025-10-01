@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
   const sessionId = ref('')
   const expiresAt = ref(null)
   const user = ref(null)
+  const sessionType = ref(localStorage.getItem('sessionType') || '')
   const loginError = ref('')
   const loginLoading = ref(false)
   const refreshing = ref(false)
@@ -26,11 +27,54 @@ export const useAuthStore = defineStore('auth', () => {
   const username = computed(() => user.value?.username || '')
 
   // 计算属性
-  const isAuthenticated = computed(() => !!sessionToken.value && !!user.value)
+  const isAuthenticated = computed(() => !!sessionToken.value)
   const token = computed(() => sessionToken.value) // 主要使用sessionToken
   const legacyToken = computed(() => authToken.value) // 向后兼容旧的authToken
 
   // 方法
+  function persistUser(userData) {
+    if (!userData) {
+      user.value = null
+      localStorage.removeItem('user')
+      return
+    }
+
+    const normalizedUser = {
+      id: userData.id || userData.username || '',
+      username: userData.username || userData.id || '',
+      role: userData.role || 'admin',
+      ...userData
+    }
+
+    user.value = normalizedUser
+    try {
+      localStorage.setItem('user', JSON.stringify(normalizedUser))
+    } catch (error) {
+      console.warn('Persist user failed:', error)
+    }
+  }
+
+  function restoreUser() {
+    const storedUser = localStorage.getItem('user')
+    if (!storedUser) {
+      user.value = null
+      return
+    }
+
+    try {
+      const parsedUser = JSON.parse(storedUser)
+      user.value = {
+        id: parsedUser.id || parsedUser.username || '',
+        username: parsedUser.username || parsedUser.id || '',
+        role: parsedUser.role || 'admin',
+        ...parsedUser
+      }
+    } catch (error) {
+      console.warn('Restore user failed:', error)
+      user.value = null
+    }
+  }
+
   async function login(credentials) {
     loginLoading.value = true
     loginError.value = ''
@@ -39,23 +83,42 @@ export const useAuthStore = defineStore('auth', () => {
       // 使用管理员认证API端点
       const result = await apiClient.post('/web/auth/login', credentials)
 
-      if (result.success && result.token) {
-        // 传统web登录响应格式适配
-        const token = result.token
-        const id = result.token // sessionId就是token
-        const expiry = result.expiresIn ? new Date(Date.now() + result.expiresIn).toISOString() : null
-        const userData = {
-          username: result.username,
-          id: result.username,
-          role: 'admin'
+      if (result?.success) {
+        const payload = result.data || {}
+        const token =
+          payload.sessionToken || result.sessionToken || result.token || ''
+
+        if (!token) {
+          throw new Error(result.message || '登录失败')
         }
+
+        const id = payload.sessionId || result.sessionId || token
+
+        let expiry = payload.expiresAt || result.expiresAt || null
+        if (!expiry && result.expiresIn) {
+          try {
+            expiry = new Date(Date.now() + result.expiresIn).toISOString()
+          } catch (error) {
+            console.warn('Calculate expiry failed:', error)
+          }
+        }
+
+        const userData =
+          payload.user || {
+            id: payload.userId || result.userId || result.username || credentials.username,
+            username: payload.username || result.username || credentials.username,
+            role: payload.role || 'admin'
+          }
 
         // 更新状态
         sessionToken.value = token
         sessionId.value = id
         expiresAt.value = expiry
-        user.value = userData
+        persistUser(userData)
         isLoggedIn.value = true
+
+        sessionType.value = token.includes('.') ? 'jwt' : 'legacy'
+        localStorage.setItem('sessionType', sessionType.value)
 
         // 保存到localStorage
         localStorage.setItem('sessionToken', token)
@@ -83,7 +146,11 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       // 调用后端登出API
       if (sessionToken.value) {
-        await apiClient.post('/auth/logout')
+        if (sessionType.value === 'legacy') {
+          await apiClient.post('/web/auth/logout')
+        } else {
+          await apiClient.post('/auth/logout')
+        }
       }
     } catch (error) {
       console.warn('Logout API call failed:', error.message)
@@ -102,13 +169,15 @@ export const useAuthStore = defineStore('auth', () => {
     sessionToken.value = ''
     sessionId.value = ''
     expiresAt.value = null
-    user.value = null
+    persistUser(null)
+    sessionType.value = ''
 
     // 清理localStorage
     localStorage.removeItem('authToken')
     localStorage.removeItem('sessionToken')
     localStorage.removeItem('sessionId')
     localStorage.removeItem('expiresAt')
+    localStorage.removeItem('sessionType')
   }
 
   function checkAuth() {
@@ -116,14 +185,18 @@ export const useAuthStore = defineStore('auth', () => {
     const storedSessionToken = localStorage.getItem('sessionToken')
     const storedSessionId = localStorage.getItem('sessionId')
     const storedExpiresAt = localStorage.getItem('expiresAt')
+    const storedSessionType = localStorage.getItem('sessionType')
 
     if (storedSessionToken) {
       sessionToken.value = storedSessionToken
       sessionId.value = storedSessionId || ''
       expiresAt.value = storedExpiresAt
+      sessionType.value = storedSessionType || (storedSessionToken.includes('.') ? 'jwt' : 'legacy')
 
       // 向后兼容
       authToken.value = storedSessionToken
+
+      restoreUser()
 
       // 检查会话是否过期
       if (storedExpiresAt && new Date(storedExpiresAt) <= new Date()) {
@@ -132,24 +205,33 @@ export const useAuthStore = defineStore('auth', () => {
       }
 
       isLoggedIn.value = true
-      // 验证token有效性
-      verifySession()
+      // 验证token有效性（仅JWT会话）
+      if (sessionType.value === 'jwt') {
+        verifySession()
+      }
     } else if (authToken.value) {
       // 向后兼容旧的authToken
       sessionToken.value = authToken.value
       isLoggedIn.value = true
-      verifySession()
+      restoreUser()
+      sessionType.value = authToken.value.includes('.') ? 'jwt' : 'legacy'
+      if (sessionType.value === 'jwt') {
+        verifySession()
+      }
     }
   }
 
   async function verifySession() {
+    if (!sessionToken.value || sessionType.value !== 'jwt') {
+      return
+    }
+
     try {
       // 使用新的会话验证端点
       const result = await apiClient.get('/auth/validate')
 
       if (result.success && result.data) {
-        user.value = result.data.user
-        // 会话有效，更新状态
+        persistUser(result.data.user)
         isLoggedIn.value = true
       } else {
         throw new Error('Session validation failed')
@@ -163,7 +245,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 刷新会话
   async function refreshSession() {
-    if (refreshing.value || !sessionToken.value) {
+    if (refreshing.value || !sessionToken.value || sessionType.value !== 'jwt') {
       return false
     }
 
@@ -184,7 +266,7 @@ export const useAuthStore = defineStore('auth', () => {
         sessionToken.value = newToken
         sessionId.value = newId
         expiresAt.value = newExpiry
-        user.value = userData
+        persistUser(userData)
 
         // 更新localStorage
         localStorage.setItem('sessionToken', newToken)
@@ -265,6 +347,7 @@ export const useAuthStore = defineStore('auth', () => {
     sessionId,
     expiresAt,
     user,
+    sessionType,
     username, // 计算属性
     loginError,
     loginLoading,

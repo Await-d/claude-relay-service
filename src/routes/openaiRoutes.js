@@ -17,6 +17,11 @@ function createProxyAgent(proxy) {
   return ProxyHelper.createProxyAgent(proxy)
 }
 
+function checkOpenAIPermissions(apiKeyData) {
+  const permissions = apiKeyData?.permissions || 'all'
+  return permissions === 'all' || permissions === 'openai'
+}
+
 // 使用统一调度器选择 OpenAI 账户
 async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel = null) {
   try {
@@ -79,11 +84,23 @@ async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel =
   }
 }
 
-router.post('/responses', authenticateApiKey, async (req, res) => {
+async function handleResponses(req, res) {
   let upstream = null
+  let accountId = null
+  let accountType = 'openai'
+  let sessionHash = null
   try {
     // 从中间件获取 API Key 数据
     const apiKeyData = req.apiKey || {}
+
+    if (!checkOpenAIPermissions(apiKeyData)) {
+      logger.warn('🚫 API Key lacks OpenAI permission', { apiKeyId: apiKeyData?.id })
+      return res.status(403).json({
+        error: {
+          message: 'This API key does not have permission to access OpenAI endpoints.'
+        }
+      })
+    }
 
     // 从请求头或请求体中提取会话 ID
     const sessionId =
@@ -104,9 +121,7 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     }
 
     const isStream = req.body?.stream !== false // 默认为流式（兼容现有行为）
-    const sessionHash = sessionId
-      ? crypto.createHash('sha256').update(sessionId).digest('hex')
-      : null
+    sessionHash = sessionId ? crypto.createHash('sha256').update(sessionId).digest('hex') : null
 
     // 判断是否为 Codex CLI 的请求
     const isCodexCLI = req.body?.instructions?.startsWith(
@@ -140,11 +155,15 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     }
 
     // 使用调度器选择账户
-    const { accessToken, accountId, accountType, proxy, account } = await getOpenAIAuthToken(
-      apiKeyData,
-      sessionId,
-      requestedModel
-    )
+    const {
+      accessToken,
+      accountId: selectedAccountId,
+      accountType: selectedAccountType,
+      proxy,
+      account
+    } = await getOpenAIAuthToken(apiKeyData, sessionId, requestedModel)
+    accountId = selectedAccountId
+    accountType = selectedAccountType || 'openai'
     if (accountType === 'openai-responses') {
       await openaiResponsesRelayService.handleRequest(req, res, account, apiKeyData)
       return
@@ -544,13 +563,47 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     req.on('aborted', cleanup)
   } catch (error) {
     logger.error('Proxy to ChatGPT codex/responses failed:', error)
-    const status = error.response?.status || 500
-    const message = error.response?.data || error.message || 'Internal server error'
+
+    const status = error.statusCode || error.response?.status || 500
+
+    if ((status === 401 || status === 402) && accountId) {
+      const reason =
+        status === 401
+          ? 'OpenAI account returned 401 unauthorized'
+          : 'OpenAI account returned 402 (possibly over quota)'
+      try {
+        await unifiedOpenAIScheduler.markAccountUnauthorized(
+          accountId,
+          accountType || 'openai',
+          sessionHash,
+          reason
+        )
+      } catch (markError) {
+        logger.error('❌ Failed to mark OpenAI account unauthorized:', markError)
+      }
+    }
+
+    let responsePayload = error.response?.data
+    if (!responsePayload) {
+      responsePayload = { error: { message: error.message || 'Internal server error' } }
+    } else if (typeof responsePayload === 'string') {
+      responsePayload = { error: { message: responsePayload } }
+    } else if (typeof responsePayload === 'object' && !responsePayload.error) {
+      responsePayload = {
+        error: {
+          message: responsePayload.message || error.message || 'Internal server error'
+        }
+      }
+    }
+
     if (!res.headersSent) {
-      res.status(status).json({ error: { message } })
+      res.status(status).json(responsePayload)
     }
   }
-})
+}
+
+router.post('/responses', authenticateApiKey, handleResponses)
+router.post('/v1/responses', authenticateApiKey, handleResponses)
 
 // 使用情况统计端点
 router.get('/usage', authenticateApiKey, async (req, res) => {

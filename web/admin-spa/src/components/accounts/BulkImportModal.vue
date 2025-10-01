@@ -31,42 +31,24 @@
           </button>
         </div>
 
-        <div class="grid gap-6 lg:grid-cols-[220px_1fr]">
-          <div class="space-y-6 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/70">
+        <div class="grid gap-6 lg:grid-cols-[260px_1fr]">
+          <div class="space-y-4 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/70">
             <div>
-              <h4 class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">选择平台</h4>
-              <CustomDropdown
-                v-model="selectedPlatform"
-                :options="platformOptions"
-                icon="fa-server"
-                icon-color="text-blue-500"
-              />
-            </div>
-
-            <div v-if="selectedPlatform === 'gemini'">
-              <h4 class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">账户类型</h4>
-              <CustomDropdown
-                v-model="geminiIntegration"
-                :options="integrationOptions"
-                icon="fa-plug"
-                icon-color="text-purple-500"
-              />
-              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                第三方模式需要填写自定义 API 地址与密钥；OAuth 模式需提供 accessToken/refreshToken。
-              </p>
-            </div>
-
-            <div>
-              <h4 class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">输入说明</h4>
-              <p class="text-xs leading-5 text-gray-600 dark:text-gray-400">
-                {{ instructions }}
-              </p>
+              <h4 class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">简易批量格式</h4>
+              <ul class="space-y-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
+                <li>每行一条记录，使用空格分隔；首个单词为平台（openai / claude / gemini）。</li>
+                <li>OpenAI：<code class="rounded bg-gray-200 px-1 text-[11px] dark:bg-gray-700">openai 名称 accessToken</code>，可追加 <code>refresh=</code>、<code>priority=</code> 等键值。</li>
+                <li>Claude：<code class="rounded bg-gray-200 px-1 text-[11px] dark:bg-gray-700">claude 名称 refreshToken</code>。</li>
+                <li>Gemini 第三方：<code class="rounded bg-gray-200 px-1 text-[11px] dark:bg-gray-700">gemini 名称 baseUrl apiKey</code>。</li>
+                <li>Gemini OAuth：<code class="rounded bg-gray-200 px-1 text-[11px] dark:bg-gray-700">gemini 名称 accessToken refreshToken</code>，可追加 <code>projectId=</code> 等。</li>
+                <li>可选字段以 <code>key=value</code> 形式继续追加；以 <code>#</code> 开头的行会被忽略。</li>
+              </ul>
             </div>
 
             <div>
               <h4 class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-200">示例</h4>
               <pre
-                class="custom-scrollbar max-h-48 overflow-auto rounded-xl bg-gray-900/90 p-3 text-xs text-emerald-200"
+                class="custom-scrollbar max-h-56 overflow-auto rounded-xl bg-gray-900/90 p-3 text-xs text-emerald-200"
               ><code>{{ sampleSnippet }}</code></pre>
             </div>
           </div>
@@ -74,12 +56,12 @@
           <div class="flex flex-col gap-4">
             <div>
               <label class="mb-2 block text-sm font-semibold text-gray-800 dark:text-gray-200">
-                粘贴 JSON 数据
+                粘贴批量数据
               </label>
               <textarea
                 v-model="rawInput"
                 class="custom-scrollbar form-input h-64 w-full font-mono text-xs dark:bg-gray-800 dark:text-gray-100"
-                placeholder="支持 JSON 数组，或每行使用 key=value 形式"
+                placeholder="例如：openai my-openai sk-xxxxxx refresh=rt-xxxx"
               />
               <p v-if="parsingError" class="mt-2 text-xs text-red-500">
                 {{ parsingError }}
@@ -155,7 +137,6 @@
 import { computed, ref, watch } from 'vue'
 import { showToast } from '@/utils/toast'
 import { useAccountsStore } from '@/stores/accounts'
-import CustomDropdown from '@/components/common/CustomDropdown.vue'
 
 const props = defineProps({
   show: {
@@ -168,61 +149,23 @@ const emit = defineEmits(['close', 'imported'])
 
 const accountsStore = useAccountsStore()
 
-const selectedPlatform = ref('openai')
-const geminiIntegration = ref('third_party')
 const rawInput = ref('')
 const parsingError = ref('')
 const loading = ref(false)
 const results = ref(null)
+const sampleSnippet = computed(
+  () => `# OpenAI 示例
+openai my-openai sk-xxxxxxxx refresh=rt-xxxxxxxx priority=40
 
-const platformOptions = [
-  { value: 'openai', label: 'OpenAI', icon: 'fa-openai' },
-  { value: 'claude', label: 'Claude', icon: 'fa-brain' },
-  { value: 'gemini', label: 'Gemini', icon: 'fa-robot' }
-]
+# Claude 示例
+claude claude-01 rtm-xxxxxxxx email=me@example.com
 
-const integrationOptions = [
-  { value: 'third_party', label: '第三方 (自定义 API)', icon: 'fa-plug' },
-  { value: 'oauth', label: 'OAuth/手动 Token', icon: 'fa-lock' }
-]
+# Gemini 第三方
+gemini gemini-eu https://proxy.example.com/v1 gm-xxxxxxxx
 
-const instructions = computed(() => {
-  const baseTips =
-    '每行一条记录，使用 key=value 形式（使用分号或逗号分隔）。也可粘贴 JSON 对象。'
-
-  switch (selectedPlatform.value) {
-    case 'openai':
-      return `${baseTips} 必填字段：name 以及 accessToken 或 refreshToken。可选：idToken、description、priority、groupId。`
-    case 'claude':
-      return `${baseTips} 必填字段：name 和 refreshToken（或 claudeAiOauth）。可选：email、priority、groupId、subscriptionInfo。`
-    case 'gemini':
-      if (geminiIntegration.value === 'third_party') {
-        return `${baseTips} 必填字段：name、baseUrl、apiKey。可选：userAgent、supportedModels、priority、groupId。`
-      }
-      return `${baseTips} 必填字段：name 以及 accessToken 或 refreshToken。可选：projectId、supportedModels、priority、groupId。`
-    default:
-      return baseTips
-  }
-})
-
-const sampleSnippet = computed(() => {
-  switch (selectedPlatform.value) {
-    case 'openai':
-      return `name=OpenAI-Manual-01; accessToken=sk-xxxx; refreshToken=rt-xxxx; priority=40
-name=OpenAI-Manual-02; accessToken=sk-yyyy`
-    case 'claude':
-      return `name=Claude-Refresh-01; refreshToken=rtm-xxx; priority=45
-name=Claude-OAuth; claudeAiOauth={"accessToken":"at-xxx","refreshToken":"rt-xxx","scopes":["user:profile"]}`
-    case 'gemini':
-      if (geminiIntegration.value === 'third_party') {
-        return `name=Gemini-EU; baseUrl=https://gemini-proxy.example.com/v1; apiKey=gm-xxxxx; userAgent=CustomRelay/1.0
-name=Gemini-Backup; baseUrl=https://backup.example.com/v1; apiKey=gm-yyyy`
-      }
-      return `name=Gemini-OAuth-01; accessToken=ya29....; refreshToken=1//0g...; projectId=cloud-ai-project`
-    default:
-      return ''
-  }
-})
+# Gemini OAuth
+gemini gemini-oauth ya29-xxxxxxxx 1//0g-xxxxxxxx projectId=cloud-ai-project`
+)
 
 const resetState = () => {
   rawInput.value = ''
@@ -244,68 +187,208 @@ const close = () => {
   emit('close')
 }
 
+const normalizeValue = (value) => {
+  if (value === undefined) {
+    return ''
+  }
+  const trimmed = value.trim()
+  if (trimmed === '') {
+    return ''
+  }
+  const lower = trimmed.toLowerCase()
+  if (lower === 'true') {
+    return true
+  }
+  if (lower === 'false') {
+    return false
+  }
+  if (!Number.isNaN(Number(trimmed)) && trimmed.length > 0 && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return Number(trimmed)
+  }
+  return trimmed
+}
+
+const allowedPlatforms = ['openai', 'claude', 'gemini']
+
+const parseSimpleLine = (line, lineNumber) => {
+  const parts = line.split(/\s+/).filter(Boolean)
+  if (parts.length < 3) {
+    throw new Error(`第 ${lineNumber} 行格式不正确，至少需要平台、名称和凭证`)
+  }
+
+  const platform = parts[0].toLowerCase()
+  if (!allowedPlatforms.includes(platform)) {
+    throw new Error(`第 ${lineNumber} 行的平台 "${parts[0]}" 暂不支持`)
+  }
+
+  const name = parts[1]
+
+  const positional = []
+  const keyValues = []
+  parts.slice(2).forEach((token) => {
+    if (token.includes('=')) {
+      keyValues.push(token)
+    } else {
+      positional.push(token)
+    }
+  })
+
+  const extra = {}
+  keyValues.forEach((token) => {
+    const [rawKey, rawValue = ''] = token.split('=', 2)
+    if (!rawKey) {
+      return
+    }
+    const key = rawKey.trim()
+    extra[key] = normalizeValue(rawValue)
+  })
+
+  const takeExtraValue = (...keys) => {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(extra, key)) {
+        const value = extra[key]
+        delete extra[key]
+        return value
+      }
+    }
+    return undefined
+  }
+
+  const peekExtraValue = (...keys) => {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(extra, key)) {
+        return extra[key]
+      }
+    }
+    return undefined
+  }
+
+  const record = { platform, name }
+
+  if (platform === 'openai') {
+    const remaining = [...positional]
+
+    const accessToken =
+      remaining.shift() || takeExtraValue('accessToken', 'access_token', 'token')
+    const refreshToken =
+      remaining.shift() || takeExtraValue('refreshToken', 'refresh_token', 'refresh', 'rt')
+
+    if (!accessToken) {
+      throw new Error(`第 ${lineNumber} 行缺少 OpenAI accessToken`)
+    }
+    record.accessToken = accessToken
+    if (refreshToken) {
+      record.refreshToken = refreshToken
+    }
+
+    if (remaining.length > 0) {
+      throw new Error(`第 ${lineNumber} 行的 OpenAI 多余字段：${remaining.join(' ')}`)
+    }
+  } else if (platform === 'claude') {
+    const remaining = [...positional]
+    const refreshToken =
+      remaining.shift() || takeExtraValue('refreshToken', 'refresh_token', 'refresh', 'rt')
+    if (!refreshToken) {
+      throw new Error(`第 ${lineNumber} 行缺少 Claude refreshToken`)
+    }
+    record.refreshToken = refreshToken
+
+    if (remaining.length > 0) {
+      throw new Error(`第 ${lineNumber} 行的 Claude 多余字段：${remaining.join(' ')}`)
+    }
+  } else if (platform === 'gemini') {
+    const looksLikeUrl = (value) => typeof value === 'string' && /^https?:/i.test(value)
+
+    const extraBaseCandidate = peekExtraValue('baseUrl', 'base_url', 'endpoint', 'url')
+    const treatAsThirdParty = looksLikeUrl(positional[0]) || !!extraBaseCandidate
+
+    if (treatAsThirdParty) {
+      const remaining = [...positional]
+
+      const baseUrl = looksLikeUrl(remaining[0])
+        ? remaining.shift()
+        : takeExtraValue('baseUrl', 'base_url', 'endpoint', 'url')
+      const apiKey = remaining.shift() || takeExtraValue('apiKey', 'api_key', 'key', 'token')
+
+      if (!baseUrl) {
+        throw new Error(`第 ${lineNumber} 行缺少 Gemini baseUrl`)
+      }
+      if (!apiKey) {
+        throw new Error(`第 ${lineNumber} 行缺少 Gemini apiKey`)
+      }
+
+      record.integrationType = 'third_party'
+      record.baseUrl = baseUrl
+      record.apiKey = apiKey
+
+      if (remaining.length > 0) {
+        throw new Error(`第 ${lineNumber} 行的 Gemini 第三方多余字段：${remaining.join(' ')}`)
+      }
+    } else {
+      const remaining = [...positional]
+
+      const accessToken =
+        remaining.shift() || takeExtraValue('accessToken', 'access_token', 'token')
+      const refreshToken =
+        remaining.shift() || takeExtraValue('refreshToken', 'refresh_token', 'refresh', 'rt')
+
+      if (!accessToken || !refreshToken) {
+        throw new Error(`第 ${lineNumber} 行缺少 Gemini accessToken 或 refreshToken`)
+      }
+
+      record.integrationType = 'oauth'
+      record.accessToken = accessToken
+      record.refreshToken = refreshToken
+
+      if (remaining.length > 0) {
+        if (remaining.length === 1) {
+          record.projectId = remaining.shift()
+        } else {
+          throw new Error(`第 ${lineNumber} 行的 Gemini OAuth 多余字段：${remaining.join(' ')}`)
+        }
+      }
+    }
+  }
+
+  const groupId = takeExtraValue('groupId', 'group', 'group_id')
+  if (groupId !== undefined) {
+    record.groupId = groupId
+  }
+
+  const projectFromExtra = takeExtraValue('projectId', 'project', 'project_id')
+  if (projectFromExtra !== undefined && record.projectId === undefined) {
+    record.projectId = projectFromExtra
+  }
+
+  const priority = takeExtraValue('priority')
+  if (priority !== undefined) {
+    record.priority = priority
+  }
+
+  const schedulable = takeExtraValue('schedulable')
+  if (schedulable !== undefined) {
+    record.schedulable = schedulable
+  }
+
+  Object.entries(extra).forEach(([key, value]) => {
+    record[key] = value
+  })
+
+  return record
+}
+
 const parseInput = () => {
-  const text = rawInput.value.trim()
-  if (!text) {
+  const raw = rawInput.value
+  if (!raw.trim()) {
     return []
   }
 
-  let payload
-  try {
-    if (text.startsWith('[')) {
-      payload = JSON.parse(text)
-    } else {
-      const lines = text
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line)
-      payload = lines.map((line) => {
-        try {
-          if (line.startsWith('{')) {
-            return JSON.parse(line)
-          }
-        } catch (error) {
-          // fall through to key=value parsing
-        }
-        return parseKeyValueLine(line)
-      })
-    }
-  } catch (error) {
-    throw new Error('JSON 解析失败，请确认格式是否正确')
-  }
+  const lines = raw
+    .split('\n')
+    .map((text, index) => ({ lineNumber: index + 1, text: text.trim() }))
+    .filter(({ text }) => text && !text.startsWith('#'))
 
-  if (!Array.isArray(payload)) {
-    payload = [payload]
-  }
-
-  return payload.map((item, idx) => {
-    if (!item || typeof item !== 'object') {
-      throw new Error(`第 ${idx + 1} 条记录无效`)
-    }
-    if (!item.name || typeof item.name !== 'string') {
-      throw new Error(`第 ${idx + 1} 条记录缺少 name 字段`)
-    }
-    if (selectedPlatform.value === 'gemini' && geminiIntegration.value === 'third_party') {
-      if (!item.baseUrl) {
-        throw new Error(`第 ${idx + 1} 条 Gemini 记录缺少 baseUrl`)
-      }
-      if (!item.apiKey) {
-        throw new Error(`第 ${idx + 1} 条 Gemini 记录缺少 apiKey`)
-      }
-    }
-    if (selectedPlatform.value === 'openai') {
-      if (!item.accessToken && !item.refreshToken && !item.openaiOauth) {
-        throw new Error(`第 ${idx + 1} 条 OpenAI 记录缺少令牌信息`)
-      }
-    }
-    if (selectedPlatform.value === 'claude') {
-      if (!item.refreshToken && !item.claudeAiOauth) {
-        throw new Error(`第 ${idx + 1} 条 Claude 记录缺少 refreshToken 或 claudeAiOauth`)
-      }
-    }
-
-    return item
-  })
+  return lines.map(({ text, lineNumber }) => parseSimpleLine(text, lineNumber))
 }
 
 const handleImport = async () => {
@@ -325,20 +408,9 @@ const handleImport = async () => {
     return
   }
 
-  const payload = entries.map((entry) => {
-    const base = {
-      platform: selectedPlatform.value,
-      ...entry
-    }
-    if (selectedPlatform.value === 'gemini') {
-      base.integrationType = geminiIntegration.value
-    }
-    return base
-  })
-
   loading.value = true
   try {
-    const response = await accountsStore.bulkImportAccounts(payload)
+    const response = await accountsStore.bulkImportAccounts(entries)
     results.value = response
     emit('imported', response)
     showToast('批量导入完成', response.summary.failed > 0 ? 'warning' : 'success')
@@ -352,52 +424,5 @@ const handleImport = async () => {
   } finally {
     loading.value = false
   }
-}
-
-const parseKeyValueLine = (line) => {
-  const record = {}
-
-  const delimiter = line.includes(';') ? ';' : ','
-  const segments = line
-    .split(delimiter)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment)
-
-  segments.forEach((segment) => {
-    const [rawKey, ...rest] = segment.split('=')
-    if (!rawKey || rest.length === 0) {
-      return
-    }
-    const key = rawKey.trim()
-    const valueRaw = rest.join('=').trim()
-
-    let value = valueRaw
-    if (valueRaw === '') {
-      value = ''
-    } else if (valueRaw.toLowerCase() === 'true') {
-      value = true
-    } else if (valueRaw.toLowerCase() === 'false') {
-      value = false
-    } else if (!Number.isNaN(Number(valueRaw)) && valueRaw !== '') {
-      value = Number(valueRaw)
-    } else if (
-      (valueRaw.startsWith('{') && valueRaw.endsWith('}')) ||
-      (valueRaw.startsWith('[') && valueRaw.endsWith(']'))
-    ) {
-      try {
-        value = JSON.parse(valueRaw)
-      } catch (error) {
-        value = valueRaw
-      }
-    }
-
-    record[key] = value
-  })
-
-  if (!record.name) {
-    throw new Error('缺少 name 字段')
-  }
-
-  return record
 }
 </script>

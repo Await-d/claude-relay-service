@@ -58,6 +58,29 @@
               />
             </div>
 
+            <!-- 搜索框 -->
+            <div class="group relative min-w-[200px]">
+              <div
+                class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-500 opacity-0 blur transition duration-300 group-hover:opacity-20"
+              ></div>
+              <div class="relative flex items-center">
+                <input
+                  v-model="searchKeyword"
+                  class="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 pl-9 text-sm text-gray-700 placeholder-gray-400 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:placeholder-gray-500 dark:hover:border-gray-500"
+                  placeholder="搜索账户名称或邮箱..."
+                  type="text"
+                />
+                <i class="fas fa-search absolute left-3 text-sm text-cyan-500" />
+                <button
+                  v-if="searchKeyword"
+                  class="absolute right-2 flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                  @click="clearSearch"
+                >
+                  <i class="fas fa-times text-xs" />
+                </button>
+              </div>
+            </div>
+
             <!-- 刷新按钮 -->
             <div class="relative">
               <el-tooltip
@@ -89,6 +112,21 @@
 
           <!-- 操作按钮 -->
           <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+            <button
+              class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-md dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 sm:flex-none"
+              @click="toggleSelectionMode"
+            >
+              <i :class="showCheckboxes ? 'fas fa-times' : 'fas fa-check-square'" />
+              <span>{{ showCheckboxes ? '取消选择' : '选择' }}</span>
+            </button>
+            <button
+              v-if="selectedCount > 0"
+              class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-5 py-2.5 text-sm font-medium text-red-600 shadow-sm transition-all duration-200 hover:border-red-300 hover:bg-red-100 hover:shadow-md dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 sm:flex-none"
+              @click="batchDeleteAccounts"
+            >
+              <i class="fas fa-trash"></i>
+              <span>删除选中 ({{ selectedCount }})</span>
+            </button>
             <button
               class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-500 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-purple-600 hover:to-indigo-600 hover:shadow-lg sm:flex-none"
               @click.stop="showBulkImportModal = true"
@@ -128,6 +166,19 @@
           <table class="w-full table-fixed lg:min-w-[1100px] xl:min-w-full">
           <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
             <tr>
+              <th
+                v-if="showCheckboxes"
+                class="w-12 px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                <div class="flex items-center">
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    :checked="allVisibleSelected"
+                    @change="toggleSelectAll($event.target.checked)"
+                  />
+                </div>
+              </th>
               <th
                 class="w-[20%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600 lg:w-[25%] xl:w-[20%]"
                 @click="sortAccounts('name')"
@@ -240,7 +291,24 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200/50 dark:divide-gray-600/50">
-            <tr v-for="account in sortedAccounts" :key="account.id" class="table-row">
+            <tr
+              v-for="account in sortedAccounts"
+              :key="account.id"
+              :class="[
+                'table-row',
+                showCheckboxes && isAccountSelected(account.id)
+                  ? 'bg-indigo-50/60 dark:bg-indigo-500/10'
+                  : ''
+              ]"
+            >
+              <td v-if="showCheckboxes" class="w-12 px-3 py-4 align-top">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  :checked="isAccountSelected(account.id)"
+                  @change="handleAccountCheckboxChange(account, $event.target.checked)"
+                />
+              </td>
               <td class="px-3 py-4">
                 <div class="flex items-center">
                   <div
@@ -723,7 +791,7 @@
                 <div class="flex flex-wrap items-center gap-1">
                   <button
                     v-if="
-                      account.platform === 'claude' &&
+                      ['claude', 'openai-responses'].includes(account.platform) &&
                       (account.status === 'unauthorized' ||
                         account.status !== 'active' ||
                         account.rateLimitStatus?.isRateLimited ||
@@ -742,6 +810,21 @@
                   >
                     <i :class="['fas fa-redo', account.isResetting ? 'animate-spin' : '']" />
                     <span class="ml-1">重置状态</span>
+                  </button>
+                  <button
+                    v-if="account.platform === 'openai-responses'"
+                    :class="[
+                      'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+                      account.isResettingUsage
+                        ? 'cursor-not-allowed bg-gray-100 text-gray-400'
+                        : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                    ]"
+                    :disabled="account.isResettingUsage"
+                    :title="account.isResettingUsage ? '重置中...' : '清空每日使用量'"
+                    @click="resetOpenAIResponsesUsage(account)"
+                  >
+                    <i :class="['fas fa-tachometer-alt', account.isResettingUsage ? 'animate-spin' : '']" />
+                    <span class="ml-1">清空用量</span>
                   </button>
                   <button
                     :class="[
@@ -788,7 +871,10 @@
         <div
           v-for="account in sortedAccounts"
           :key="account.id"
-          class="card p-4 transition-shadow hover:shadow-lg"
+          :class="[
+            'card p-4 transition-shadow hover:shadow-lg',
+            showCheckboxes && isAccountSelected(account.id) ? 'ring-2 ring-indigo-400' : ''
+          ]"
         >
           <!-- 卡片头部 -->
           <div class="mb-3 flex items-start justify-between">
@@ -804,7 +890,9 @@
                         ? 'bg-gradient-to-br from-blue-500 to-cyan-600'
                         : account.platform === 'openai'
                           ? 'bg-gradient-to-br from-gray-600 to-gray-700'
-                          : 'bg-gradient-to-br from-blue-500 to-blue-600'
+                          : account.platform === 'openai-responses'
+                            ? 'bg-gradient-to-br from-indigo-500 to-purple-600'
+                            : 'bg-gradient-to-br from-blue-500 to-blue-600'
                 ]"
               >
                 <i
@@ -818,7 +906,9 @@
                           ? 'fab fa-microsoft'
                           : account.platform === 'openai'
                             ? 'fas fa-openai'
-                            : 'fas fa-robot'
+                            : account.platform === 'openai-responses'
+                              ? 'fas fa-comments'
+                              : 'fas fa-robot'
                   ]"
                 />
               </div>
@@ -835,17 +925,26 @@
                 </div>
               </div>
             </div>
-            <span
-              :class="[
-                'inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold',
-                getAccountStatusClass(account)
-              ]"
-            >
-              <div
-                :class="['mr-1.5 h-1.5 w-1.5 rounded-full', getAccountStatusDotClass(account)]"
+            <div class="flex items-center gap-2">
+              <span
+                :class="[
+                  'inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold',
+                  getAccountStatusClass(account)
+                ]"
+              >
+                <div
+                  :class="['mr-1.5 h-1.5 w-1.5 rounded-full', getAccountStatusDotClass(account)]"
+                />
+                {{ getAccountStatusText(account) }}
+              </span>
+              <input
+                v-if="showCheckboxes"
+                type="checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                :checked="isAccountSelected(account.id)"
+                @change="handleAccountCheckboxChange(account, $event.target.checked)"
               />
-              {{ getAccountStatusText(account) }}
-            </span>
+            </div>
           </div>
 
           <!-- 使用统计 -->
@@ -1106,6 +1205,31 @@
           <!-- 操作按钮 -->
           <div class="mt-3 flex gap-2 border-t border-gray-100 pt-3">
             <button
+              v-if="
+                ['claude', 'openai-responses'].includes(account.platform) &&
+                (account.status === 'unauthorized' ||
+                  account.status !== 'active' ||
+                  account.rateLimitStatus?.isRateLimited ||
+                  account.rateLimitStatus === 'limited' ||
+                  !account.isActive)
+              "
+              class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-700 transition-colors hover:bg-yellow-100"
+              :disabled="account.isResetting"
+              @click="resetAccountStatus(account)"
+            >
+              <i :class="['fas fa-redo', account.isResetting ? 'animate-spin' : '']" />
+              重置
+            </button>
+            <button
+              v-if="account.platform === 'openai-responses'"
+              class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 transition-colors hover:bg-blue-100"
+              :disabled="account.isResettingUsage"
+              @click="resetOpenAIResponsesUsage(account)"
+            >
+              <i :class="['fas fa-tachometer-alt', account.isResettingUsage ? 'animate-spin' : '']" />
+              清空
+            </button>
+            <button
               class="flex flex-1 items-center justify-center gap-1 rounded-lg px-3 py-2 text-xs transition-colors"
               :class="
                 account.schedulable
@@ -1202,6 +1326,9 @@ const apiKeys = ref([])
 const accountGroups = ref([])
 const groupFilter = ref('all')
 const platformFilter = ref('all')
+const searchKeyword = ref('')
+const showCheckboxes = ref(false)
+const selectedAccountIds = ref([])
 
 // 缓存状态标志
 const apiKeysLoaded = ref(false)
@@ -1225,6 +1352,7 @@ const platformOptions = ref([
   { value: 'claude-console', label: 'Claude Console', icon: 'fa-terminal' },
   { value: 'gemini', label: 'Gemini', icon: 'fa-google' },
   { value: 'openai', label: 'OpenAi', icon: 'fa-openai' },
+  { value: 'openai-responses', label: 'OpenAI Responses', icon: 'fa-comments' },
   { value: 'azure_openai', label: 'Azure OpenAI', icon: 'fab fa-microsoft' },
   { value: 'bedrock', label: 'Bedrock', icon: 'fab fa-aws' }
 ])
@@ -1260,8 +1388,33 @@ const editingAccount = ref(null)
 
 // 计算排序后的账户列表
 const sortedAccounts = computed(() => {
-  const sourceAccounts = accounts.value
-  if (!accountsSortBy.value) return sourceAccounts
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  let sourceAccounts = accounts.value
+
+  if (keyword) {
+    sourceAccounts = sourceAccounts.filter((account) => {
+      const fields = [
+        account.name,
+        account.email,
+        account.username,
+        account.platform,
+        account.type,
+        account.accountType,
+        account.groupInfo?.name
+      ]
+
+      return fields.some((field) => {
+        if (field === undefined || field === null) {
+          return false
+        }
+        return field.toString().toLowerCase().includes(keyword)
+      })
+    })
+  }
+
+  if (!accountsSortBy.value) {
+    return [...sourceAccounts]
+  }
 
   const sorted = [...sourceAccounts].sort((a, b) => {
     let aVal = a[accountsSortBy.value]
@@ -1298,8 +1451,19 @@ const sortedAccounts = computed(() => {
     if (aVal > bVal) return accountsSortOrder.value === 'asc' ? 1 : -1
     return 0
   })
-
   return sorted
+})
+
+const selectedAccountSet = computed(() => new Set(selectedAccountIds.value))
+const selectedCount = computed(() => selectedAccountIds.value.length)
+const allVisibleSelected = computed(() => {
+  if (!showCheckboxes.value) return false
+  const visibleAccounts = sortedAccounts.value
+  if (visibleAccounts.length === 0) {
+    return false
+  }
+  const currentSelected = selectedAccountSet.value
+  return visibleAccounts.every((account) => currentSelected.has(account.id))
 })
 
 // 加载账户列表
@@ -1326,7 +1490,8 @@ const loadAccounts = async (forceReload = false) => {
         apiClient.get('/admin/bedrock-accounts', { params }),
         apiClient.get('/admin/gemini-accounts', { params }),
         apiClient.get('/admin/openai-accounts', { params }),
-        apiClient.get('/admin/azure-openai-accounts', { params })
+        apiClient.get('/admin/azure-openai-accounts', { params }),
+        apiClient.get('/admin/openai-responses-accounts', { params })
       )
     } else {
       // 只请求指定平台，其他平台设为null占位
@@ -1336,7 +1501,10 @@ const loadAccounts = async (forceReload = false) => {
             apiClient.get('/admin/claude-accounts', { params }),
             Promise.resolve({ success: true, data: [] }), // claude-console 占位
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
-            Promise.resolve({ success: true, data: [] }) // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
           )
           break
         case 'claude-console':
@@ -1344,7 +1512,10 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // claude 占位
             apiClient.get('/admin/claude-console-accounts', { params }),
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
-            Promise.resolve({ success: true, data: [] }) // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
           )
           break
         case 'bedrock':
@@ -1352,7 +1523,10 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // claude 占位
             Promise.resolve({ success: true, data: [] }), // claude-console 占位
             apiClient.get('/admin/bedrock-accounts', { params }),
-            Promise.resolve({ success: true, data: [] }) // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
           )
           break
         case 'gemini':
@@ -1360,7 +1534,43 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // claude 占位
             Promise.resolve({ success: true, data: [] }), // claude-console 占位
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
-            apiClient.get('/admin/gemini-accounts', { params })
+            apiClient.get('/admin/gemini-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+          )
+          break
+        case 'openai':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            apiClient.get('/admin/openai-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+          )
+          break
+        case 'azure_openai':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            apiClient.get('/admin/azure-openai-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+          )
+          break
+        case 'openai-responses':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            apiClient.get('/admin/openai-responses-accounts', { params })
           )
           break
       }
@@ -1372,8 +1582,15 @@ const loadAccounts = async (forceReload = false) => {
     // 加载分组成员关系（需要在分组数据加载完成后）
     await loadGroupMembers(forceReload)
 
-    const [claudeData, claudeConsoleData, bedrockData, geminiData, openaiData, azureOpenaiData] =
-      await Promise.all(requests)
+    const [
+      claudeData,
+      claudeConsoleData,
+      bedrockData,
+      geminiData,
+      openaiData,
+      azureOpenaiData,
+      openaiResponsesData
+    ] = await Promise.all(requests)
 
     const allAccounts = []
 
@@ -1442,6 +1659,14 @@ const loadAccounts = async (forceReload = false) => {
       allAccounts.push(...azureOpenaiAccounts)
     }
 
+    if (openaiResponsesData && openaiResponsesData.success) {
+      const responsesAccounts = (openaiResponsesData.data || []).map((acc) => {
+        const groupInfo = accountGroupMap.value.get(acc.id) || null
+        return { ...acc, platform: 'openai-responses', boundApiKeysCount: 0, groupInfo }
+      })
+      allAccounts.push(...responsesAccounts)
+    }
+
     // 为Claude账户加载费用统计信息
     await loadCostStatsForAccounts(allAccounts)
 
@@ -1463,6 +1688,11 @@ const sortAccounts = (field) => {
       accountsSortOrder.value = 'asc'
     }
   }
+}
+
+const clearSearch = () => {
+  if (!searchKeyword.value) return
+  searchKeyword.value = ''
 }
 
 // 计算平均每请求Token数（使用优化的工具函数）
@@ -1643,15 +1873,133 @@ const editAccount = (account) => {
   showEditAccountModal.value = true
 }
 
+const getBoundKeysCount = (account) => {
+  return apiKeys.value.filter((key) => {
+    return (
+      key.claudeAccountId === account.id ||
+      key.geminiAccountId === account.id ||
+      key.openaiAccountId === account.id ||
+      key.azureOpenaiAccountId === account.id
+    )
+  }).length
+}
+
+const getAccountDeleteEndpoint = (account) => {
+  switch (account.platform) {
+    case 'claude':
+      return `/admin/claude-accounts/${account.id}`
+    case 'claude-console':
+      return `/admin/claude-console-accounts/${account.id}`
+    case 'bedrock':
+      return `/admin/bedrock-accounts/${account.id}`
+    case 'gemini':
+      return `/admin/gemini-accounts/${account.id}`
+    case 'openai':
+      return `/admin/openai-accounts/${account.id}`
+    case 'azure_openai':
+      return `/admin/azure-openai-accounts/${account.id}`
+    case 'openai-responses':
+      return `/admin/openai-responses-accounts/${account.id}`
+    default:
+      return null
+  }
+}
+
+const toggleSelectionMode = () => {
+  showCheckboxes.value = !showCheckboxes.value
+  if (!showCheckboxes.value) {
+    selectedAccountIds.value = []
+  }
+}
+
+const handleAccountCheckboxChange = (account, checked) => {
+  if (!showCheckboxes.value) {
+    return
+  }
+
+  const ids = selectedAccountIds.value
+  if (checked) {
+    if (!selectedAccountSet.value.has(account.id)) {
+      selectedAccountIds.value = [...ids, account.id]
+    }
+  } else if (selectedAccountSet.value.has(account.id)) {
+    selectedAccountIds.value = ids.filter((id) => id !== account.id)
+  }
+}
+
+const toggleSelectAll = (checked) => {
+  if (!showCheckboxes.value) return
+  if (checked) {
+    selectedAccountIds.value = sortedAccounts.value.map((account) => account.id)
+  } else {
+    selectedAccountIds.value = []
+  }
+}
+
+const isAccountSelected = (accountId) => selectedAccountSet.value.has(accountId)
+
+const cleanupSelectedAccounts = () => {
+  if (!selectedAccountIds.value.length) return
+  const availableIds = new Set(accounts.value.map((account) => account.id))
+  selectedAccountIds.value = selectedAccountIds.value.filter((id) => availableIds.has(id))
+}
+
+const batchDeleteAccounts = async () => {
+  if (!selectedAccountIds.value.length) {
+    return
+  }
+
+  const accountMap = new Map(accounts.value.map((account) => [account.id, account]))
+  const targets = selectedAccountIds.value
+    .map((id) => accountMap.get(id))
+    .filter((account) => !!account)
+
+  if (!targets.length) {
+    showToast('未找到选中的账户', 'warning')
+    return
+  }
+
+  const blocked = targets.filter((account) => getBoundKeysCount(account) > 0)
+  if (blocked.length > 0) {
+    const names = blocked.map((account) => account.name || account.id).join(', ')
+    showToast(`请先解绑以下账户的 API Key: ${names}`, 'error')
+    return
+  }
+
+  const confirmed = await showConfirm(
+    '批量删除账户',
+    `确定要删除选中的 ${targets.length} 个账户吗？此操作不可恢复。`,
+    '删除',
+    '取消'
+  )
+
+  if (!confirmed) return
+
+  try {
+    for (const account of targets) {
+      const endpoint = getAccountDeleteEndpoint(account)
+      if (!endpoint) continue
+      const response = await apiClient.delete(endpoint)
+      if (!response?.success) {
+        throw new Error(response?.message || `删除账户 ${account.name || account.id} 失败`)
+      }
+    }
+
+    showToast(`已删除 ${targets.length} 个账户`, 'success')
+    selectedAccountIds.value = []
+    showCheckboxes.value = false
+    groupMembersLoaded.value = false
+    await loadAccounts(true)
+  } catch (error) {
+    console.error(error)
+    showToast(error.message || '批量删除失败', 'error')
+  }
+}
+
 // 删除账户
 const deleteAccount = async (account) => {
   // 检查是否有API Key绑定到此账号
-  const boundKeysCount = apiKeys.value.filter(
-    (key) =>
-      key.claudeAccountId === account.id ||
-      key.geminiAccountId === account.id ||
-      key.openaiAccountId === account.id
-  ).length
+  const boundKeysCount = getBoundKeysCount(account)
 
   if (boundKeysCount > 0) {
     showToast(
@@ -1671,19 +2019,10 @@ const deleteAccount = async (account) => {
   if (!confirmed) return
 
   try {
-    let endpoint
-    if (account.platform === 'claude') {
-      endpoint = `/admin/claude-accounts/${account.id}`
-    } else if (account.platform === 'claude-console') {
-      endpoint = `/admin/claude-console-accounts/${account.id}`
-    } else if (account.platform === 'bedrock') {
-      endpoint = `/admin/bedrock-accounts/${account.id}`
-    } else if (account.platform === 'openai') {
-      endpoint = `/admin/openai-accounts/${account.id}`
-    } else if (account.platform === 'azure_openai') {
-      endpoint = `/admin/azure-openai-accounts/${account.id}`
-    } else {
-      endpoint = `/admin/gemini-accounts/${account.id}`
+    const endpoint = getAccountDeleteEndpoint(account)
+    if (!endpoint) {
+      showToast('当前账户类型暂不支持删除', 'warning')
+      return
     }
 
     const data = await apiClient.delete(endpoint)
@@ -1721,7 +2060,19 @@ const resetAccountStatus = async (account) => {
 
   try {
     account.isResetting = true
-    const data = await apiClient.post(`/admin/claude-accounts/${account.id}/reset-status`)
+    let endpoint = null
+    if (account.platform === 'claude') {
+      endpoint = `/admin/claude-accounts/${account.id}/reset-status`
+    } else if (account.platform === 'openai-responses') {
+      endpoint = `/admin/openai-responses-accounts/${account.id}/reset-status`
+    }
+
+    if (!endpoint) {
+      showToast('当前账户类型暂不支持状态重置', 'warning')
+      return
+    }
+
+    const data = await apiClient.post(endpoint)
 
     if (data.success) {
       showToast('账户状态已重置', 'success')
@@ -1733,6 +2084,44 @@ const resetAccountStatus = async (account) => {
     showToast('状态重置失败', 'error')
   } finally {
     account.isResetting = false
+  }
+}
+
+const resetOpenAIResponsesUsage = async (account) => {
+  if (account.platform !== 'openai-responses' || account.isResettingUsage) {
+    return
+  }
+
+  let confirmed = false
+  if (window.showConfirm) {
+    confirmed = await window.showConfirm(
+      '重置每日用量',
+      '确定要清空该账户的每日使用量吗？',
+      '确定重置',
+      '取消'
+    )
+  } else {
+    confirmed = confirm('确定要清空该账户的每日使用量吗？')
+  }
+
+  if (!confirmed) return
+
+  try {
+    account.isResettingUsage = true
+    const response = await apiClient.post(
+      `/admin/openai-responses-accounts/${account.id}/reset-usage`
+    )
+
+    if (response.success) {
+      showToast('每日使用量已重置', 'success')
+      loadAccounts()
+    } else {
+      showToast(response.message || '每日使用量重置失败', 'error')
+    }
+  } catch (error) {
+    showToast('每日使用量重置失败', 'error')
+  } finally {
+    account.isResettingUsage = false
   }
 }
 
@@ -1964,6 +2353,15 @@ watch(accountSortBy, (newVal) => {
   if (fieldMap[newVal]) {
     sortAccounts(fieldMap[newVal])
   }
+})
+
+watch(accounts, () => {
+  cleanupSelectedAccounts()
+})
+
+watch(sortedAccounts, () => {
+  if (!showCheckboxes.value) return
+  cleanupSelectedAccounts()
 })
 
 onMounted(() => {

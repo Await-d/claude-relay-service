@@ -1,11 +1,11 @@
 <template>
   <div class="min-h-screen p-3 sm:p-4 md:p-6">
-    <!-- Session Manager for authenticated pages -->
+    <!-- Session Manager for authenticated pages (不显示 indicator，在 AppHeader 中显示) -->
     <SessionManager
       :auto-refresh="true"
       :expires-at="authStore.expiresAt"
       :session-token="authStore.sessionToken"
-      :show-indicator="true"
+      :show-indicator="false"
       :show-status-text="false"
       @logout="handleLogout"
       @refresh-failed="handleRefreshFailed"
@@ -14,7 +14,11 @@
     />
 
     <!-- 顶部导航 -->
-    <AppHeader />
+    <AppHeader
+      :session-token="authStore.sessionToken"
+      :expires-at="authStore.expiresAt"
+      @logout="handleLogout"
+    />
 
     <!-- 主内容区域 -->
     <div

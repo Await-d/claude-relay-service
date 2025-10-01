@@ -1,5 +1,6 @@
 const logger = require('./logger')
 const webhookService = require('../services/webhookService')
+const { getISOStringWithTimezone } = require('./dateHelper')
 
 class WebhookNotifier {
   constructor() {
@@ -28,10 +29,27 @@ class WebhookNotifier {
         errorCode:
           notification.errorCode || this._getErrorCode(notification.platform, notification.status),
         reason: notification.reason,
-        timestamp: notification.timestamp || new Date().toISOString()
+        timestamp: notification.timestamp || getISOStringWithTimezone(new Date())
       })
     } catch (error) {
       logger.error('Failed to send account anomaly notification:', error)
+    }
+  }
+
+  /**
+   * 发送账号事件通知
+   * @param {string} eventType - 事件类型
+   * @param {Object} data - 事件数据
+   */
+  async sendAccountEvent(eventType, data = {}) {
+    try {
+      await webhookService.sendNotification('accountEvent', {
+        eventType,
+        ...data,
+        timestamp: data.timestamp || getISOStringWithTimezone(new Date())
+      })
+    } catch (error) {
+      logger.error(`Failed to send account event (${eventType}):`, error)
     }
   }
 
@@ -67,6 +85,7 @@ class WebhookNotifier {
     const errorCodes = {
       'claude-oauth': {
         unauthorized: 'CLAUDE_OAUTH_UNAUTHORIZED',
+        blocked: 'CLAUDE_OAUTH_BLOCKED',
         error: 'CLAUDE_OAUTH_ERROR',
         disabled: 'CLAUDE_OAUTH_MANUALLY_DISABLED'
       },
@@ -79,6 +98,12 @@ class WebhookNotifier {
         error: 'GEMINI_ERROR',
         unauthorized: 'GEMINI_UNAUTHORIZED',
         disabled: 'GEMINI_MANUALLY_DISABLED'
+      },
+      openai: {
+        error: 'OPENAI_ERROR',
+        unauthorized: 'OPENAI_UNAUTHORIZED',
+        blocked: 'OPENAI_RATE_LIMITED',
+        disabled: 'OPENAI_MANUALLY_DISABLED'
       }
     }
 
