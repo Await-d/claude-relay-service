@@ -1677,6 +1677,79 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
   }
 })
 
+// 获取所有 Claude OAuth 账户的使用量数据
+router.get('/claude-accounts/usage', authenticateAdmin, async (req, res) => {
+  try {
+    const accounts = await database.getAllClaudeAccounts()
+    const now = Date.now()
+    const usageCacheTtlMs = 300 * 1000 // 5分钟缓存
+
+    const usagePromises = accounts.map(async (account) => {
+      // 检查账户是否是 OAuth 授权
+      const scopes = account.scopes && account.scopes.trim() ? account.scopes.split(' ') : []
+      const isOAuth = scopes.includes('user:profile') && scopes.includes('user:inference')
+
+      // 仅对活跃的 OAuth 账户调用 usage API
+      if (
+        isOAuth &&
+        account.isActive === 'true' &&
+        account.accessToken &&
+        account.status === 'active'
+      ) {
+        // 如果缓存新鲜，使用缓存的使用量
+        const cachedUsage = claudeAccountService.buildClaudeUsageSnapshot(account)
+        const lastUpdatedAt = account.claudeUsageUpdatedAt
+          ? new Date(account.claudeUsageUpdatedAt).getTime()
+          : 0
+        const isCacheFresh = cachedUsage && lastUpdatedAt && now - lastUpdatedAt < usageCacheTtlMs
+
+        if (isCacheFresh) {
+          return {
+            accountId: account.id,
+            claudeUsage: cachedUsage
+          }
+        }
+
+        try {
+          const usageData = await claudeAccountService.fetchOAuthUsage(account.id)
+          if (usageData) {
+            await claudeAccountService.updateClaudeUsageSnapshot(account.id, usageData)
+          }
+          const updatedAccount = await database.getClaudeAccount(account.id)
+          return {
+            accountId: account.id,
+            claudeUsage: claudeAccountService.buildClaudeUsageSnapshot(updatedAccount)
+          }
+        } catch (fetchError) {
+          logger.warn(`⚠️ Failed to fetch usage for account ${account.id}:`, fetchError.message)
+          return {
+            accountId: account.id,
+            claudeUsage: cachedUsage || null
+          }
+        }
+      }
+
+      return {
+        accountId: account.id,
+        claudeUsage: null
+      }
+    })
+
+    const usageResults = await Promise.all(usagePromises)
+    const usageMap = {}
+    usageResults.forEach((result) => {
+      usageMap[result.accountId] = result.claudeUsage
+    })
+
+    return res.json({ success: true, data: usageMap })
+  } catch (error) {
+    logger.error('❌ Failed to get Claude accounts usage:', error)
+    return res
+      .status(500)
+      .json({ error: 'Failed to get Claude accounts usage', message: error.message })
+  }
+})
+
 // 创建新的Claude账户
 router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
   try {

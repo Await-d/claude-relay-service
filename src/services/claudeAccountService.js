@@ -2714,6 +2714,167 @@ class ClaudeAccountService {
       return { success: false, error: error.message }
     }
   }
+
+  // 📊 获取 OAuth 账户的使用量数据
+  async fetchOAuthUsage(accountId, accessToken = null, agent = null) {
+    try {
+      const accountData = await database.getClaudeAccount(accountId)
+      if (!accountData || Object.keys(accountData).length === 0) {
+        throw new Error('Account not found')
+      }
+
+      // 如果没有提供 accessToken，使用 getValidAccessToken 自动检查并刷新
+      if (!accessToken) {
+        accessToken = await this.getValidAccessToken(accountId)
+      }
+
+      // 如果没有提供 agent，创建代理
+      if (!agent) {
+        agent = this._createProxyAgent(accountData.proxy)
+      }
+
+      logger.debug(`📊 Fetching OAuth usage for account: ${accountData.name} (${accountId})`)
+
+      // 请求 OAuth usage 接口
+      const response = await axios.get('https://api.anthropic.com/api/oauth/usage', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'anthropic-beta': 'oauth-2025-04-20',
+          'User-Agent': 'claude-cli/1.0.56 (external, cli)',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        httpsAgent: agent,
+        timeout: 15000
+      })
+
+      if (response.status === 200 && response.data) {
+        logger.debug('✅ Successfully fetched OAuth usage data:', {
+          accountId,
+          fiveHour: response.data.five_hour?.utilization,
+          sevenDay: response.data.seven_day?.utilization,
+          sevenDayOpus: response.data.seven_day_opus?.utilization
+        })
+
+        return response.data
+      }
+
+      logger.warn(`⚠️ Failed to fetch OAuth usage for account ${accountId}: ${response.status}`)
+      return null
+    } catch (error) {
+      logger.error(`❌ Failed to fetch OAuth usage for account ${accountId}:`, error.message)
+      return null
+    }
+  }
+
+  // 🔧 辅助方法：安全的数字转换
+  _toNumberOrNull(value) {
+    if (value === null || value === undefined || value === '') {
+      return null
+    }
+    const num = parseFloat(value)
+    return isNaN(num) ? null : num
+  }
+
+  // 📸 构建 Claude 使用量快照
+  buildClaudeUsageSnapshot(accountData) {
+    const updatedAt = accountData.claudeUsageUpdatedAt
+
+    const fiveHourUtilization = this._toNumberOrNull(accountData.claudeFiveHourUtilization)
+    const fiveHourResetsAt = accountData.claudeFiveHourResetsAt
+    const sevenDayUtilization = this._toNumberOrNull(accountData.claudeSevenDayUtilization)
+    const sevenDayResetsAt = accountData.claudeSevenDayResetsAt
+    const sevenDayOpusUtilization = this._toNumberOrNull(accountData.claudeSevenDayOpusUtilization)
+    const sevenDayOpusResetsAt = accountData.claudeSevenDayOpusResetsAt
+
+    const hasFiveHourData = fiveHourUtilization !== null || fiveHourResetsAt
+    const hasSevenDayData = sevenDayUtilization !== null || sevenDayResetsAt
+    const hasSevenDayOpusData = sevenDayOpusUtilization !== null || sevenDayOpusResetsAt
+
+    if (!updatedAt && !hasFiveHourData && !hasSevenDayData && !hasSevenDayOpusData) {
+      return null
+    }
+
+    const now = Date.now()
+
+    return {
+      updatedAt,
+      fiveHour: {
+        utilization: fiveHourUtilization,
+        resetsAt: fiveHourResetsAt,
+        remainingSeconds: fiveHourResetsAt
+          ? Math.max(0, Math.floor((new Date(fiveHourResetsAt).getTime() - now) / 1000))
+          : null
+      },
+      sevenDay: {
+        utilization: sevenDayUtilization,
+        resetsAt: sevenDayResetsAt,
+        remainingSeconds: sevenDayResetsAt
+          ? Math.max(0, Math.floor((new Date(sevenDayResetsAt).getTime() - now) / 1000))
+          : null
+      },
+      sevenDayOpus: {
+        utilization: sevenDayOpusUtilization,
+        resetsAt: sevenDayOpusResetsAt,
+        remainingSeconds: sevenDayOpusResetsAt
+          ? Math.max(0, Math.floor((new Date(sevenDayOpusResetsAt).getTime() - now) / 1000))
+          : null
+      }
+    }
+  }
+
+  // 💾 更新 Claude 使用量快照
+  async updateClaudeUsageSnapshot(accountId, usageData) {
+    if (!usageData || typeof usageData !== 'object') {
+      return
+    }
+
+    const updates = {}
+
+    // 5-hour window
+    if (usageData.five_hour) {
+      if (usageData.five_hour.utilization !== undefined) {
+        updates.claudeFiveHourUtilization = String(usageData.five_hour.utilization)
+      }
+      if (usageData.five_hour.resets_at) {
+        updates.claudeFiveHourResetsAt = usageData.five_hour.resets_at
+      }
+    }
+
+    // 7-day window
+    if (usageData.seven_day) {
+      if (usageData.seven_day.utilization !== undefined) {
+        updates.claudeSevenDayUtilization = String(usageData.seven_day.utilization)
+      }
+      if (usageData.seven_day.resets_at) {
+        updates.claudeSevenDayResetsAt = usageData.seven_day.resets_at
+      }
+    }
+
+    // 7-day Opus window
+    if (usageData.seven_day_opus) {
+      if (usageData.seven_day_opus.utilization !== undefined) {
+        updates.claudeSevenDayOpusUtilization = String(usageData.seven_day_opus.utilization)
+      }
+      if (usageData.seven_day_opus.resets_at) {
+        updates.claudeSevenDayOpusResetsAt = usageData.seven_day_opus.resets_at
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return
+    }
+
+    updates.claudeUsageUpdatedAt = new Date().toISOString()
+
+    const accountData = await database.getClaudeAccount(accountId)
+    if (accountData && Object.keys(accountData).length > 0) {
+      Object.assign(accountData, updates)
+      await database.setClaudeAccount(accountId, accountData)
+      logger.debug(`💾 Updated Claude usage snapshot for account ${accountId}`)
+    }
+  }
 }
 
 module.exports = new ClaudeAccountService()
