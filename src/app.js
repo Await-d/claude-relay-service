@@ -8,32 +8,23 @@ const bcrypt = require('bcryptjs')
 
 const config = require('../config/config')
 const logger = require('./utils/logger')
-const database = require('./models/database')
+const redis = require('./models/redis')
 const pricingService = require('./services/pricingService')
 const cacheMonitor = require('./utils/cacheMonitor')
-
-// 🔧 动态配置系统
-const {
-  initializeDynamicConfigSystem,
-  shutdownDynamicConfigSystem
-} = require('./services/dynamicConfigSystemBootstrap')
 
 // Import routes
 const apiRoutes = require('./routes/api')
 const adminRoutes = require('./routes/admin')
 const webRoutes = require('./routes/web')
-const authRoutes = require('./routes/auth')
 const apiStatsRoutes = require('./routes/apiStats')
 const geminiRoutes = require('./routes/geminiRoutes')
 const openaiGeminiRoutes = require('./routes/openaiGeminiRoutes')
+const standardGeminiRoutes = require('./routes/standardGeminiRoutes')
 const openaiClaudeRoutes = require('./routes/openaiClaudeRoutes')
 const openaiRoutes = require('./routes/openaiRoutes')
+const userRoutes = require('./routes/userRoutes')
 const azureOpenaiRoutes = require('./routes/azureOpenaiRoutes')
 const webhookRoutes = require('./routes/webhook')
-const dataManagementRoutes = require('./routes/dataManagement')
-const requestLogsRoutes = require('./routes/requestLogs')
-const configAdminRoutes = require('./routes/configAdmin')
-const performanceRoutes = require('./routes/performance')
 
 // Import middleware
 const {
@@ -44,6 +35,7 @@ const {
   globalRateLimit,
   requestSizeLimit
 } = require('./middleware/auth')
+const { browserFallbackMiddleware } = require('./middleware/browserFallback')
 
 class Application {
   constructor() {
@@ -53,18 +45,14 @@ class Application {
 
   async initialize() {
     try {
-      // 🔗 连接数据库
-      logger.info('🔄 Connecting to database...')
-      await database.connect()
-      logger.success('✅ Database connected successfully')
+      // 🔗 连接Redis
+      logger.info('🔄 Connecting to Redis...')
+      await redis.connect()
+      logger.success('✅ Redis connected successfully')
 
       // 💰 初始化价格服务
       logger.info('🔄 Initializing pricing service...')
       await pricingService.initialize()
-
-      // 🔧 初始化动态配置系统
-      logger.info('🔄 Initializing dynamic configuration system...')
-      await initializeDynamicConfigSystem()
 
       // 📊 初始化缓存监控
       await this.initializeCacheMonitoring()
@@ -89,10 +77,6 @@ class Application {
       logger.info('🕐 Initializing Claude account session windows...')
       const claudeAccountService = require('./services/claudeAccountService')
       await claudeAccountService.initializeSessionWindows()
-
-      // 📊 初始化UnifiedLogService
-      logger.info('📊 Initializing UnifiedLogService...')
-      await this.initializeUnifiedLogService()
 
       // 超早期拦截 /admin-next/ 请求 - 在所有中间件之前
       this.app.use((req, res, next) => {
@@ -127,6 +111,9 @@ class Application {
         this.app.use(corsMiddleware)
       }
 
+      // 🆕 兜底中间件：处理Chrome插件兼容性（必须在认证之前）
+      this.app.use(browserFallbackMiddleware)
+
       // 📦 压缩 - 排除流式响应（SSE）
       this.app.use(
         compression({
@@ -151,6 +138,17 @@ class Application {
 
       // 📝 请求日志（使用自定义logger而不是morgan）
       this.app.use(requestLogger)
+
+      // 🐛 HTTP调试拦截器（仅在启用调试时生效）
+      if (process.env.DEBUG_HTTP_TRAFFIC === 'true') {
+        try {
+          const { debugInterceptor } = require('./middleware/debugInterceptor')
+          this.app.use(debugInterceptor)
+          logger.info('🐛 HTTP调试拦截器已启用 - 日志输出到 logs/http-debug-*.log')
+        } catch (error) {
+          logger.warn('⚠️ 无法加载HTTP调试拦截器:', error.message)
+        }
+      }
 
       // 🔧 基础中间件
       this.app.use(
@@ -254,20 +252,18 @@ class Application {
       this.app.use('/api', apiRoutes)
       this.app.use('/claude', apiRoutes) // /claude 路由别名，与 /api 功能相同
       this.app.use('/admin', adminRoutes)
-      this.app.use('/auth', authRoutes) // 用户认证路由
+      this.app.use('/users', userRoutes)
       // 使用 web 路由（包含 auth 和页面重定向）
       this.app.use('/web', webRoutes)
       this.app.use('/apiStats', apiStatsRoutes)
-      this.app.use('/gemini', geminiRoutes)
+      // Gemini 路由：同时支持标准格式和原有格式
+      this.app.use('/gemini', standardGeminiRoutes) // 标准 Gemini API 格式路由
+      this.app.use('/gemini', geminiRoutes) // 保留原有路径以保持向后兼容
       this.app.use('/openai/gemini', openaiGeminiRoutes)
       this.app.use('/openai/claude', openaiClaudeRoutes)
       this.app.use('/openai', openaiRoutes)
       this.app.use('/azure', azureOpenaiRoutes)
       this.app.use('/admin/webhook', webhookRoutes)
-      this.app.use('/admin/data', dataManagementRoutes)
-      this.app.use('/admin/request-logs', requestLogsRoutes)
-      this.app.use('/admin/config', configAdminRoutes)
-      this.app.use('/admin/performance', performanceRoutes)
 
       // 🏠 根路径重定向到新版管理界面
       this.app.get('/', (req, res) => {
@@ -341,7 +337,7 @@ class Application {
       // 📊 指标端点
       this.app.get('/metrics', async (req, res) => {
         try {
-          const stats = await database.getSystemStats()
+          const stats = await redis.getSystemStats()
           const metrics = {
             ...stats,
             uptime: process.uptime(),
@@ -401,7 +397,7 @@ class Application {
         updatedAt: initData.updatedAt || null
       }
 
-      await database.setSession('admin_credentials', adminCredentials)
+      await redis.setSession('admin_credentials', adminCredentials)
 
       logger.success('✅ Admin credentials loaded from init.json (single source of truth)')
       logger.info(`📋 Admin username: ${adminCredentials.username}`)
@@ -418,72 +414,18 @@ class Application {
   async checkRedisHealth() {
     try {
       const start = Date.now()
-      const client = database.getClient()
-      await client.ping()
+      await redis.getClient().ping()
       const latency = Date.now() - start
-
-      // 🔍 调试：检查Redis中的请求日志键
-      let requestLogKeys = []
-      try {
-        const allRequestKeys = await client.keys('*request*log*')
-        const specificKeys = await client.keys('request_log:*')
-        requestLogKeys = {
-          all: allRequestKeys.slice(0, 10),
-          specific: specificKeys.slice(0, 10),
-          totalCount: allRequestKeys.length
-        }
-      } catch (keyError) {
-        requestLogKeys = { error: keyError.message }
-      }
 
       return {
         status: 'healthy',
-        connected: database.isConnected,
-        latency: `${latency}ms`,
-        debug: {
-          requestLogKeys,
-          // 🔍 测试修复的searchLogs方法
-          testSearchLogs: await this.testSearchLogs()
-        }
+        connected: redis.isConnected,
+        latency: `${latency}ms`
       }
     } catch (error) {
       return {
         status: 'unhealthy',
         connected: false,
-        error: error.message
-      }
-    }
-  }
-
-  // 🔍 测试searchLogs修复
-  async testSearchLogs() {
-    try {
-      // 先测试单个键是否存在
-      const client = database.getClient()
-      const testKey = 'request_log:bb3dd7bd-10d8-4240-a810-ccdcc59b4c71:1756392164715'
-      const keyExists = await client.exists(testKey)
-      const keyData = await client.hgetall(testKey)
-
-      const logs = await database.searchLogs({}, { limit: 3 })
-      return {
-        success: true,
-        logCount: logs.length,
-        testKey: {
-          key: testKey,
-          exists: keyExists,
-          dataKeys: keyData ? Object.keys(keyData) : null,
-          hasData: keyData && Object.keys(keyData).length > 0
-        },
-        sampleData: logs.slice(0, 2).map((log) => ({
-          id: log.id,
-          keyId: log.keyId,
-          method: log.method,
-          status: log.statusCode
-        }))
-      }
-    } catch (error) {
-      return {
-        success: false,
         error: error.message
       }
     }
@@ -540,38 +482,6 @@ class Application {
     }
   }
 
-  // 📊 初始化UnifiedLogService
-  async initializeUnifiedLogService() {
-    try {
-      const { unifiedLogServiceFactory } = require('./services/UnifiedLogServiceFactory')
-
-      // 初始化单例实例
-      logger.info('🔄 Creating UnifiedLogService singleton...')
-      await unifiedLogServiceFactory.getSingleton()
-
-      // 进行健康检查
-      logger.info('🔍 Performing UnifiedLogService health check...')
-      const healthCheck = await unifiedLogServiceFactory.healthCheck()
-
-      if (healthCheck.status === 'healthy') {
-        logger.success('✅ UnifiedLogService initialized successfully')
-      } else if (healthCheck.status === 'degraded') {
-        logger.warn('⚠️ UnifiedLogService initialized with degraded status:', healthCheck)
-      } else {
-        logger.error('❌ UnifiedLogService health check failed:', healthCheck)
-        throw new Error('UnifiedLogService health check failed')
-      }
-
-      // 记录工厂统计信息
-      const factoryStats = unifiedLogServiceFactory.getFactoryStats()
-      logger.info('📊 UnifiedLogService factory stats:', factoryStats)
-    } catch (error) {
-      logger.error('💥 Failed to initialize UnifiedLogService:', error)
-      // 不阻止应用启动，但记录错误
-      logger.warn('⚠️ Application will continue without UnifiedLogService')
-    }
-  }
-
   // 📊 初始化缓存监控
   async initializeCacheMonitoring() {
     try {
@@ -617,10 +527,11 @@ class Application {
 
         const [expiredKeys, errorAccounts] = await Promise.all([
           apiKeyService.cleanupExpiredKeys(),
-          claudeAccountService.cleanupErrorAccounts()
+          claudeAccountService.cleanupErrorAccounts(),
+          claudeAccountService.cleanupTempErrorAccounts() // 新增：清理临时错误账户
         ])
 
-        await database.cleanup()
+        await redis.cleanup()
 
         logger.success(
           `🧹 Cleanup completed: ${expiredKeys} expired keys, ${errorAccounts} error accounts reset`
@@ -632,6 +543,15 @@ class Application {
 
     logger.info(
       `🔄 Cleanup tasks scheduled every ${config.system.cleanupInterval / 1000 / 60} minutes`
+    )
+
+    // 🚨 启动限流状态自动清理服务
+    // 每5分钟检查一次过期的限流状态，确保账号能及时恢复调度
+    const rateLimitCleanupService = require('./services/rateLimitCleanupService')
+    const cleanupIntervalMinutes = config.system.rateLimitCleanupInterval || 5 // 默认5分钟
+    rateLimitCleanupService.start(cleanupIntervalMinutes)
+    logger.info(
+      `🚨 Rate limit cleanup service started (checking every ${cleanupIntervalMinutes} minutes)`
     )
   }
 
@@ -651,16 +571,17 @@ class Application {
             logger.error('❌ Error cleaning up pricing service:', error)
           }
 
-          // 🔧 关闭动态配置系统
+          // 停止限流清理服务
           try {
-            await shutdownDynamicConfigSystem()
-            logger.info('🔧 Dynamic configuration system shutdown')
+            const rateLimitCleanupService = require('./services/rateLimitCleanupService')
+            rateLimitCleanupService.stop()
+            logger.info('🚨 Rate limit cleanup service stopped')
           } catch (error) {
-            logger.error('❌ Error shutting down dynamic configuration system:', error)
+            logger.error('❌ Error stopping rate limit cleanup service:', error)
           }
 
           try {
-            await database.disconnect()
+            await redis.disconnect()
             logger.info('👋 Redis disconnected')
           } catch (error) {
             logger.error('❌ Error disconnecting Redis:', error)

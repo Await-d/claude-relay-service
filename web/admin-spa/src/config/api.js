@@ -60,7 +60,7 @@ class ApiClient {
   }
 
   // 处理响应
-  async handleResponse(response, responseType = 'json') {
+  async handleResponse(response) {
     // 401 未授权，需要重新登录
     if (response.status === 401) {
       // 如果当前已经在登录页面，不要再次跳转
@@ -75,67 +75,56 @@ class ApiClient {
       throw new Error('Unauthorized')
     }
 
-    // 如果响应不成功，先处理错误
-    if (!response.ok) {
-      // 尝试解析错误信息
-      const contentType = response.headers.get('content-type')
-      if (contentType && contentType.includes('application/json')) {
-        try {
-          const errorData = await response.json()
-          throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`)
-        } catch (jsonError) {
-          // JSON 解析失败，使用默认错误信息
-        }
-      }
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    // 根据 responseType 处理成功响应
-    if (responseType === 'blob') {
-      return {
-        data: await response.blob(),
-        headers: response.headers,
-        status: response.status,
-        statusText: response.statusText
-      }
-    }
-
     // 尝试解析 JSON
     const contentType = response.headers.get('content-type')
     if (contentType && contentType.includes('application/json')) {
       const data = await response.json()
+
+      // 如果响应不成功，抛出错误
+      if (!response.ok) {
+        // 创建一个包含完整错误信息的错误对象
+        const error = new Error(data.message || `HTTP ${response.status}`)
+        // 保留完整的响应数据，以便错误处理时可以访问详细信息
+        error.response = {
+          status: response.status,
+          data: data
+        }
+        // 为了向后兼容，也保留原始的 message
+        error.message = data.message || error.message
+        throw error
+      }
+
       return data
     }
 
-    // 其他响应类型
+    // 非 JSON 响应
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
     return response
   }
 
   // GET 请求
   async get(url, options = {}) {
-    let fullUrl = createApiUrl(url)
-    const { responseType, params, ...fetchOptions } = options
     // 处理查询参数
-    if (params && Object.keys(params).length > 0) {
-      const searchParams = new URLSearchParams()
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== '') {
-          searchParams.append(key, value)
-        }
-      })
-      const queryString = searchParams.toString()
-      if (queryString) {
-        fullUrl += (fullUrl.includes('?') ? '&' : '?') + queryString
-      }
+    let fullUrl = createApiUrl(url)
+    if (options.params) {
+      const params = new URLSearchParams(options.params)
+      fullUrl += '?' + params.toString()
     }
+
+    // 移除 params 避免传递给 fetch
+    // eslint-disable-next-line no-unused-vars
+    const { params, ...configOptions } = options
     const config = this.buildConfig({
-      ...fetchOptions,
+      ...configOptions,
       method: 'GET'
     })
+
     try {
-      console.log('🌐 API GET请求:', { fullUrl, params, config })
       const response = await fetch(fullUrl, config)
-      return await this.handleResponse(response, responseType)
+      return await this.handleResponse(response)
     } catch (error) {
       console.error('API GET Error:', error)
       throw error
@@ -145,33 +134,15 @@ class ApiClient {
   // POST 请求
   async post(url, data = null, options = {}) {
     const fullUrl = createApiUrl(url)
-    const { responseType, ...fetchOptions } = options
-    // 处理 FormData - 不要 JSON 序列化，也不要设置 Content-Type
-    let body = undefined
-    let headers = {}
-    if (data) {
-      if (data instanceof FormData) {
-        body = data
-        // FormData 会自动设置正确的 Content-Type (multipart/form-data)
-        // 所以我们不设置 Content-Type header
-      } else {
-        body = JSON.stringify(data)
-        headers['Content-Type'] = 'application/json'
-      }
-    }
     const config = this.buildConfig({
-      ...fetchOptions,
+      ...options,
       method: 'POST',
-      body,
-      headers: {
-        ...headers,
-        ...fetchOptions.headers
-      }
+      body: data ? JSON.stringify(data) : undefined
     })
 
     try {
       const response = await fetch(fullUrl, config)
-      return await this.handleResponse(response, responseType)
+      return await this.handleResponse(response)
     } catch (error) {
       console.error('API POST Error:', error)
       throw error
@@ -181,18 +152,35 @@ class ApiClient {
   // PUT 请求
   async put(url, data = null, options = {}) {
     const fullUrl = createApiUrl(url)
-    const { responseType, ...fetchOptions } = options
     const config = this.buildConfig({
-      ...fetchOptions,
+      ...options,
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined
     })
 
     try {
       const response = await fetch(fullUrl, config)
-      return await this.handleResponse(response, responseType)
+      return await this.handleResponse(response)
     } catch (error) {
       console.error('API PUT Error:', error)
+      throw error
+    }
+  }
+
+  // PATCH 请求
+  async patch(url, data = null, options = {}) {
+    const fullUrl = createApiUrl(url)
+    const config = this.buildConfig({
+      ...options,
+      method: 'PATCH',
+      body: data ? JSON.stringify(data) : undefined
+    })
+
+    try {
+      const response = await fetch(fullUrl, config)
+      return await this.handleResponse(response)
+    } catch (error) {
+      console.error('API PATCH Error:', error)
       throw error
     }
   }
@@ -200,7 +188,7 @@ class ApiClient {
   // DELETE 请求
   async delete(url, options = {}) {
     const fullUrl = createApiUrl(url)
-    const { data, responseType, ...restOptions } = options
+    const { data, ...restOptions } = options
 
     const config = this.buildConfig({
       ...restOptions,
@@ -210,7 +198,7 @@ class ApiClient {
 
     try {
       const response = await fetch(fullUrl, config)
-      return await this.handleResponse(response, responseType)
+      return await this.handleResponse(response)
     } catch (error) {
       console.error('API DELETE Error:', error)
       throw error

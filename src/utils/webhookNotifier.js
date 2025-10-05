@@ -41,17 +41,6 @@ class WebhookNotifier {
    * @param {string} eventType - 事件类型
    * @param {Object} data - 事件数据
    */
-  async sendAccountEvent(eventType, data = {}) {
-    try {
-      await webhookService.sendNotification('accountEvent', {
-        eventType,
-        ...data,
-        timestamp: data.timestamp || getISOStringWithTimezone(new Date())
-      })
-    } catch (error) {
-      logger.error(`Failed to send account event (${eventType}):`, error)
-    }
-  }
 
   /**
    * 测试Webhook连通性（兼容旧接口）
@@ -72,6 +61,24 @@ class WebhookNotifier {
       return result
     } catch (error) {
       return { success: false, error: error.message }
+    }
+  }
+
+  /**
+   * 发送账号事件通知
+   * @param {string} eventType - 事件类型 (account.created, account.updated, account.deleted, account.status_changed)
+   * @param {Object} data - 事件数据
+   */
+  async sendAccountEvent(eventType, data) {
+    try {
+      // 使用webhookService发送通知
+      await webhookService.sendNotification('accountEvent', {
+        eventType,
+        ...data,
+        timestamp: data.timestamp || getISOStringWithTimezone(new Date())
+      })
+    } catch (error) {
+      logger.error(`Failed to send account event (${eventType}):`, error)
     }
   }
 

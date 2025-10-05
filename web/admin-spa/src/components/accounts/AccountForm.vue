@@ -466,15 +466,6 @@
                 >添加方式</label
               >
               <div class="flex flex-wrap gap-4">
-                <label v-if="form.platform === 'claude'" class="flex cursor-pointer items-center">
-                  <input
-                    v-model="form.addType"
-                    class="mr-2 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
-                    type="radio"
-                    value="setup-token"
-                  />
-                  <span class="text-sm text-gray-700 dark:text-gray-300">Setup Token (推荐)</span>
-                </label>
                 <label class="flex cursor-pointer items-center">
                   <input
                     v-model="form.addType"
@@ -482,7 +473,18 @@
                     type="radio"
                     value="oauth"
                   />
-                  <span class="text-sm text-gray-700 dark:text-gray-300">OAuth 授权</span>
+                  <span class="text-sm text-gray-700 dark:text-gray-300"
+                    >OAuth 授权 (用量可视化)</span
+                  >
+                </label>
+                <label v-if="form.platform === 'claude'" class="flex cursor-pointer items-center">
+                  <input
+                    v-model="form.addType"
+                    class="mr-2 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                    type="radio"
+                    value="setup-token"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">Setup Token (效期长)</span>
                 </label>
                 <label class="flex cursor-pointer items-center">
                   <input
@@ -494,18 +496,6 @@
                   <span class="text-sm text-gray-700 dark:text-gray-300"
                     >手动输入 Access Token</span
                   >
-                </label>
-                <label
-                  v-if="form.platform === 'gemini'"
-                  class="flex cursor-pointer items-center"
-                >
-                  <input
-                    v-model="form.addType"
-                    class="mr-2 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
-                    type="radio"
-                    value="third-party"
-                  />
-                  <span class="text-sm text-gray-700 dark:text-gray-300">第三方自定义 API</span>
                 </label>
               </div>
             </div>
@@ -1395,78 +1385,6 @@
                   </div>
                 </div>
               </label>
-            </div>
-
-            <!-- Gemini 第三方自定义 API -->
-            <div
-              v-if="form.platform === 'gemini' && form.addType === 'third-party'"
-              class="space-y-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/60 dark:bg-emerald-900/20"
-            >
-              <div class="mb-4 flex items-start gap-3">
-                <div
-                  class="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-500"
-                >
-                  <i class="fas fa-plug text-sm text-white" />
-                </div>
-                <div>
-                  <h5 class="mb-2 font-semibold text-emerald-900 dark:text-emerald-200">
-                    连接第三方 Gemini API
-                  </h5>
-                  <p class="mb-2 text-sm text-emerald-800 dark:text-emerald-200">
-                    填写自建或第三方代理的 API 地址与密钥，系统将通过该地址完成 Gemini 请求。
-                  </p>
-                  <p class="text-xs text-emerald-700 dark:text-emerald-200">
-                    💡 建议使用完整的 HTTP(S) 地址，例如
-                    <code class="rounded bg-emerald-100 px-1 py-0.5 font-mono dark:bg-emerald-900/40"
-                      >https://proxy.example.com/v1</code
-                    >。
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
-                  >API 基础地址 *</label
-                >
-                <input
-                  v-model="form.baseUrl"
-                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                  :class="{ 'border-red-500': errors.baseUrl }"
-                  placeholder="例如：https://proxy.example.com/v1"
-                  type="text"
-                />
-                <p v-if="errors.baseUrl" class="mt-1 text-xs text-red-500">
-                  {{ errors.baseUrl }}
-                </p>
-              </div>
-
-              <div>
-                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
-                  >API Key *</label
-                >
-                <input
-                  v-model="form.apiKey"
-                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                  :placeholder="
-                    isEdit
-                      ? '如需更新密钥请重新输入，留空表示不修改'
-                      : '请输入 API Key'
-                  "
-                  type="text"
-                />
-              </div>
-
-              <div>
-                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
-                  >User-Agent (可选)</label
-                >
-                <input
-                  v-model="form.userAgent"
-                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                  placeholder="自定义 User-Agent，留空使用默认"
-                  type="text"
-                />
-              </div>
             </div>
 
             <!-- 所有平台的优先级设置 -->
@@ -2855,19 +2773,6 @@ const determinePlatformGroup = (platform) => {
   return ''
 }
 
-const getDefaultAddType = (platform, integrationType = 'oauth') => {
-  if (platform === 'claude') {
-    return 'setup-token'
-  }
-  if (platform === 'gemini') {
-    return integrationType === 'third_party' ? 'third-party' : 'oauth'
-  }
-  if (platform === 'openai') {
-    return 'oauth'
-  }
-  return 'manual'
-}
-
 // 初始化代理配置
 const initProxyConfig = () => {
   if (props.account?.proxy && props.account.proxy.host && props.account.proxy.port) {
@@ -2891,13 +2796,14 @@ const initProxyConfig = () => {
 }
 
 // 表单数据
-const initialPlatform = props.account?.platform || 'claude'
-const initialIntegrationType = props.account?.integrationType || 'oauth'
-
 const form = ref({
-  platform: initialPlatform,
-  integrationType: initialIntegrationType,
-  addType: getDefaultAddType(initialPlatform, initialIntegrationType),
+  platform: props.account?.platform || 'claude',
+  addType: (() => {
+    const platform = props.account?.platform || 'claude'
+    if (platform === 'gemini' || platform === 'openai') return 'oauth'
+    if (platform === 'claude') return 'oauth'
+    return 'manual'
+  })(),
   name: props.account?.name || '',
   description: props.account?.description || '',
   accountType: props.account?.accountType || 'shared',
@@ -2915,7 +2821,6 @@ const form = ref({
   // Claude Console 特定字段
   apiUrl: props.account?.apiUrl || '',
   apiKey: props.account?.apiKey || '',
-  baseUrl: props.account?.baseUrl || '',
   priority: props.account?.priority || 50,
   // OpenAI-Responses 特定字段
   baseApi: props.account?.baseApi || '',
@@ -2984,7 +2889,6 @@ const errors = ref({
   accessToken: '',
   apiUrl: '',
   apiKey: '',
-  baseUrl: '',
   accessKeyId: '',
   secretAccessKey: '',
   region: '',
@@ -3325,7 +3229,6 @@ const createAccount = async () => {
   errors.value.accessToken = ''
   errors.value.apiUrl = ''
   errors.value.apiKey = ''
-  errors.value.baseUrl = ''
 
   let hasError = false
 
@@ -3406,20 +3309,10 @@ const createAccount = async () => {
       }
       // Access Token 可选，如果没有会通过 Refresh Token 获取
     } else if (form.value.platform === 'gemini') {
-      if (form.value.addType === 'third-party') {
-        if (!form.value.baseUrl || form.value.baseUrl.trim() === '') {
-          errors.value.baseUrl = '请填写 API 基础地址'
-          hasError = true
-        }
-        if (!form.value.apiKey || form.value.apiKey.trim() === '') {
-          errors.value.apiKey = '请填写 API Key'
-          hasError = true
-        }
-      } else {
-        if (!form.value.accessToken || form.value.accessToken.trim() === '') {
-          errors.value.accessToken = '请填写 Access Token'
-          hasError = true
-        }
+      // Gemini 平台需要 Access Token
+      if (!form.value.accessToken || form.value.accessToken.trim() === '') {
+        errors.value.accessToken = '请填写 Access Token'
+        hasError = true
       }
     } else if (form.value.platform === 'claude') {
       // Claude 平台需要 Access Token
@@ -3502,34 +3395,25 @@ const createAccount = async () => {
         manuallySet: true // 标记为手动设置
       }
     } else if (form.value.platform === 'gemini') {
-      if (form.value.addType === 'third-party') {
-        data.integrationType = 'third_party'
-        data.baseUrl = form.value.baseUrl ? form.value.baseUrl.trim() : ''
-        data.apiKey = form.value.apiKey ? form.value.apiKey.trim() : ''
-        data.userAgent = form.value.userAgent || ''
-        data.priority = form.value.priority || 50
-      } else {
-        // Gemini手动模式需要构建geminiOauth对象
-        const expiresInMs = form.value.refreshToken
-          ? 10 * 60 * 1000 // 10分钟
-          : 365 * 24 * 60 * 60 * 1000 // 1年
+      // Gemini手动模式需要构建geminiOauth对象
+      const expiresInMs = form.value.refreshToken
+        ? 10 * 60 * 1000 // 10分钟
+        : 365 * 24 * 60 * 60 * 1000 // 1年
 
-        data.geminiOauth = {
-          access_token: form.value.accessToken,
-          refresh_token: form.value.refreshToken || '',
-          scope: 'https://www.googleapis.com/auth/cloud-platform',
-          token_type: 'Bearer',
-          expiry_date: Date.now() + expiresInMs
-        }
-
-        if (form.value.projectId) {
-          data.projectId = form.value.projectId
-        }
-
-        // 添加 Gemini 优先级
-        data.priority = form.value.priority || 50
-        data.integrationType = 'oauth'
+      data.geminiOauth = {
+        access_token: form.value.accessToken,
+        refresh_token: form.value.refreshToken || '',
+        scope: 'https://www.googleapis.com/auth/cloud-platform',
+        token_type: 'Bearer',
+        expiry_date: Date.now() + expiresInMs
       }
+
+      if (form.value.projectId) {
+        data.projectId = form.value.projectId
+      }
+
+      // 添加 Gemini 优先级
+      data.priority = form.value.priority || 50
     } else if (form.value.platform === 'openai') {
       // OpenAI手动模式需要构建openaiOauth对象
       const expiresInMs = form.value.refreshToken
@@ -3686,7 +3570,7 @@ const updateAccount = async () => {
   }
 
   // 对于Gemini账户，检查项目 ID
-  if (form.value.platform === 'gemini' && form.value.addType !== 'third-party') {
+  if (form.value.platform === 'gemini') {
     if (!form.value.projectId || form.value.projectId.trim() === '') {
       // 使用自定义确认弹窗
       const confirmed = await showConfirm(
@@ -3734,7 +3618,7 @@ const updateAccount = async () => {
           expiresAt: Date.now() + expiresInMs,
           scopes: props.account.scopes || [] // 保持原有的 scopes，如果没有则为空数组
         }
-      } else if (props.account.platform === 'gemini' && form.value.addType !== 'third-party') {
+      } else if (props.account.platform === 'gemini') {
         // Gemini需要构建geminiOauth对象
         const expiresInMs = form.value.refreshToken
           ? 10 * 60 * 1000 // 10分钟
@@ -3769,17 +3653,7 @@ const updateAccount = async () => {
     }
 
     if (props.account.platform === 'gemini') {
-      if (form.value.addType === 'third-party') {
-        data.integrationType = 'third_party'
-        data.baseUrl = form.value.baseUrl ? form.value.baseUrl.trim() : ''
-        if (form.value.apiKey && form.value.apiKey.trim()) {
-          data.apiKey = form.value.apiKey.trim()
-        }
-        data.userAgent = form.value.userAgent || ''
-      } else {
-        data.integrationType = 'oauth'
-        data.projectId = form.value.projectId || ''
-      }
+      data.projectId = form.value.projectId || ''
     }
 
     // Claude 官方账号优先级和订阅类型更新
@@ -3950,15 +3824,6 @@ watch(
   }
 )
 
-watch(
-  () => form.value.baseUrl,
-  () => {
-    if (errors.value.baseUrl && form.value.baseUrl?.trim()) {
-      errors.value.baseUrl = ''
-    }
-  }
-)
-
 // 监听API URL变化，清除错误
 watch(
   () => form.value.apiUrl,
@@ -4061,37 +3926,20 @@ watch(
     ) {
       form.value.addType = 'manual' // Claude Console、CCR、Bedrock 和 OpenAI-Responses 只支持手动模式
     } else if (newPlatform === 'claude') {
-      // 切换到 Claude 时，使用 Setup Token 作为默认方式
-      form.value.addType = 'setup-token'
-      form.value.integrationType = 'oauth'
+      // 切换到 Claude 时，使用 oauth 作为默认方式
+      form.value.addType = 'oauth'
     } else if (newPlatform === 'gemini') {
       // 切换到 Gemini 时，使用 OAuth 作为默认方式
-      if (form.value.addType !== 'third-party') {
-        form.value.addType = 'oauth'
-      }
-      form.value.integrationType =
-        form.value.addType === 'third-party' ? 'third_party' : 'oauth'
+      form.value.addType = 'oauth'
     } else if (newPlatform === 'openai') {
       // 切换到 OpenAI 时，使用 OAuth 作为默认方式
       form.value.addType = 'oauth'
-      form.value.integrationType = 'oauth'
-    } else {
-      form.value.integrationType = 'oauth'
     }
 
     // 平台变化时，清空分组选择
     if (form.value.accountType === 'group') {
       form.value.groupId = ''
       form.value.groupIds = []
-    }
-  }
-)
-
-watch(
-  () => form.value.addType,
-  (newType) => {
-    if (form.value.platform === 'gemini') {
-      form.value.integrationType = newType === 'third-party' ? 'third_party' : 'oauth'
     }
   }
 )
@@ -4276,12 +4124,9 @@ watch(
         }
       }
 
-      const nextIntegration = newAccount.integrationType || 'oauth'
-
       form.value = {
         platform: newAccount.platform,
-        integrationType: nextIntegration,
-        addType: getDefaultAddType(newAccount.platform, nextIntegration),
+        addType: 'oauth',
         name: newAccount.name,
         description: newAccount.description || '',
         accountType: newAccount.accountType || 'shared',
@@ -4299,7 +4144,6 @@ watch(
         // Claude Console 特定字段
         apiUrl: newAccount.apiUrl || '',
         apiKey: '', // 编辑模式不显示现有的 API Key
-        baseUrl: newAccount.baseUrl || '',
         priority: newAccount.priority || 50,
         supportedModels: (() => {
           const models = newAccount.supportedModels
@@ -4336,8 +4180,6 @@ watch(
         dailyUsage: newAccount.dailyUsage || 0,
         quotaResetTime: newAccount.quotaResetTime || '00:00'
       }
-
-      platformGroup.value = determinePlatformGroup(newAccount.platform)
 
       // 如果是Claude Console账户，加载实时使用情况
       if (newAccount.platform === 'claude-console') {

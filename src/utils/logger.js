@@ -1,6 +1,7 @@
 const winston = require('winston')
 const DailyRotateFile = require('winston-daily-rotate-file')
 const config = require('../../config/config')
+const { formatDateWithTimezone } = require('../utils/dateHelper')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -95,7 +96,7 @@ const safeStringify = (obj, maxDepth = 8, fullDepth = false) => {
 // 📝 增强的日志格式
 const createLogFormat = (colorize = false) => {
   const formats = [
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.timestamp({ format: () => formatDateWithTimezone(new Date(), false) }),
     winston.format.errors({ stack: true })
     // 移除 winston.format.metadata() 来避免自动包装
   ]
@@ -189,7 +190,7 @@ const securityLogger = winston.createLogger({
 const authDetailLogger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.timestamp({ format: () => formatDateWithTimezone(new Date(), false) }),
     winston.format.printf(({ level, message, timestamp, data }) => {
       // 使用更深的深度和格式化的JSON输出
       const jsonData = data ? JSON.stringify(data, null, 2) : '{}'

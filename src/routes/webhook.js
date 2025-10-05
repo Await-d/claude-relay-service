@@ -4,6 +4,7 @@ const logger = require('../utils/logger')
 const webhookService = require('../services/webhookService')
 const webhookConfigService = require('../services/webhookConfigService')
 const { authenticateAdmin } = require('../middleware/auth')
+const { getISOStringWithTimezone } = require('../utils/dateHelper')
 
 // 获取webhook配置
 router.get('/config', authenticateAdmin, async (req, res) => {
@@ -114,26 +115,152 @@ router.post('/platforms/:id/toggle', authenticateAdmin, async (req, res) => {
 // 测试Webhook连通性
 router.post('/test', authenticateAdmin, async (req, res) => {
   try {
-    const { url, type = 'custom', secret, enableSign } = req.body
+    const {
+      url,
+      type = 'custom',
+      secret,
+      enableSign,
+      deviceKey,
+      serverUrl,
+      level,
+      sound,
+      group,
+      // SMTP 相关字段
+      host,
+      port,
+      secure,
+      user,
+      pass,
+      from,
+      to,
+      ignoreTLS,
+      botToken,
+      chatId,
+      apiBaseUrl,
+      proxyUrl
+    } = req.body
 
-    if (!url) {
-      return res.status(400).json({
-        error: 'Missing webhook URL',
-        message: '请提供webhook URL'
-      })
+    // Bark平台特殊处理
+    if (type === 'bark') {
+      if (!deviceKey) {
+        return res.status(400).json({
+          error: 'Missing device key',
+          message: '请提供Bark设备密钥'
+        })
+      }
+
+      // 验证服务器URL（如果提供）
+      if (serverUrl) {
+        try {
+          new URL(serverUrl)
+        } catch (urlError) {
+          return res.status(400).json({
+            error: 'Invalid server URL format',
+            message: '请提供有效的Bark服务器URL'
+          })
+        }
+      }
+
+      logger.info(`🧪 测试webhook: ${type} - Device Key: ${deviceKey.substring(0, 8)}...`)
+    } else if (type === 'smtp') {
+      // SMTP平台验证
+      if (!host) {
+        return res.status(400).json({
+          error: 'Missing SMTP host',
+          message: '请提供SMTP服务器地址'
+        })
+      }
+      if (!user) {
+        return res.status(400).json({
+          error: 'Missing SMTP user',
+          message: '请提供SMTP用户名'
+        })
+      }
+      if (!pass) {
+        return res.status(400).json({
+          error: 'Missing SMTP password',
+          message: '请提供SMTP密码'
+        })
+      }
+      if (!to) {
+        return res.status(400).json({
+          error: 'Missing recipient email',
+          message: '请提供收件人邮箱'
+        })
+      }
+
+      logger.info(`🧪 测试webhook: ${type} - ${host}:${port || 587} -> ${to}`)
+    } else if (type === 'telegram') {
+      if (!botToken) {
+        return res.status(400).json({
+          error: 'Missing Telegram bot token',
+          message: '请提供 Telegram 机器人 Token'
+        })
+      }
+      if (!chatId) {
+        return res.status(400).json({
+          error: 'Missing Telegram chat id',
+          message: '请提供 Telegram Chat ID'
+        })
+      }
+
+      if (apiBaseUrl) {
+        try {
+          const parsed = new URL(apiBaseUrl)
+          if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return res.status(400).json({
+              error: 'Invalid Telegram API base url protocol',
+              message: 'Telegram API 基础地址仅支持 http 或 https'
+            })
+          }
+        } catch (urlError) {
+          return res.status(400).json({
+            error: 'Invalid Telegram API base url',
+            message: '请提供有效的 Telegram API 基础地址'
+          })
+        }
+      }
+
+      if (proxyUrl) {
+        try {
+          const parsed = new URL(proxyUrl)
+          const supportedProtocols = ['http:', 'https:', 'socks4:', 'socks4a:', 'socks5:']
+          if (!supportedProtocols.includes(parsed.protocol)) {
+            return res.status(400).json({
+              error: 'Unsupported proxy protocol',
+              message: 'Telegram 代理仅支持 http/https/socks 协议'
+            })
+          }
+        } catch (urlError) {
+          return res.status(400).json({
+            error: 'Invalid proxy url',
+            message: '请提供有效的代理地址'
+          })
+        }
+      }
+
+      logger.info(`🧪 测试webhook: ${type} - Chat ID: ${chatId}`)
+    } else {
+      // 其他平台验证URL
+      if (!url) {
+        return res.status(400).json({
+          error: 'Missing webhook URL',
+          message: '请提供webhook URL'
+        })
+      }
+
+      // 验证URL格式
+      try {
+        new URL(url)
+      } catch (urlError) {
+        return res.status(400).json({
+          error: 'Invalid URL format',
+          message: '请提供有效的webhook URL'
+        })
+      }
+
+      logger.info(`🧪 测试webhook: ${type} - ${url}`)
     }
-
-    // 验证URL格式
-    try {
-      new URL(url)
-    } catch (urlError) {
-      return res.status(400).json({
-        error: 'Invalid URL format',
-        message: '请提供有效的webhook URL'
-      })
-    }
-
-    logger.info(`🧪 测试webhook: ${type} - ${url}`)
 
     // 创建临时平台配置
     const platform = {
@@ -145,21 +272,61 @@ router.post('/test', authenticateAdmin, async (req, res) => {
       timeout: 10000
     }
 
+    // 添加Bark特有字段
+    if (type === 'bark') {
+      platform.deviceKey = deviceKey
+      platform.serverUrl = serverUrl
+      platform.level = level
+      platform.sound = sound
+      platform.group = group
+    } else if (type === 'smtp') {
+      // 添加SMTP特有字段
+      platform.host = host
+      platform.port = port || 587
+      platform.secure = secure || false
+      platform.user = user
+      platform.pass = pass
+      platform.from = from
+      platform.to = to
+      platform.ignoreTLS = ignoreTLS || false
+    } else if (type === 'telegram') {
+      platform.botToken = botToken
+      platform.chatId = chatId
+      platform.apiBaseUrl = apiBaseUrl
+      platform.proxyUrl = proxyUrl
+    }
+
     const result = await webhookService.testWebhook(platform)
 
+    const identifier = (() => {
+      if (type === 'bark') {
+        return `Device: ${deviceKey.substring(0, 8)}...`
+      }
+      if (type === 'smtp') {
+        const recipients = Array.isArray(to) ? to.join(', ') : to
+        return `${host}:${port || 587} -> ${recipients}`
+      }
+      if (type === 'telegram') {
+        return `Chat ID: ${chatId}`
+      }
+      return url
+    })()
+
     if (result.success) {
-      logger.info(`✅ Webhook测试成功: ${url}`)
+      logger.info(`✅ Webhook测试成功: ${identifier}`)
       res.json({
         success: true,
         message: 'Webhook测试成功',
-        url
+        url: type === 'bark' ? undefined : url,
+        deviceKey: type === 'bark' ? `${deviceKey.substring(0, 8)}...` : undefined
       })
     } else {
-      logger.warn(`❌ Webhook测试失败: ${url} - ${result.error}`)
+      logger.warn(`❌ Webhook测试失败: ${identifier} - ${result.error}`)
       res.status(400).json({
         success: false,
         message: 'Webhook测试失败',
-        url,
+        url: type === 'bark' ? undefined : url,
+        deviceKey: type === 'bark' ? `${deviceKey.substring(0, 8)}...` : undefined,
         error: result.error
       })
     }
@@ -218,7 +385,7 @@ router.post('/test-notification', authenticateAdmin, async (req, res) => {
       errorCode,
       reason,
       message,
-      timestamp: new Date().toISOString()
+      timestamp: getISOStringWithTimezone(new Date())
     }
 
     const result = await webhookService.sendNotification(type, testData)

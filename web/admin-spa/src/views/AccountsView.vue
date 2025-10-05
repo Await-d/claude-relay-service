@@ -7,7 +7,7 @@
             账户管理
           </h3>
           <p class="text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-            管理您的 Claude、Gemini、OpenAI 和 Azure OpenAI 账户及代理配置
+            管理 Claude、Gemini、OpenAI 等账户与代理配置
           </p>
         </div>
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -67,20 +67,22 @@
                 <input
                   v-model="searchKeyword"
                   class="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 pl-9 text-sm text-gray-700 placeholder-gray-400 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:placeholder-gray-500 dark:hover:border-gray-500"
-                  placeholder="搜索账户名称或邮箱..."
+                  placeholder="搜索账户名称..."
                   type="text"
                 />
                 <i class="fas fa-search absolute left-3 text-sm text-cyan-500" />
                 <button
                   v-if="searchKeyword"
-                  class="absolute right-2 flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                  class="absolute right-2 flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
                   @click="clearSearch"
                 >
                   <i class="fas fa-times text-xs" />
                 </button>
               </div>
             </div>
+          </div>
 
+          <div class="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
             <!-- 刷新按钮 -->
             <div class="relative">
               <el-tooltip
@@ -108,34 +110,32 @@
                 </button>
               </el-tooltip>
             </div>
-          </div>
 
-          <!-- 操作按钮 -->
-          <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+            <!-- 选择/取消选择按钮 -->
             <button
-              class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-md dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 sm:flex-none"
+              class="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-md dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
               @click="toggleSelectionMode"
             >
-              <i :class="showCheckboxes ? 'fas fa-times' : 'fas fa-check-square'" />
+              <i :class="showCheckboxes ? 'fas fa-times' : 'fas fa-check-square'"></i>
               <span>{{ showCheckboxes ? '取消选择' : '选择' }}</span>
             </button>
+
+            <!-- 批量删除按钮 -->
             <button
-              v-if="selectedCount > 0"
-              class="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-5 py-2.5 text-sm font-medium text-red-600 shadow-sm transition-all duration-200 hover:border-red-300 hover:bg-red-100 hover:shadow-md dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 sm:flex-none"
+              v-if="selectedAccounts.length > 0"
+              class="group relative flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 shadow-sm transition-all duration-200 hover:border-red-300 hover:bg-red-100 hover:shadow-md dark:border-red-700 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50 sm:w-auto"
               @click="batchDeleteAccounts"
             >
-              <i class="fas fa-trash"></i>
-              <span>删除选中 ({{ selectedCount }})</span>
+              <div
+                class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-red-500 to-pink-500 opacity-0 blur transition duration-300 group-hover:opacity-20"
+              ></div>
+              <i class="fas fa-trash relative text-red-600 dark:text-red-400" />
+              <span class="relative">删除选中 ({{ selectedAccounts.length }})</span>
             </button>
+
+            <!-- 添加账户按钮 -->
             <button
-              class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-500 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-purple-600 hover:to-indigo-600 hover:shadow-lg sm:flex-none"
-              @click.stop="showBulkImportModal = true"
-            >
-              <i class="fas fa-file-import"></i>
-              <span>批量导入</span>
-            </button>
-            <button
-              class="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-green-500 to-green-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-green-600 hover:to-green-700 hover:shadow-lg sm:flex-none"
+              class="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-green-500 to-green-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-green-600 hover:to-green-700 hover:shadow-lg sm:w-auto"
               @click.stop="openCreateAccountModal"
             >
               <i class="fas fa-plus"></i>
@@ -162,499 +162,690 @@
 
       <!-- 桌面端表格视图 -->
       <div v-else class="table-container hidden md:block">
-        <div class="table-scroll-wrapper relative overflow-x-auto">
-          <table class="w-full table-fixed lg:min-w-[1100px] xl:min-w-full">
-            <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
-              <tr>
-                <th
-                  v-if="showCheckboxes"
-                  class="w-12 px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
-                >
-                  <div class="flex items-center">
-                    <input
-                      type="checkbox"
-                      class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      :checked="allVisibleSelected"
-                      @change="toggleSelectAll($event.target.checked)"
-                    />
-                  </div>
-                </th>
-                <th
-                  class="w-[20%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600 lg:w-[25%] xl:w-[20%]"
-                  @click="sortAccounts('name')"
-                >
-                  名称
-                  <i
-                    v-if="accountsSortBy === 'name'"
-                    :class="[
-                      'fas',
-                      accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
-                      'ml-1'
-                    ]"
-                  />
-                  <i v-else class="fas fa-sort ml-1 text-gray-400" />
-                </th>
-                <th
-                  class="w-[14%] min-w-[120px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
-                  @click="sortAccounts('platform')"
-                >
-                  平台/类型
-                  <i
-                    v-if="accountsSortBy === 'platform'"
-                    :class="[
-                      'fas',
-                      accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
-                      'ml-1'
-                    ]"
-                  />
-                  <i v-else class="fas fa-sort ml-1 text-gray-400" />
-                </th>
-                <th
-                  class="w-[12%] min-w-[100px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
-                  @click="sortAccounts('status')"
-                >
-                  状态
-                  <i
-                    v-if="accountsSortBy === 'status'"
-                    :class="[
-                      'fas',
-                      accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
-                      'ml-1'
-                    ]"
-                  />
-                  <i v-else class="fas fa-sort ml-1 text-gray-400" />
-                </th>
-                <th
-                  class="hidden w-[8%] min-w-[80px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600 xl:table-cell"
-                  @click="sortAccounts('priority')"
-                >
-                  优先级
-                  <i
-                    v-if="accountsSortBy === 'priority'"
-                    :class="[
-                      'fas',
-                      accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
-                      'ml-1'
-                    ]"
-                  />
-                  <i v-else class="fas fa-sort ml-1 text-gray-400" />
-                </th>
-                <th
-                  class="hidden w-[10%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 lg:table-cell"
-                >
-                  <div class="flex items-center gap-1">
-                    <i class="fas fa-route text-xs text-blue-500" />
-                    调度策略
-                  </div>
-                </th>
-                <th
-                  class="w-[10%] min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
-                >
-                  代理
-                </th>
-                <th
-                  class="w-[10%] min-w-[90px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
-                >
-                  今日使用
-                </th>
-                <th
-                  class="hidden w-[10%] min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 xl:table-cell"
-                >
-                  会话窗口
-                </th>
-                <th
-                  class="hidden w-[12%] min-w-[150px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 xl:table-cell"
-                >
-                  <div class="flex items-center gap-1">
-                    <i class="fas fa-chart-pie text-xs text-purple-500" />
-                    OAuth 使用量
-                  </div>
-                </th>
-                <th
-                  class="hidden w-[12%] min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 lg:table-cell"
-                >
-                  <div class="flex items-center gap-1">
-                    <i class="fas fa-chart-line text-xs text-blue-500" />
-                    历史统计
-                  </div>
-                </th>
-                <th
-                  class="hidden w-[10%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 lg:table-cell"
-                >
-                  <div class="flex items-center gap-1">
-                    <i class="fas fa-dollar-sign text-xs text-green-500" />
-                    费用统计
-                  </div>
-                </th>
-                <th
-                  class="hidden w-[8%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 xl:table-cell"
-                >
-                  最后使用
-                </th>
-                <th
-                  class="w-[13%] min-w-[160px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 lg:w-[18%] xl:w-[13%]"
-                >
-                  操作
-                </th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200/50 dark:divide-gray-600/50">
-              <tr
-                v-for="account in sortedAccounts"
-                :key="account.id"
-                :class="[
-                  'table-row',
-                  showCheckboxes && isAccountSelected(account.id)
-                    ? 'bg-indigo-50/60 dark:bg-indigo-500/10'
-                    : ''
-                ]"
-              >
-                <td v-if="showCheckboxes" class="w-12 px-3 py-4 align-top">
+        <table class="w-full table-fixed">
+          <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
+            <tr>
+              <th v-if="shouldShowCheckboxes" class="w-[50px] px-3 py-4 text-left">
+                <div class="flex items-center">
                   <input
+                    v-model="selectAllChecked"
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    :indeterminate="isIndeterminate"
                     type="checkbox"
-                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    :checked="isAccountSelected(account.id)"
-                    @change="handleAccountCheckboxChange(account, $event.target.checked)"
+                    @change="handleSelectAll"
                   />
-                </td>
-                <td class="px-3 py-4">
-                  <div class="flex items-center">
-                    <div
-                      class="mr-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green-500 to-green-600"
-                    >
-                      <i class="fas fa-user-circle text-xs text-white" />
-                    </div>
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-2">
-                        <div
-                          class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
-                          :title="account.name"
-                        >
-                          {{ account.name }}
-                        </div>
-                        <span
-                          v-if="account.accountType === 'dedicated'"
-                          class="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800"
-                        >
-                          <i class="fas fa-lock mr-1" />专属
-                        </span>
-                        <span
-                          v-else-if="account.accountType === 'group'"
-                          class="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800"
-                        >
-                          <i class="fas fa-layer-group mr-1" />分组调度
-                        </span>
-                        <span
-                          v-else
-                          class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800"
-                        >
-                          <i class="fas fa-share-alt mr-1" />共享
-                        </span>
-                        <el-tooltip
-                          v-if="account.groupInfo"
-                          :content="`分组: ${account.groupInfo.name}\n调度策略: ${getStrategyName(account.groupInfo.schedulingStrategy || 'least_recent')}\n${getGroupSchedulingDetails(account.groupInfo)}\n成员数量: ${account.groupInfo.memberCount || 0} 个账户`"
-                          effect="dark"
-                          placement="top"
-                          raw-content
-                        >
-                          <span
-                            class="ml-1 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-400"
-                          >
-                            <i class="fas fa-layer-group mr-1" />{{ account.groupInfo.name }}
-                            <div
-                              :class="[
-                                'ml-1 flex items-center gap-1 rounded px-1 text-xs',
-                                getStrategyColorCompact(
-                                  account.groupInfo.schedulingStrategy || 'least_recent'
-                                )
-                              ]"
-                              :title="
-                                getStrategyName(
-                                  account.groupInfo.schedulingStrategy || 'least_recent'
-                                )
-                              "
-                            >
-                              <i
-                                :class="
-                                  getStrategyIconCompact(
-                                    account.groupInfo.schedulingStrategy || 'least_recent'
-                                  )
-                                "
-                              />
-                            </div>
-                          </span>
-                        </el-tooltip>
-                      </div>
+                </div>
+              </th>
+              <th
+                class="w-[22%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="sortAccounts('name')"
+              >
+                名称
+                <i
+                  v-if="accountsSortBy === 'name'"
+                  :class="[
+                    'fas',
+                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                    'ml-1'
+                  ]"
+                />
+                <i v-else class="fas fa-sort ml-1 text-gray-400" />
+              </th>
+              <th
+                class="w-[15%] min-w-[120px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="sortAccounts('platform')"
+              >
+                平台/类型
+                <i
+                  v-if="accountsSortBy === 'platform'"
+                  :class="[
+                    'fas',
+                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                    'ml-1'
+                  ]"
+                />
+                <i v-else class="fas fa-sort ml-1 text-gray-400" />
+              </th>
+              <th
+                class="w-[12%] min-w-[100px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="sortAccounts('status')"
+              >
+                状态
+                <i
+                  v-if="accountsSortBy === 'status'"
+                  :class="[
+                    'fas',
+                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                    'ml-1'
+                  ]"
+                />
+                <i v-else class="fas fa-sort ml-1 text-gray-400" />
+              </th>
+              <th
+                class="w-[8%] min-w-[80px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="sortAccounts('priority')"
+              >
+                优先级
+                <i
+                  v-if="accountsSortBy === 'priority'"
+                  :class="[
+                    'fas',
+                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                    'ml-1'
+                  ]"
+                />
+                <i v-else class="fas fa-sort ml-1 text-gray-400" />
+              </th>
+              <th
+                class="w-[10%] min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                代理
+              </th>
+              <th
+                class="w-[10%] min-w-[90px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                今日使用
+              </th>
+              <th
+                class="w-[10%] min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                <div class="flex items-center gap-2">
+                  <span>会话窗口</span>
+                  <el-tooltip placement="top">
+                    <template #content>
                       <div
-                        class="truncate text-xs text-gray-500 dark:text-gray-400"
-                        :title="account.id"
+                        class="w-[260px] space-y-3 text-xs leading-relaxed text-white dark:text-gray-800"
                       >
-                        {{ account.id }}
+                        <div class="space-y-2">
+                          <div class="text-sm font-semibold text-white dark:text-gray-900">
+                            Claude 系列
+                          </div>
+                          <div class="text-gray-200 dark:text-gray-600">
+                            会话窗口进度表示 5 小时窗口的时间推移，颜色提示当前调度状态。
+                          </div>
+                          <div class="space-y-1 pt-1 text-gray-200 dark:text-gray-600">
+                            <div class="flex items-center gap-2">
+                              <div
+                                class="h-2 w-16 rounded bg-gradient-to-r from-blue-500 to-indigo-600"
+                              ></div>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >正常：请求正常处理</span
+                              >
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <div
+                                class="h-2 w-16 rounded bg-gradient-to-r from-yellow-500 to-orange-500"
+                              ></div>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >警告：接近限制</span
+                              >
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <div
+                                class="h-2 w-16 rounded bg-gradient-to-r from-red-500 to-red-600"
+                              ></div>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >拒绝：达到速率限制</span
+                              >
+                            </div>
+                          </div>
+                        </div>
+                        <div class="h-px bg-gray-200 dark:bg-gray-600/50"></div>
+                        <div class="space-y-2">
+                          <div class="text-sm font-semibold text-white dark:text-gray-900">
+                            OpenAI
+                          </div>
+                          <div class="text-gray-200 dark:text-gray-600">
+                            进度条分别展示 5h 与周限窗口的额度使用比例，颜色含义与上方保持一致。
+                          </div>
+                          <div class="space-y-1 text-gray-200 dark:text-gray-600">
+                            <div class="flex items-start gap-2">
+                              <i class="fas fa-clock mt-[2px] text-[10px] text-blue-500"></i>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >5h 窗口：5小时使用量进度，到达重置时间后会自动归零。</span
+                              >
+                            </div>
+                            <div class="flex items-start gap-2">
+                              <i class="fas fa-history mt-[2px] text-[10px] text-emerald-500"></i>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >周限窗口：7天使用量进度，重置时同样回到 0%。</span
+                              >
+                            </div>
+                            <div class="flex items-start gap-2">
+                              <i
+                                class="fas fa-info-circle mt-[2px] text-[10px] text-indigo-500"
+                              ></i>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >当“重置剩余”为 0 时，进度条与百分比会同步清零。</span
+                              >
+                            </div>
+                          </div>
+                        </div>
+                        <div class="h-px bg-gray-200 dark:bg-gray-600/50"></div>
+                        <div class="space-y-2">
+                          <div class="text-sm font-semibold text-white dark:text-gray-900">
+                            Claude OAuth 账户
+                          </div>
+                          <div class="text-gray-200 dark:text-gray-600">
+                            展示三个窗口的使用率（utilization百分比），颜色含义同上。
+                          </div>
+                          <div class="space-y-1 text-gray-200 dark:text-gray-600">
+                            <div class="flex items-start gap-2">
+                              <i class="fas fa-clock mt-[2px] text-[10px] text-indigo-500"></i>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >5h 窗口：5小时滑动窗口的使用率。</span
+                              >
+                            </div>
+                            <div class="flex items-start gap-2">
+                              <i
+                                class="fas fa-calendar-alt mt-[2px] text-[10px] text-emerald-500"
+                              ></i>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >7d 窗口：7天总限额的使用率。</span
+                              >
+                            </div>
+                            <div class="flex items-start gap-2">
+                              <i class="fas fa-gem mt-[2px] text-[10px] text-purple-500"></i>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >Opus 窗口：7天Opus模型专用限额。</span
+                              >
+                            </div>
+                            <div class="flex items-start gap-2">
+                              <i class="fas fa-sync-alt mt-[2px] text-[10px] text-blue-500"></i>
+                              <span class="font-medium text-white dark:text-gray-900"
+                                >到达重置时间后自动归零。</span
+                              >
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    </template>
+                    <i
+                      class="fas fa-question-circle cursor-help text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400"
+                    />
+                  </el-tooltip>
+                </div>
+              </th>
+              <th
+                class="w-[8%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                最后使用
+              </th>
+              <th
+                class="w-[15%] min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                操作
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200/50 dark:divide-gray-600/50">
+            <tr v-for="account in paginatedAccounts" :key="account.id" class="table-row">
+              <td v-if="shouldShowCheckboxes" class="px-3 py-3">
+                <div class="flex items-center">
+                  <input
+                    v-model="selectedAccounts"
+                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    type="checkbox"
+                    :value="account.id"
+                    @change="updateSelectAllState"
+                  />
+                </div>
+              </td>
+              <td class="px-3 py-4">
+                <div class="flex items-center">
+                  <div
+                    class="mr-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green-500 to-green-600"
+                  >
+                    <i class="fas fa-user-circle text-xs text-white" />
                   </div>
-                </td>
-                <td class="px-3 py-4">
-                  <div class="flex items-center gap-1">
-                    <!-- 平台图标和名称 -->
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <div
+                        class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
+                        :title="account.name"
+                      >
+                        {{ account.name }}
+                      </div>
+                      <span
+                        v-if="account.accountType === 'dedicated'"
+                        class="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800"
+                      >
+                        <i class="fas fa-lock mr-1" />专属
+                      </span>
+                      <span
+                        v-else-if="account.accountType === 'group'"
+                        class="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800"
+                      >
+                        <i class="fas fa-layer-group mr-1" />分组调度
+                      </span>
+                      <span
+                        v-else
+                        class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800"
+                      >
+                        <i class="fas fa-share-alt mr-1" />共享
+                      </span>
+                    </div>
+                    <!-- 显示所有分组 - 换行显示 -->
                     <div
-                      v-if="account.platform === 'gemini'"
-                      class="flex items-center gap-1.5 rounded-lg border border-yellow-200 bg-gradient-to-r from-yellow-100 to-amber-100 px-2.5 py-1"
+                      v-if="account.groupInfos && account.groupInfos.length > 0"
+                      class="my-2 flex flex-wrap items-center gap-2"
                     >
-                      <i class="fas fa-robot text-xs text-yellow-700" />
-                      <span class="text-xs font-semibold text-yellow-800">Gemini</span>
-                      <span class="mx-1 h-4 w-px bg-yellow-300" />
-                      <span class="text-xs font-medium text-yellow-700">
-                        {{ getGeminiAuthType() }}
+                      <span
+                        v-for="group in account.groupInfos"
+                        :key="group.id"
+                        class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                        :title="`所属分组: ${group.name}`"
+                      >
+                        <i class="fas fa-folder mr-1" />{{ group.name }}
                       </span>
                     </div>
                     <div
-                      v-else-if="account.platform === 'claude-console'"
-                      class="flex items-center gap-1.5 rounded-lg border border-purple-200 bg-gradient-to-r from-purple-100 to-pink-100 px-2.5 py-1"
+                      class="truncate text-xs text-gray-500 dark:text-gray-400"
+                      :title="account.id"
                     >
-                      <i class="fas fa-terminal text-xs text-purple-700" />
-                      <span class="text-xs font-semibold text-purple-800">Console</span>
-                      <span class="mx-1 h-4 w-px bg-purple-300" />
-                      <span class="text-xs font-medium text-purple-700">API Key</span>
-                    </div>
-                    <div
-                      v-else-if="account.platform === 'bedrock'"
-                      class="flex items-center gap-1.5 rounded-lg border border-orange-200 bg-gradient-to-r from-orange-100 to-red-100 px-2.5 py-1"
-                    >
-                      <i class="fab fa-aws text-xs text-orange-700" />
-                      <span class="text-xs font-semibold text-orange-800">Bedrock</span>
-                      <span class="mx-1 h-4 w-px bg-orange-300" />
-                      <span class="text-xs font-medium text-orange-700">AWS</span>
-                    </div>
-                    <div
-                      v-else-if="account.platform === 'openai'"
-                      class="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-100 bg-gradient-to-r from-gray-100 to-gray-100 px-2.5 py-1"
-                    >
-                      <div class="fa-openai" />
-                      <span class="text-xs font-semibold text-gray-950">OpenAi</span>
-                      <span class="mx-1 h-4 w-px bg-gray-400" />
-                      <span class="text-xs font-medium text-gray-950">{{
-                        getOpenAIAuthType()
-                      }}</span>
-                    </div>
-                    <div
-                      v-else-if="account.platform === 'azure_openai'"
-                      class="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-gradient-to-r from-blue-100 to-cyan-100 px-2.5 py-1 dark:border-blue-700 dark:from-blue-900/20 dark:to-cyan-900/20"
-                    >
-                      <i class="fab fa-microsoft text-xs text-blue-700 dark:text-blue-400" />
-                      <span class="text-xs font-semibold text-blue-800 dark:text-blue-300"
-                        >Azure OpenAI</span
-                      >
-                      <span class="mx-1 h-4 w-px bg-blue-300 dark:bg-blue-600" />
-                      <span class="text-xs font-medium text-blue-700 dark:text-blue-400"
-                        >API Key</span
-                      >
-                    </div>
-                    <div
-                      v-else-if="
-                        account.platform === 'claude' || account.platform === 'claude-oauth'
-                      "
-                      class="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-100 to-blue-100 px-2.5 py-1"
-                    >
-                      <i class="fas fa-brain text-xs text-indigo-700" />
-                      <span class="text-xs font-semibold text-indigo-800">{{
-                        getClaudeAccountType(account)
-                      }}</span>
-                      <span class="mx-1 h-4 w-px bg-indigo-300" />
-                      <span class="text-xs font-medium text-indigo-700">
-                        {{ getClaudeAuthType(account) }}
-                      </span>
-                    </div>
-                    <div
-                      v-else
-                      class="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gradient-to-r from-gray-100 to-gray-200 px-2.5 py-1"
-                    >
-                      <i class="fas fa-question text-xs text-gray-700" />
-                      <span class="text-xs font-semibold text-gray-800">未知</span>
+                      {{ account.id }}
                     </div>
                   </div>
-                </td>
-                <td class="whitespace-nowrap px-3 py-4">
-                  <div class="flex flex-col gap-1">
-                    <span
-                      :class="[
-                        'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
-                        account.status === 'blocked'
-                          ? 'bg-orange-100 text-orange-800'
-                          : account.status === 'unauthorized'
-                            ? 'bg-red-100 text-red-800'
+                </div>
+              </td>
+              <td class="px-3 py-4">
+                <div class="flex items-center gap-1">
+                  <!-- 平台图标和名称 -->
+                  <div
+                    v-if="account.platform === 'gemini'"
+                    class="flex items-center gap-1.5 rounded-lg border border-yellow-200 bg-gradient-to-r from-yellow-100 to-amber-100 px-2.5 py-1"
+                  >
+                    <i class="fas fa-robot text-xs text-yellow-700" />
+                    <span class="text-xs font-semibold text-yellow-800">Gemini</span>
+                    <span class="mx-1 h-4 w-px bg-yellow-300" />
+                    <span class="text-xs font-medium text-yellow-700">
+                      {{ getGeminiAuthType() }}
+                    </span>
+                  </div>
+                  <div
+                    v-else-if="account.platform === 'claude-console'"
+                    class="flex items-center gap-1.5 rounded-lg border border-purple-200 bg-gradient-to-r from-purple-100 to-pink-100 px-2.5 py-1"
+                  >
+                    <i class="fas fa-terminal text-xs text-purple-700" />
+                    <span class="text-xs font-semibold text-purple-800">Console</span>
+                    <span class="mx-1 h-4 w-px bg-purple-300" />
+                    <span class="text-xs font-medium text-purple-700">API Key</span>
+                  </div>
+                  <div
+                    v-else-if="account.platform === 'bedrock'"
+                    class="flex items-center gap-1.5 rounded-lg border border-orange-200 bg-gradient-to-r from-orange-100 to-red-100 px-2.5 py-1"
+                  >
+                    <i class="fab fa-aws text-xs text-orange-700" />
+                    <span class="text-xs font-semibold text-orange-800">Bedrock</span>
+                    <span class="mx-1 h-4 w-px bg-orange-300" />
+                    <span class="text-xs font-medium text-orange-700">AWS</span>
+                  </div>
+                  <div
+                    v-else-if="account.platform === 'openai'"
+                    class="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-100 bg-gradient-to-r from-gray-100 to-gray-100 px-2.5 py-1"
+                  >
+                    <div class="fa-openai" />
+                    <span class="text-xs font-semibold text-gray-950">OpenAi</span>
+                    <span class="mx-1 h-4 w-px bg-gray-400" />
+                    <span class="text-xs font-medium text-gray-950">{{ getOpenAIAuthType() }}</span>
+                  </div>
+                  <div
+                    v-else-if="account.platform === 'azure_openai'"
+                    class="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-gradient-to-r from-blue-100 to-cyan-100 px-2.5 py-1 dark:border-blue-700 dark:from-blue-900/20 dark:to-cyan-900/20"
+                  >
+                    <i class="fab fa-microsoft text-xs text-blue-700 dark:text-blue-400" />
+                    <span class="text-xs font-semibold text-blue-800 dark:text-blue-300"
+                      >Azure OpenAI</span
+                    >
+                    <span class="mx-1 h-4 w-px bg-blue-300 dark:bg-blue-600" />
+                    <span class="text-xs font-medium text-blue-700 dark:text-blue-400"
+                      >API Key</span
+                    >
+                  </div>
+                  <div
+                    v-else-if="account.platform === 'openai-responses'"
+                    class="flex items-center gap-1.5 rounded-lg border border-teal-200 bg-gradient-to-r from-teal-100 to-green-100 px-2.5 py-1 dark:border-teal-700 dark:from-teal-900/20 dark:to-green-900/20"
+                  >
+                    <i class="fas fa-server text-xs text-teal-700 dark:text-teal-400" />
+                    <span class="text-xs font-semibold text-teal-800 dark:text-teal-300"
+                      >OpenAI-Responses</span
+                    >
+                    <span class="mx-1 h-4 w-px bg-teal-300 dark:bg-teal-600" />
+                    <span class="text-xs font-medium text-teal-700 dark:text-teal-400"
+                      >API Key</span
+                    >
+                  </div>
+                  <div
+                    v-else-if="account.platform === 'claude' || account.platform === 'claude-oauth'"
+                    class="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-100 to-blue-100 px-2.5 py-1"
+                  >
+                    <i class="fas fa-brain text-xs text-indigo-700" />
+                    <span class="text-xs font-semibold text-indigo-800">{{
+                      getClaudeAccountType(account)
+                    }}</span>
+                    <span class="mx-1 h-4 w-px bg-indigo-300" />
+                    <span class="text-xs font-medium text-indigo-700">
+                      {{ getClaudeAuthType(account) }}
+                    </span>
+                  </div>
+                  <div
+                    v-else-if="account.platform === 'ccr'"
+                    class="flex items-center gap-1.5 rounded-lg border border-teal-200 bg-gradient-to-r from-teal-100 to-emerald-100 px-2.5 py-1 dark:border-teal-700 dark:from-teal-900/20 dark:to-emerald-900/20"
+                  >
+                    <i class="fas fa-code-branch text-xs text-teal-700 dark:text-teal-400" />
+                    <span class="text-xs font-semibold text-teal-800 dark:text-teal-300">CCR</span>
+                    <span class="mx-1 h-4 w-px bg-teal-300 dark:bg-teal-600" />
+                    <span class="text-xs font-medium text-teal-700 dark:text-teal-300">Relay</span>
+                  </div>
+                  <div
+                    v-else
+                    class="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gradient-to-r from-gray-100 to-gray-200 px-2.5 py-1"
+                  >
+                    <i class="fas fa-question text-xs text-gray-700" />
+                    <span class="text-xs font-semibold text-gray-800">未知</span>
+                  </div>
+                </div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4">
+                <div class="flex flex-col gap-1">
+                  <span
+                    :class="[
+                      'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
+                      account.status === 'blocked'
+                        ? 'bg-orange-100 text-orange-800'
+                        : account.status === 'unauthorized'
+                          ? 'bg-red-100 text-red-800'
+                          : account.status === 'temp_error'
+                            ? 'bg-orange-100 text-orange-800'
                             : account.isActive
                               ? 'bg-green-100 text-green-800'
                               : 'bg-red-100 text-red-800'
-                      ]"
-                    >
-                      <div
-                        :class="[
-                          'mr-2 h-2 w-2 rounded-full',
-                          account.status === 'blocked'
-                            ? 'bg-orange-500'
-                            : account.status === 'unauthorized'
-                              ? 'bg-red-500'
+                    ]"
+                  >
+                    <div
+                      :class="[
+                        'mr-2 h-2 w-2 rounded-full',
+                        account.status === 'blocked'
+                          ? 'bg-orange-500'
+                          : account.status === 'unauthorized'
+                            ? 'bg-red-500'
+                            : account.status === 'temp_error'
+                              ? 'bg-orange-500'
                               : account.isActive
                                 ? 'bg-green-500'
                                 : 'bg-red-500'
-                        ]"
-                      />
-                      {{
-                        account.status === 'blocked'
-                          ? '已封锁'
-                          : account.status === 'unauthorized'
-                            ? '异常'
+                      ]"
+                    />
+                    {{
+                      account.status === 'blocked'
+                        ? '已封锁'
+                        : account.status === 'unauthorized'
+                          ? '异常'
+                          : account.status === 'temp_error'
+                            ? '临时异常'
                             : account.isActive
                               ? '正常'
                               : '异常'
-                      }}
-                    </span>
-                    <RateLimitCountdown
-                      v-if="
-                        (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
-                        account.rateLimitStatus === 'limited'
-                      "
-                      :rate-limit-info="account.rateLimitStatus"
-                      @expired="handleRateLimitExpired(account)"
-                      @update="handleRateLimitUpdate"
-                    />
-                    <ClaudeResetCountdown
-                      v-if="account.platform === 'claude' || account.platform === 'claude-oauth'"
-                      :account="account"
-                      @update="handleClaudeResetUpdate"
-                    />
-                    <span
-                      v-if="account.schedulable === false"
-                      class="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700"
-                    >
-                      <i class="fas fa-pause-circle mr-1" />
-                      不可调度
-                    </span>
-                    <span
-                      v-if="account.status === 'blocked' && account.errorMessage"
-                      class="mt-1 max-w-xs truncate text-xs text-gray-500 dark:text-gray-400"
-                      :title="account.errorMessage"
-                    >
-                      {{ account.errorMessage }}
-                    </span>
-                    <span
-                      v-if="account.accountType === 'dedicated'"
-                      class="text-xs text-gray-500 dark:text-gray-400"
-                    >
-                      绑定: {{ account.boundApiKeysCount || 0 }} 个API Key
-                    </span>
-                  </div>
-                </td>
-                <td class="hidden whitespace-nowrap px-3 py-4 xl:table-cell">
-                  <div
+                    }}
+                  </span>
+                  <span
                     v-if="
-                      account.platform === 'claude' ||
-                      account.platform === 'claude-console' ||
-                      account.platform === 'bedrock' ||
-                      account.platform === 'gemini' ||
-                      account.platform === 'openai'
+                      (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
+                      account.rateLimitStatus === 'limited'
                     "
-                    class="flex items-center gap-2"
+                    class="inline-flex items-center rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800"
                   >
-                    <div class="h-2 w-16 rounded-full bg-gray-200">
-                      <div
-                        class="h-2 rounded-full bg-gradient-to-r from-green-500 to-blue-600 transition-all duration-300"
-                        :style="{ width: 101 - (account.priority || 50) + '%' }"
-                      />
-                    </div>
-                    <span class="min-w-[20px] text-xs font-medium text-gray-700 dark:text-gray-200">
-                      {{ account.priority || 50 }}
-                    </span>
+                    <i class="fas fa-exclamation-triangle mr-1" />
+                    限流中
+                    <span
+                      v-if="
+                        account.rateLimitStatus &&
+                        typeof account.rateLimitStatus === 'object' &&
+                        account.rateLimitStatus.minutesRemaining > 0
+                      "
+                      >({{ formatRateLimitTime(account.rateLimitStatus.minutesRemaining) }})</span
+                    >
+                  </span>
+                  <span
+                    v-if="account.schedulable === false"
+                    class="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700"
+                  >
+                    <i class="fas fa-pause-circle mr-1" />
+                    不可调度
+                    <el-tooltip
+                      v-if="getSchedulableReason(account)"
+                      :content="getSchedulableReason(account)"
+                      effect="dark"
+                      placement="top"
+                    >
+                      <i class="fas fa-question-circle ml-1 cursor-help text-gray-500" />
+                    </el-tooltip>
+                  </span>
+                  <span
+                    v-if="account.status === 'blocked' && account.errorMessage"
+                    class="mt-1 max-w-xs truncate text-xs text-gray-500 dark:text-gray-400"
+                    :title="account.errorMessage"
+                  >
+                    {{ account.errorMessage }}
+                  </span>
+                  <span
+                    v-if="account.accountType === 'dedicated'"
+                    class="text-xs text-gray-500 dark:text-gray-400"
+                  >
+                    绑定: {{ account.boundApiKeysCount || 0 }} 个API Key
+                  </span>
+                </div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4">
+                <div
+                  v-if="
+                    account.platform === 'claude' ||
+                    account.platform === 'claude-console' ||
+                    account.platform === 'bedrock' ||
+                    account.platform === 'gemini' ||
+                    account.platform === 'openai' ||
+                    account.platform === 'openai-responses' ||
+                    account.platform === 'azure_openai' ||
+                    account.platform === 'ccr'
+                  "
+                  class="flex items-center gap-2"
+                >
+                  <div class="h-2 w-16 rounded-full bg-gray-200">
+                    <div
+                      class="h-2 rounded-full bg-gradient-to-r from-green-500 to-blue-600 transition-all duration-300"
+                      :style="{ width: 101 - (account.priority || 50) + '%' }"
+                    />
                   </div>
-                  <div v-else class="text-sm text-gray-400">
-                    <span class="text-xs">N/A</span>
+                  <span class="min-w-[20px] text-xs font-medium text-gray-700 dark:text-gray-200">
+                    {{ account.priority || 50 }}
+                  </span>
+                </div>
+                <div v-else class="text-sm text-gray-400">
+                  <span class="text-xs">N/A</span>
+                </div>
+              </td>
+              <td class="px-3 py-4 text-sm text-gray-600">
+                <div
+                  v-if="formatProxyDisplay(account.proxy)"
+                  class="break-all rounded bg-blue-50 px-2 py-1 font-mono text-xs"
+                  :title="formatProxyDisplay(account.proxy)"
+                >
+                  {{ formatProxyDisplay(account.proxy) }}
+                </div>
+                <div v-else class="text-gray-400">无代理</div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4 text-sm">
+                <div v-if="account.usage && account.usage.daily" class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <div class="h-2 w-2 rounded-full bg-blue-500" />
+                    <span class="text-sm font-medium text-gray-900 dark:text-gray-100"
+                      >{{ account.usage.daily.requests || 0 }} 次</span
+                    >
                   </div>
-                </td>
-                <td class="hidden whitespace-nowrap px-3 py-4 lg:table-cell">
-                  <div class="flex flex-col gap-1">
-                    <!-- 调度策略名称 -->
-                    <div class="flex items-center gap-2">
-                      <div
-                        :class="[
-                          'flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium',
-                          getStrategyColor(account.schedulingStrategy || 'least_recent')
-                        ]"
-                      >
-                        <i :class="getStrategyIcon(account.schedulingStrategy || 'least_recent')" />
-                        <span>{{
-                          getStrategyName(account.schedulingStrategy || 'least_recent')
-                        }}</span>
+                  <div class="flex items-center gap-2">
+                    <div class="h-2 w-2 rounded-full bg-purple-500" />
+                    <span class="text-xs text-gray-600 dark:text-gray-300"
+                      >{{ formatNumber(account.usage.daily.allTokens || 0) }}M</span
+                    >
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <div class="h-2 w-2 rounded-full bg-green-500" />
+                    <span class="text-xs text-gray-600 dark:text-gray-300"
+                      >${{ calculateDailyCost(account) }}</span
+                    >
+                  </div>
+                  <div
+                    v-if="account.usage.averages && account.usage.averages.rpm > 0"
+                    class="text-xs text-gray-500 dark:text-gray-400"
+                  >
+                    平均 {{ account.usage.averages.rpm.toFixed(2) }} RPM
+                  </div>
+                </div>
+                <div v-else class="text-xs text-gray-400">暂无数据</div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4">
+                <div v-if="account.platform === 'claude'" class="space-y-2">
+                  <!-- OAuth 账户：显示三窗口 OAuth usage -->
+                  <div v-if="isClaudeOAuth(account) && account.claudeUsage" class="space-y-2">
+                    <!-- 5小时窗口 -->
+                    <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                      <div class="flex items-center gap-2">
+                        <span
+                          class="inline-flex min-w-[32px] justify-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
+                        >
+                          5h
+                        </span>
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2">
+                            <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                              <div
+                                :class="[
+                                  'h-2 rounded-full transition-all duration-300',
+                                  getClaudeUsageBarClass(account.claudeUsage.fiveHour)
+                                ]"
+                                :style="{
+                                  width: getClaudeUsageWidth(account.claudeUsage.fiveHour)
+                                }"
+                              />
+                            </div>
+                            <span
+                              class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                            >
+                              {{ formatClaudeUsagePercent(account.claudeUsage.fiveHour) }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        重置剩余 {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
                       </div>
                     </div>
-
-                    <!-- 策略特殊参数 -->
-                    <div
-                      v-if="
-                        account.schedulingStrategy === 'weighted_random' && account.schedulingWeight
-                      "
-                      class="text-xs text-gray-600 dark:text-gray-300"
-                    >
-                      <i class="fas fa-weight-hanging mr-1 text-orange-500" />
-                      权重: {{ account.schedulingWeight }}
+                    <!-- 7天窗口 -->
+                    <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                      <div class="flex items-center gap-2">
+                        <span
+                          class="inline-flex min-w-[32px] justify-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300"
+                        >
+                          7d
+                        </span>
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2">
+                            <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                              <div
+                                :class="[
+                                  'h-2 rounded-full transition-all duration-300',
+                                  getClaudeUsageBarClass(account.claudeUsage.sevenDay)
+                                ]"
+                                :style="{
+                                  width: getClaudeUsageWidth(account.claudeUsage.sevenDay)
+                                }"
+                              />
+                            </div>
+                            <span
+                              class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                            >
+                              {{ formatClaudeUsagePercent(account.claudeUsage.sevenDay) }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
+                      </div>
                     </div>
-                    <div
-                      v-else-if="
-                        account.schedulingStrategy === 'sequential' && account.sequentialOrder
-                      "
-                      class="text-xs text-gray-600 dark:text-gray-300"
-                    >
-                      <i class="fas fa-sort-numeric-down mr-1 text-purple-500" />
-                      顺序: {{ account.sequentialOrder }}
+                    <!-- 7天Opus窗口 -->
+                    <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                      <div class="flex items-center gap-2">
+                        <span
+                          class="inline-flex min-w-[32px] justify-center rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-600 dark:bg-purple-500/20 dark:text-purple-300"
+                        >
+                          Opus
+                        </span>
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2">
+                            <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                              <div
+                                :class="[
+                                  'h-2 rounded-full transition-all duration-300',
+                                  getClaudeUsageBarClass(account.claudeUsage.sevenDayOpus)
+                                ]"
+                                :style="{
+                                  width: getClaudeUsageWidth(account.claudeUsage.sevenDayOpus)
+                                }"
+                              />
+                            </div>
+                            <span
+                              class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                            >
+                              {{ formatClaudeUsagePercent(account.claudeUsage.sevenDayOpus) }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                      </div>
                     </div>
                   </div>
-                </td>
-                <td class="px-3 py-4 text-sm text-gray-600">
+                  <!-- Setup Token 账户：显示原有的会话窗口时间进度 -->
                   <div
-                    v-if="formatProxyDisplay(account.proxy)"
-                    class="break-all rounded bg-blue-50 px-2 py-1 font-mono text-xs"
-                    :title="formatProxyDisplay(account.proxy)"
-                  >
-                    {{ formatProxyDisplay(account.proxy) }}
-                  </div>
-                  <div v-else class="text-gray-400">无代理</div>
-                </td>
-                <td class="whitespace-nowrap px-3 py-4 text-sm">
-                  <div v-if="account.usage && account.usage.daily" class="space-y-1">
-                    <div class="flex items-center gap-2">
-                      <div class="h-2 w-2 rounded-full bg-green-500" />
-                      <span class="text-sm font-medium text-gray-900 dark:text-gray-100"
-                        >{{ account.usage.daily.requests || 0 }} 次</span
-                      >
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <div class="h-2 w-2 rounded-full bg-blue-500" />
-                      <span class="text-xs text-gray-600 dark:text-gray-300"
-                        >{{ formatNumber(account.usage.daily.allTokens || 0) }} tokens</span
-                      >
-                    </div>
-                    <div
-                      v-if="account.usage.averages && account.usage.averages.rpm > 0"
-                      class="text-xs text-gray-500 dark:text-gray-400"
-                    >
-                      平均 {{ account.usage.averages.rpm.toFixed(2) }} RPM
-                    </div>
-                  </div>
-                  <div v-else class="text-xs text-gray-400">暂无数据</div>
-                </td>
-                <td class="hidden whitespace-nowrap px-3 py-4 xl:table-cell">
-                  <div
-                    v-if="
-                      ['claude', 'claude-console'].includes(account.platform) &&
+                    v-else-if="
+                      !isClaudeOAuth(account) &&
                       account.sessionWindow &&
                       account.sessionWindow.hasActiveWindow
                     "
                     class="space-y-2"
                   >
+                    <!-- 使用统计在顶部 -->
+                    <div
+                      v-if="account.usage && account.usage.sessionWindow"
+                      class="flex items-center gap-3 text-xs"
+                    >
+                      <div class="flex items-center gap-1">
+                        <div class="h-1.5 w-1.5 rounded-full bg-purple-500" />
+                        <span class="font-medium text-gray-900 dark:text-gray-100">
+                          {{ formatNumber(account.usage.sessionWindow.totalTokens) }}M
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <div class="h-1.5 w-1.5 rounded-full bg-green-500" />
+                        <span class="font-medium text-gray-900 dark:text-gray-100">
+                          ${{ formatCost(account.usage.sessionWindow.totalCost) }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <!-- 进度条 -->
                     <div class="flex items-center gap-2">
-                      <div class="h-2 w-24 rounded-full bg-gray-200">
+                      <div class="h-2 w-24 rounded-full bg-gray-200 dark:bg-gray-700">
                         <div
-                          class="h-2 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-300"
+                          :class="[
+                            'h-2 rounded-full transition-all duration-300',
+                            getSessionProgressBarClass(
+                              account.sessionWindow.sessionWindowStatus,
+                              account
+                            )
+                          ]"
                           :style="{ width: account.sessionWindow.progress + '%' }"
                         />
                       </div>
@@ -664,7 +855,9 @@
                         {{ account.sessionWindow.progress }}%
                       </span>
                     </div>
-                    <div class="text-xs text-gray-600 dark:text-gray-300">
+
+                    <!-- 时间信息 -->
+                    <div class="text-xs text-gray-600 dark:text-gray-400">
                       <div>
                         {{
                           formatSessionWindow(
@@ -675,387 +868,223 @@
                       </div>
                       <div
                         v-if="account.sessionWindow.remainingTime > 0"
-                        class="font-medium text-indigo-600"
+                        class="font-medium text-indigo-600 dark:text-indigo-400"
                       >
                         剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
                       </div>
                     </div>
                   </div>
-                  <div
-                    v-else-if="['claude', 'claude-console'].includes(account.platform)"
-                    class="flex items-center gap-1.5"
-                  >
-                    <div
-                      class="flex items-center gap-1.5 rounded-lg bg-gray-50 px-2.5 py-1.5 dark:bg-gray-700/50"
-                    >
-                      <i class="fas fa-clock text-xs text-gray-500 dark:text-gray-400" />
-                      <span class="text-xs font-medium text-gray-600 dark:text-gray-300"
-                        >未使用</span
+                  <div v-else class="text-xs text-gray-400">暂无统计</div>
+                </div>
+                <!-- Claude Console: 显示每日额度使用进度 -->
+                <div v-else-if="account.platform === 'claude-console'" class="space-y-2">
+                  <div v-if="Number(account.dailyQuota) > 0">
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="text-gray-600 dark:text-gray-300">额度进度</span>
+                      <span class="font-medium text-gray-700 dark:text-gray-200">
+                        {{ getQuotaUsagePercent(account).toFixed(1) }}%
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <div class="h-2 w-24 rounded-full bg-gray-200 dark:bg-gray-700">
+                        <div
+                          :class="[
+                            'h-2 rounded-full transition-all duration-300',
+                            getQuotaBarClass(getQuotaUsagePercent(account))
+                          ]"
+                          :style="{ width: Math.min(100, getQuotaUsagePercent(account)) + '%' }"
+                        />
+                      </div>
+                      <span
+                        class="min-w-[32px] text-xs font-medium text-gray-700 dark:text-gray-200"
+                      >
+                        ${{ formatCost(account.usage?.daily?.cost || 0) }} / ${{
+                          Number(account.dailyQuota).toFixed(2)
+                        }}
+                      </span>
+                    </div>
+                    <div class="text-xs text-gray-600 dark:text-gray-400">
+                      剩余 ${{ formatRemainingQuota(account) }}
+                      <span class="ml-2 text-gray-400"
+                        >重置 {{ account.quotaResetTime || '00:00' }}</span
                       >
                     </div>
                   </div>
-                  <div v-else class="flex items-center gap-1.5">
-                    <div
-                      class="flex items-center gap-1.5 rounded-lg bg-gray-50 px-2.5 py-1.5 dark:bg-gray-700/50"
-                    >
-                      <i class="fas fa-ban text-xs text-gray-400" />
-                      <span class="text-xs font-medium text-gray-500 dark:text-gray-400"
-                        >不适用</span
-                      >
-                    </div>
+                  <div v-else class="text-sm text-gray-400">
+                    <i class="fas fa-minus" />
                   </div>
-                </td>
-                <td class="hidden whitespace-nowrap px-3 py-4 xl:table-cell">
-                  <div
-                    v-if="isClaudeOAuth(account) && claudeOAuthUsage[account.id]"
-                    class="space-y-2"
-                  >
-                    <!-- 5小时窗口 -->
-                    <div v-if="claudeOAuthUsage[account.id].fiveHour" class="space-y-1">
-                      <div class="flex items-center justify-between">
-                        <span class="text-xs font-medium text-gray-600 dark:text-gray-300">5h</span>
+                </div>
+                <div v-else-if="account.platform === 'openai'" class="space-y-2">
+                  <div v-if="account.codexUsage" class="space-y-2">
+                    <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                      <div class="flex items-center gap-2">
                         <span
-                          class="text-xs font-bold"
-                          :class="{
-                            'text-green-600':
-                              (claudeOAuthUsage[account.id].fiveHour.utilization || 0) < 0.5,
-                            'text-yellow-600':
-                              (claudeOAuthUsage[account.id].fiveHour.utilization || 0) >= 0.5 &&
-                              (claudeOAuthUsage[account.id].fiveHour.utilization || 0) < 0.8,
-                            'text-red-600':
-                              (claudeOAuthUsage[account.id].fiveHour.utilization || 0) >= 0.8
-                          }"
+                          class="inline-flex min-w-[32px] justify-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
                         >
-                          {{
-                            formatClaudeUsagePercent(
-                              claudeOAuthUsage[account.id].fiveHour.utilization
-                            )
-                          }}
+                          {{ getCodexWindowLabel('primary') }}
                         </span>
-                      </div>
-                      <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700">
-                        <div
-                          :class="
-                            getClaudeUsageBarClass(
-                              claudeOAuthUsage[account.id].fiveHour.utilization
-                            )
-                          "
-                          class="h-1.5 rounded-full transition-all duration-300"
-                          :style="{
-                            width: getClaudeUsageWidth(
-                              claudeOAuthUsage[account.id].fiveHour.utilization
-                            )
-                          }"
-                        />
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {{
-                          formatClaudeRemaining(
-                            claudeOAuthUsage[account.id].fiveHour.remainingSeconds
-                          )
-                        }}
-                      </div>
-                    </div>
-
-                    <!-- 7天窗口 -->
-                    <div v-if="claudeOAuthUsage[account.id].sevenDay" class="space-y-1">
-                      <div class="flex items-center justify-between">
-                        <span class="text-xs font-medium text-gray-600 dark:text-gray-300">7d</span>
-                        <span
-                          class="text-xs font-bold"
-                          :class="{
-                            'text-green-600':
-                              (claudeOAuthUsage[account.id].sevenDay.utilization || 0) < 0.5,
-                            'text-yellow-600':
-                              (claudeOAuthUsage[account.id].sevenDay.utilization || 0) >= 0.5 &&
-                              (claudeOAuthUsage[account.id].sevenDay.utilization || 0) < 0.8,
-                            'text-red-600':
-                              (claudeOAuthUsage[account.id].sevenDay.utilization || 0) >= 0.8
-                          }"
-                        >
-                          {{
-                            formatClaudeUsagePercent(
-                              claudeOAuthUsage[account.id].sevenDay.utilization
-                            )
-                          }}
-                        </span>
-                      </div>
-                      <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700">
-                        <div
-                          :class="
-                            getClaudeUsageBarClass(
-                              claudeOAuthUsage[account.id].sevenDay.utilization
-                            )
-                          "
-                          class="h-1.5 rounded-full transition-all duration-300"
-                          :style="{
-                            width: getClaudeUsageWidth(
-                              claudeOAuthUsage[account.id].sevenDay.utilization
-                            )
-                          }"
-                        />
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {{
-                          formatClaudeRemaining(
-                            claudeOAuthUsage[account.id].sevenDay.remainingSeconds
-                          )
-                        }}
-                      </div>
-                    </div>
-
-                    <!-- 7天 Opus 窗口 -->
-                    <div v-if="claudeOAuthUsage[account.id].sevenDayOpus" class="space-y-1">
-                      <div class="flex items-center justify-between">
-                        <span class="text-xs font-medium text-gray-600 dark:text-gray-300"
-                          >Opus</span
-                        >
-                        <span
-                          class="text-xs font-bold"
-                          :class="{
-                            'text-green-600':
-                              (claudeOAuthUsage[account.id].sevenDayOpus.utilization || 0) < 0.5,
-                            'text-yellow-600':
-                              (claudeOAuthUsage[account.id].sevenDayOpus.utilization || 0) >= 0.5 &&
-                              (claudeOAuthUsage[account.id].sevenDayOpus.utilization || 0) < 0.8,
-                            'text-red-600':
-                              (claudeOAuthUsage[account.id].sevenDayOpus.utilization || 0) >= 0.8
-                          }"
-                        >
-                          {{
-                            formatClaudeUsagePercent(
-                              claudeOAuthUsage[account.id].sevenDayOpus.utilization
-                            )
-                          }}
-                        </span>
-                      </div>
-                      <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700">
-                        <div
-                          :class="
-                            getClaudeUsageBarClass(
-                              claudeOAuthUsage[account.id].sevenDayOpus.utilization
-                            )
-                          "
-                          class="h-1.5 rounded-full transition-all duration-300"
-                          :style="{
-                            width: getClaudeUsageWidth(
-                              claudeOAuthUsage[account.id].sevenDayOpus.utilization
-                            )
-                          }"
-                        />
-                      </div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">
-                        {{
-                          formatClaudeRemaining(
-                            claudeOAuthUsage[account.id].sevenDayOpus.remainingSeconds
-                          )
-                        }}
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else class="text-xs text-gray-400">
-                    {{ isClaudeOAuth(account) ? '加载中...' : 'N/A' }}
-                  </div>
-                </td>
-                <td class="hidden whitespace-nowrap px-3 py-4 text-sm lg:table-cell">
-                  <div v-if="account.usage && account.usage.total" class="space-y-2">
-                    <el-tooltip
-                      :content="`详细统计：\n总Token使用量: ${formatNumber(account.usage.total.tokens || 0)} tokens\n总请求次数: ${formatNumber(account.usage.total.requests || 0)} 次\n平均每请求Token: ${formatAverageTokensPerRequest(account.usage.total.tokens, account.usage.total.requests)} tokens/次`"
-                      effect="dark"
-                      placement="left"
-                      :show-after="800"
-                    >
-                      <div class="space-y-2">
-                        <!-- 总Token使用量 -->
-                        <div
-                          class="flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                        >
-                          <i class="fas fa-coins text-xs text-yellow-600 dark:text-yellow-500" />
-                          <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {{ formatNumber(account.usage.total.tokens || 0) }}
-                          </span>
-                          <span class="text-xs text-gray-500 dark:text-gray-400">tokens</span>
-                        </div>
-
-                        <!-- 总请求次数 -->
-                        <div
-                          class="flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                        >
-                          <i class="fas fa-paper-plane text-xs text-blue-600 dark:text-blue-500" />
-                          <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {{ formatNumber(account.usage.total.requests || 0) }}
-                          </span>
-                          <span class="text-xs text-gray-500 dark:text-gray-400">次</span>
-                        </div>
-
-                        <!-- 平均每请求Token数 -->
-                        <div
-                          class="flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                        >
-                          <i class="fas fa-chart-bar text-xs text-green-600 dark:text-green-500" />
-                          <span class="text-xs font-medium text-gray-600 dark:text-gray-300">
-                            平均
-                            {{
-                              formatAverageTokensPerRequest(
-                                account.usage.total.tokens,
-                                account.usage.total.requests
-                              )
-                            }}/次
-                          </span>
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2">
+                            <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                              <div
+                                :class="[
+                                  'h-2 rounded-full transition-all duration-300',
+                                  getCodexUsageBarClass(account.codexUsage.primary)
+                                ]"
+                                :style="{
+                                  width: getCodexUsageWidth(account.codexUsage.primary)
+                                }"
+                              />
+                            </div>
+                            <span
+                              class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                            >
+                              {{ formatCodexUsagePercent(account.codexUsage.primary) }}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </el-tooltip>
+                      <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        重置剩余 {{ formatCodexRemaining(account.codexUsage.primary) }}
+                      </div>
+                    </div>
+                    <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                      <div class="flex items-center gap-2">
+                        <span
+                          class="inline-flex min-w-[32px] justify-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-500/20 dark:text-blue-300"
+                        >
+                          {{ getCodexWindowLabel('secondary') }}
+                        </span>
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2">
+                            <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                              <div
+                                :class="[
+                                  'h-2 rounded-full transition-all duration-300',
+                                  getCodexUsageBarClass(account.codexUsage.secondary)
+                                ]"
+                                :style="{
+                                  width: getCodexUsageWidth(account.codexUsage.secondary)
+                                }"
+                              />
+                            </div>
+                            <span
+                              class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                            >
+                              {{ formatCodexUsagePercent(account.codexUsage.secondary) }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        重置剩余 {{ formatCodexRemaining(account.codexUsage.secondary) }}
+                      </div>
+                    </div>
                   </div>
-                  <div
-                    v-else
-                    class="flex items-center justify-center text-gray-400 dark:text-gray-500"
+                  <div v-else class="text-sm text-gray-400">
+                    <span class="text-xs">N/A</span>
+                  </div>
+                </div>
+                <div v-else class="text-sm text-gray-400">
+                  <span class="text-xs">N/A</span>
+                </div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-300">
+                {{ formatLastUsed(account.lastUsedAt) }}
+              </td>
+              <td class="whitespace-nowrap px-3 py-4 text-sm font-medium">
+                <div class="flex flex-wrap items-center gap-1">
+                  <button
+                    v-if="
+                      (account.platform === 'claude' ||
+                        account.platform === 'claude-console' ||
+                        account.platform === 'openai' ||
+                        account.platform === 'openai-responses') &&
+                      (account.status === 'unauthorized' ||
+                        account.status !== 'active' ||
+                        account.rateLimitStatus?.isRateLimited ||
+                        account.rateLimitStatus === 'limited' ||
+                        !account.isActive)
+                    "
+                    :class="[
+                      'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+                      account.isResetting
+                        ? 'cursor-not-allowed bg-gray-100 text-gray-400'
+                        : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                    ]"
+                    :disabled="account.isResetting"
+                    :title="account.isResetting ? '重置中...' : '重置所有异常状态'"
+                    @click="resetAccountStatus(account)"
                   >
-                    <div class="text-center">
-                      <i class="fas fa-chart-line mb-1 text-lg opacity-50" />
-                      <div class="text-xs">暂无统计</div>
-                    </div>
-                  </div>
-                </td>
-                <!-- 费用统计列 -->
-                <td class="hidden whitespace-nowrap px-3 py-4 text-sm lg:table-cell">
-                  <div v-if="account.costStats && account.costStats.hasCostStats" class="space-y-1">
-                    <div class="flex items-center gap-2">
-                      <div class="h-2 w-2 rounded-full bg-green-500" />
-                      <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {{ account.costStats.formatted?.totalCost || '$0.00' }}
-                      </span>
-                    </div>
-                    <div
-                      v-if="account.costStats.formatted?.dailyCost"
-                      class="flex items-center gap-2"
-                    >
-                      <div class="h-2 w-2 rounded-full bg-blue-500" />
-                      <span class="text-xs text-gray-600 dark:text-gray-300">
-                        今日: {{ account.costStats.formatted.dailyCost }}
-                      </span>
-                    </div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400">
-                      {{ account.costStats.platformName || account.platform }}
-                    </div>
-                  </div>
-                  <div v-else-if="account.costStats && account.costStats.error" class="space-y-1">
-                    <div class="flex items-center gap-2">
-                      <div class="h-2 w-2 rounded-full bg-red-500" />
-                      <span class="text-xs text-red-600 dark:text-red-400"> 加载失败 </span>
-                    </div>
-                  </div>
-                  <div
-                    v-else
-                    class="flex items-center justify-center text-gray-400 dark:text-gray-500"
+                    <i :class="['fas fa-redo', account.isResetting ? 'animate-spin' : '']" />
+                    <span class="ml-1">重置状态</span>
+                  </button>
+                  <button
+                    :class="[
+                      'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+                      account.isTogglingSchedulable
+                        ? 'cursor-not-allowed bg-gray-100 text-gray-400'
+                        : account.schedulable
+                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ]"
+                    :disabled="account.isTogglingSchedulable"
+                    :title="account.schedulable ? '点击禁用调度' : '点击启用调度'"
+                    @click="toggleSchedulable(account)"
                   >
-                    <div class="text-center">
-                      <i class="fas fa-dollar-sign mb-1 text-lg opacity-50" />
-                      <div class="text-xs">暂无数据</div>
-                    </div>
-                  </div>
-                </td>
-                <td
-                  class="hidden whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-300 xl:table-cell"
-                >
-                  {{ formatLastUsed(account.lastUsedAt) }}
-                </td>
-                <td class="whitespace-nowrap px-3 py-4 text-sm font-medium">
-                  <div class="flex flex-wrap items-center gap-1">
-                    <button
-                      v-if="
-                        ['claude', 'openai-responses'].includes(account.platform) &&
-                        (account.status === 'unauthorized' ||
-                          account.status !== 'active' ||
-                          account.rateLimitStatus?.isRateLimited ||
-                          account.rateLimitStatus === 'limited' ||
-                          !account.isActive)
-                      "
-                      :class="[
-                        'rounded px-2.5 py-1 text-xs font-medium transition-colors',
-                        account.isResetting
-                          ? 'cursor-not-allowed bg-gray-100 text-gray-400'
-                          : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
-                      ]"
-                      :disabled="account.isResetting"
-                      :title="account.isResetting ? '重置中...' : '重置所有异常状态'"
-                      @click="resetAccountStatus(account)"
-                    >
-                      <i :class="['fas fa-redo', account.isResetting ? 'animate-spin' : '']" />
-                      <span class="ml-1">重置状态</span>
-                    </button>
-                    <button
-                      v-if="account.platform === 'openai-responses'"
-                      :class="[
-                        'rounded px-2.5 py-1 text-xs font-medium transition-colors',
-                        account.isResettingUsage
-                          ? 'cursor-not-allowed bg-gray-100 text-gray-400'
-                          : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                      ]"
-                      :disabled="account.isResettingUsage"
-                      :title="account.isResettingUsage ? '重置中...' : '清空每日使用量'"
-                      @click="resetOpenAIResponsesUsage(account)"
-                    >
-                      <i
-                        :class="[
-                          'fas fa-tachometer-alt',
-                          account.isResettingUsage ? 'animate-spin' : ''
-                        ]"
-                      />
-                      <span class="ml-1">清空用量</span>
-                    </button>
-                    <button
-                      :class="[
-                        'rounded px-2.5 py-1 text-xs font-medium transition-colors',
-                        account.isTogglingSchedulable
-                          ? 'cursor-not-allowed bg-gray-100 text-gray-400'
-                          : account.schedulable
-                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      ]"
-                      :disabled="account.isTogglingSchedulable"
-                      :title="account.schedulable ? '点击禁用调度' : '点击启用调度'"
-                      @click="toggleSchedulable(account)"
-                    >
-                      <i :class="['fas', account.schedulable ? 'fa-toggle-on' : 'fa-toggle-off']" />
-                      <span class="ml-1">{{ account.schedulable ? '调度' : '停用' }}</span>
-                    </button>
-                    <button
-                      class="rounded bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-200"
-                      :title="'编辑账户'"
-                      @click="editAccount(account)"
-                    >
-                      <i class="fas fa-edit" />
-                      <span class="ml-1">编辑</span>
-                    </button>
-                    <button
-                      class="rounded bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-200"
-                      :title="'删除账户'"
-                      @click="deleteAccount(account)"
-                    >
-                      <i class="fas fa-trash" />
-                      <span class="ml-1">删除</span>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                    <i :class="['fas', account.schedulable ? 'fa-toggle-on' : 'fa-toggle-off']" />
+                    <span class="ml-1">{{ account.schedulable ? '调度' : '停用' }}</span>
+                  </button>
+                  <button
+                    v-if="canViewUsage(account)"
+                    class="rounded bg-indigo-100 px-2.5 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-200"
+                    :title="'查看使用详情'"
+                    @click="openAccountUsageModal(account)"
+                  >
+                    <i class="fas fa-chart-line" />
+                    <span class="ml-1">详情</span>
+                  </button>
+                  <button
+                    class="rounded bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-200"
+                    :title="'编辑账户'"
+                    @click="editAccount(account)"
+                  >
+                    <i class="fas fa-edit" />
+                    <span class="ml-1">编辑</span>
+                  </button>
+                  <button
+                    class="rounded bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-200"
+                    :title="'删除账户'"
+                    @click="deleteAccount(account)"
+                  >
+                    <i class="fas fa-trash" />
+                    <span class="ml-1">删除</span>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- 移动端卡片视图 -->
       <div v-if="!accountsLoading && sortedAccounts.length > 0" class="space-y-3 md:hidden">
         <div
-          v-for="account in sortedAccounts"
+          v-for="account in paginatedAccounts"
           :key="account.id"
-          :class="[
-            'card p-4 transition-shadow hover:shadow-lg',
-            showCheckboxes && isAccountSelected(account.id) ? 'ring-2 ring-indigo-400' : ''
-          ]"
+          class="card p-4 transition-shadow hover:shadow-lg"
         >
           <!-- 卡片头部 -->
           <div class="mb-3 flex items-start justify-between">
             <div class="flex items-center gap-3">
+              <input
+                v-if="shouldShowCheckboxes"
+                v-model="selectedAccounts"
+                class="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                type="checkbox"
+                :value="account.id"
+                @change="updateSelectAllState"
+              />
               <div
                 :class="[
                   'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg',
@@ -1067,8 +1096,8 @@
                         ? 'bg-gradient-to-br from-blue-500 to-cyan-600'
                         : account.platform === 'openai'
                           ? 'bg-gradient-to-br from-gray-600 to-gray-700'
-                          : account.platform === 'openai-responses'
-                            ? 'bg-gradient-to-br from-indigo-500 to-purple-600'
+                          : account.platform === 'ccr'
+                            ? 'bg-gradient-to-br from-teal-500 to-emerald-600'
                             : 'bg-gradient-to-br from-blue-500 to-blue-600'
                 ]"
               >
@@ -1083,8 +1112,8 @@
                           ? 'fab fa-microsoft'
                           : account.platform === 'openai'
                             ? 'fas fa-openai'
-                            : account.platform === 'openai-responses'
-                              ? 'fas fa-comments'
+                            : account.platform === 'ccr'
+                              ? 'fas fa-code-branch'
                               : 'fas fa-robot'
                   ]"
                 />
@@ -1102,196 +1131,292 @@
                 </div>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <span
-                :class="[
-                  'inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold',
-                  getAccountStatusClass(account)
-                ]"
-              >
-                <div
-                  :class="['mr-1.5 h-1.5 w-1.5 rounded-full', getAccountStatusDotClass(account)]"
-                />
-                {{ getAccountStatusText(account) }}
-              </span>
-              <input
-                v-if="showCheckboxes"
-                type="checkbox"
-                class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                :checked="isAccountSelected(account.id)"
-                @change="handleAccountCheckboxChange(account, $event.target.checked)"
+            <span
+              :class="[
+                'inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold',
+                getAccountStatusClass(account)
+              ]"
+            >
+              <div
+                :class="['mr-1.5 h-1.5 w-1.5 rounded-full', getAccountStatusDotClass(account)]"
               />
-            </div>
+              {{ getAccountStatusText(account) }}
+            </span>
           </div>
 
           <!-- 使用统计 -->
           <div class="mb-3 grid grid-cols-2 gap-3">
             <div>
               <p class="text-xs text-gray-500 dark:text-gray-400">今日使用</p>
-              <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                {{ formatNumber(account.usage?.daily?.requests || 0) }} 次
-              </p>
-              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ formatNumber(account.usage?.daily?.allTokens || 0) }} tokens
-              </p>
+              <div class="space-y-1">
+                <div class="flex items-center gap-1.5">
+                  <div class="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                  <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {{ account.usage?.daily?.requests || 0 }} 次
+                  </p>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <div class="h-1.5 w-1.5 rounded-full bg-purple-500" />
+                  <p class="text-xs text-gray-600 dark:text-gray-400">
+                    {{ formatNumber(account.usage?.daily?.allTokens || 0) }}M
+                  </p>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <div class="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  <p class="text-xs text-gray-600 dark:text-gray-400">
+                    ${{ calculateDailyCost(account) }}
+                  </p>
+                </div>
+              </div>
             </div>
             <div>
-              <p class="mb-2 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                <i class="fas fa-chart-line text-xs" />
-                历史统计
-              </p>
-              <div v-if="account.usage?.total" class="space-y-1.5">
-                <!-- 总请求次数 -->
-                <div
-                  class="flex items-center gap-2 rounded-lg bg-blue-50 px-2 py-1.5 dark:bg-blue-900/20"
-                >
-                  <i class="fas fa-paper-plane text-xs text-blue-600 dark:text-blue-400" />
-                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {{ formatNumber(account.usage.total.requests || 0) }}
-                  </span>
-                  <span class="text-xs text-blue-600 dark:text-blue-400">次请求</span>
+              <p class="text-xs text-gray-500 dark:text-gray-400">会话窗口</p>
+              <div v-if="account.usage && account.usage.sessionWindow" class="space-y-1">
+                <div class="flex items-center gap-1.5">
+                  <div class="h-1.5 w-1.5 rounded-full bg-purple-500" />
+                  <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {{ formatNumber(account.usage.sessionWindow.totalTokens) }}M
+                  </p>
                 </div>
-
-                <!-- 总Token使用量 -->
-                <div
-                  class="flex items-center gap-2 rounded-lg bg-yellow-50 px-2 py-1.5 dark:bg-yellow-900/20"
-                >
-                  <i class="fas fa-coins text-xs text-yellow-600 dark:text-yellow-400" />
-                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {{ formatNumber(account.usage.total.tokens || 0) }}
-                  </span>
-                  <span class="text-xs text-yellow-600 dark:text-yellow-400">tokens</span>
-                </div>
-
-                <!-- 总使用费用 -->
-                <div
-                  class="flex items-center gap-2 rounded-lg bg-green-50 px-2 py-1.5 dark:bg-green-900/20"
-                >
-                  <i class="fas fa-dollar-sign text-xs text-green-600 dark:text-green-400" />
-                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    ${{ formatCost(account.costStats?.totalCost || 0) }}
-                  </span>
-                  <span class="text-xs text-green-600 dark:text-green-400">总费用</span>
-                </div>
-
-                <!-- 平均每请求Token数 -->
-                <div
-                  class="flex items-center gap-2 rounded-lg bg-purple-50 px-2 py-1.5 dark:bg-purple-900/20"
-                >
-                  <i class="fas fa-chart-bar text-xs text-purple-600 dark:text-purple-400" />
-                  <span class="text-xs font-medium text-purple-600 dark:text-purple-400">
-                    平均
-                    {{
-                      formatAverageTokensPerRequest(
-                        account.usage.total.tokens,
-                        account.usage.total.requests
-                      )
-                    }}/次
-                  </span>
+                <div class="flex items-center gap-1.5">
+                  <div class="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  <p class="text-xs text-gray-600 dark:text-gray-400">
+                    ${{ formatCost(account.usage.sessionWindow.totalCost) }}
+                  </p>
                 </div>
               </div>
-              <div
-                v-else
-                class="flex items-center justify-center py-4 text-gray-400 dark:text-gray-500"
-              >
-                <div class="text-center">
-                  <i class="fas fa-chart-line mb-1 text-lg opacity-50" />
-                  <div class="text-xs">暂无统计</div>
-                </div>
-              </div>
+              <div v-else class="text-sm font-semibold text-gray-400">-</div>
             </div>
           </div>
 
           <!-- 状态信息 -->
           <div class="mb-3 space-y-2">
-            <!-- 限流状态 -->
-            <RateLimitCountdown
-              v-if="
-                (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
-                account.rateLimitStatus === 'limited'
-              "
-              :rate-limit-info="account.rateLimitStatus"
-              @expired="handleRateLimitExpired(account)"
-              @update="handleRateLimitUpdate"
-            />
-
-            <!-- Claude 5小时重置倒计时 -->
-            <ClaudeResetCountdown
-              v-if="account.platform === 'claude' || account.platform === 'claude-oauth'"
-              :account="account"
-              @update="handleClaudeResetUpdate"
-            />
-
             <!-- 会话窗口 -->
-            <div
-              v-if="['claude', 'claude-console'].includes(account.platform)"
-              class="space-y-1.5 rounded-lg bg-gray-50 p-2 dark:bg-gray-700"
-            >
-              <div class="flex items-center justify-between text-xs">
-                <span class="font-medium text-gray-600 dark:text-gray-300">会话窗口</span>
-                <span
-                  v-if="
-                    account.sessionWindow &&
-                    account.sessionWindow.hasActiveWindow &&
-                    account.sessionWindow.progress
-                  "
-                  class="font-medium text-gray-700 dark:text-gray-200"
-                >
-                  {{ account.sessionWindow.progress }}%
-                </span>
-                <span v-else class="font-medium text-gray-500 dark:text-gray-400"> 未使用 </span>
-              </div>
-              <div
-                v-if="
-                  account.sessionWindow &&
-                  account.sessionWindow.hasActiveWindow &&
-                  account.sessionWindow.progress
-                "
-                class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-600"
-              >
-                <div
-                  class="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-300"
-                  :style="{ width: account.sessionWindow.progress + '%' }"
-                />
-              </div>
-              <div
-                v-else
-                class="flex items-center justify-center rounded-full bg-gray-200 py-2 dark:bg-gray-600"
-              >
-                <div class="flex items-center gap-1.5">
-                  <i class="fas fa-clock text-xs text-gray-500 dark:text-gray-400" />
-                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400"
-                    >等待首次使用</span
-                  >
+            <div v-if="account.platform === 'claude'" class="space-y-2">
+              <!-- OAuth 账户：显示三窗口 OAuth usage -->
+              <div v-if="isClaudeOAuth(account) && account.claudeUsage" class="space-y-2">
+                <!-- 5小时窗口 -->
+                <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex min-w-[32px] justify-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
+                    >
+                      5h
+                    </span>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                          <div
+                            :class="[
+                              'h-2 rounded-full transition-all duration-300',
+                              getClaudeUsageBarClass(account.claudeUsage.fiveHour)
+                            ]"
+                            :style="{
+                              width: getClaudeUsageWidth(account.claudeUsage.fiveHour)
+                            }"
+                          />
+                        </div>
+                        <span
+                          class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                        >
+                          {{ formatClaudeUsagePercent(account.claudeUsage.fiveHour) }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
+                  </div>
+                </div>
+                <!-- 7天窗口 -->
+                <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex min-w-[32px] justify-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300"
+                    >
+                      7d
+                    </span>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                          <div
+                            :class="[
+                              'h-2 rounded-full transition-all duration-300',
+                              getClaudeUsageBarClass(account.claudeUsage.sevenDay)
+                            ]"
+                            :style="{
+                              width: getClaudeUsageWidth(account.claudeUsage.sevenDay)
+                            }"
+                          />
+                        </div>
+                        <span
+                          class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                        >
+                          {{ formatClaudeUsagePercent(account.claudeUsage.sevenDay) }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
+                  </div>
+                </div>
+                <!-- 7天Opus窗口 -->
+                <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex min-w-[32px] justify-center rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-600 dark:bg-purple-500/20 dark:text-purple-300"
+                    >
+                      Opus
+                    </span>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                          <div
+                            :class="[
+                              'h-2 rounded-full transition-all duration-300',
+                              getClaudeUsageBarClass(account.claudeUsage.sevenDayOpus)
+                            ]"
+                            :style="{
+                              width: getClaudeUsageWidth(account.claudeUsage.sevenDayOpus)
+                            }"
+                          />
+                        </div>
+                        <span
+                          class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                        >
+                          {{ formatClaudeUsagePercent(account.claudeUsage.sevenDayOpus) }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                  </div>
                 </div>
               </div>
+              <!-- Setup Token 账户：显示原有的会话窗口时间进度 -->
               <div
-                v-if="
+                v-else-if="
+                  !isClaudeOAuth(account) &&
                   account.sessionWindow &&
-                  account.sessionWindow.hasActiveWindow &&
-                  account.sessionWindow.progress
+                  account.sessionWindow.hasActiveWindow
                 "
-                class="flex items-center justify-between text-xs"
+                class="space-y-1.5 rounded-lg bg-gray-50 p-2 dark:bg-gray-700"
               >
-                <span class="text-gray-500 dark:text-gray-400">
-                  {{
-                    formatSessionWindow(
-                      account.sessionWindow.windowStart,
-                      account.sessionWindow.windowEnd
-                    )
-                  }}
-                </span>
-                <span
-                  v-if="account.sessionWindow.remainingTime > 0"
-                  class="font-medium text-indigo-600"
-                >
-                  剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
-                </span>
-                <span v-else class="text-gray-500"> 已结束 </span>
+                <div class="flex items-center justify-between text-xs">
+                  <div class="flex items-center gap-1">
+                    <span class="font-medium text-gray-600 dark:text-gray-300">会话窗口</span>
+                    <el-tooltip
+                      content="会话窗口进度不代表使用量，仅表示距离下一个5小时窗口的剩余时间"
+                      placement="top"
+                    >
+                      <i
+                        class="fas fa-question-circle cursor-help text-xs text-gray-400 hover:text-gray-600"
+                      />
+                    </el-tooltip>
+                  </div>
+                  <span class="font-medium text-gray-700 dark:text-gray-200">
+                    {{ account.sessionWindow.progress }}%
+                  </span>
+                </div>
+                <div class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-600">
+                  <div
+                    :class="[
+                      'h-full transition-all duration-300',
+                      getSessionProgressBarClass(account.sessionWindow.sessionWindowStatus, account)
+                    ]"
+                    :style="{ width: account.sessionWindow.progress + '%' }"
+                  />
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-gray-500 dark:text-gray-400">
+                    {{
+                      formatSessionWindow(
+                        account.sessionWindow.windowStart,
+                        account.sessionWindow.windowEnd
+                      )
+                    }}
+                  </span>
+                  <span
+                    v-if="account.sessionWindow.remainingTime > 0"
+                    class="font-medium text-indigo-600"
+                  >
+                    剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
+                  </span>
+                  <span v-else class="text-gray-500"> 已结束 </span>
+                </div>
               </div>
-              <div v-else class="text-center text-xs text-gray-400 dark:text-gray-500">
-                Claude 账户会话窗口在首次使用后开始计时
+              <div v-else class="text-xs text-gray-400">暂无统计</div>
+            </div>
+            <div v-else-if="account.platform === 'openai'" class="space-y-2">
+              <div v-if="account.codexUsage" class="space-y-2">
+                <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex min-w-[32px] justify-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
+                    >
+                      {{ getCodexWindowLabel('primary') }}
+                    </span>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                          <div
+                            :class="[
+                              'h-2 rounded-full transition-all duration-300',
+                              getCodexUsageBarClass(account.codexUsage.primary)
+                            ]"
+                            :style="{
+                              width: getCodexUsageWidth(account.codexUsage.primary)
+                            }"
+                          />
+                        </div>
+                        <span
+                          class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                        >
+                          {{ formatCodexUsagePercent(account.codexUsage.primary) }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    重置剩余 {{ formatCodexRemaining(account.codexUsage.primary) }}
+                  </div>
+                </div>
+                <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex min-w-[32px] justify-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-500/20 dark:text-blue-300"
+                    >
+                      {{ getCodexWindowLabel('secondary') }}
+                    </span>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                          <div
+                            :class="[
+                              'h-2 rounded-full transition-all duration-300',
+                              getCodexUsageBarClass(account.codexUsage.secondary)
+                            ]"
+                            :style="{
+                              width: getCodexUsageWidth(account.codexUsage.secondary)
+                            }"
+                          />
+                        </div>
+                        <span
+                          class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                        >
+                          {{ formatCodexUsagePercent(account.codexUsage.secondary) }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    重置剩余 {{ formatCodexRemaining(account.codexUsage.secondary) }}
+                  </div>
+                </div>
               </div>
+              <div v-if="!account.codexUsage" class="text-xs text-gray-400">暂无统计</div>
             </div>
 
             <!-- 最后使用时间 -->
@@ -1300,32 +1425,6 @@
               <span class="text-gray-700 dark:text-gray-200">
                 {{ account.lastUsedAt ? formatRelativeTime(account.lastUsedAt) : '从未使用' }}
               </span>
-            </div>
-
-            <!-- 费用统计 -->
-            <div class="flex items-center justify-between text-xs">
-              <span class="text-gray-500 dark:text-gray-400">费用统计</span>
-              <div
-                v-if="account.costStats && account.costStats.hasCostStats"
-                class="flex flex-col items-end gap-1"
-              >
-                <span class="font-medium text-green-600 dark:text-green-400">
-                  {{ account.costStats.formatted?.totalCost || '$0.00' }}
-                </span>
-                <span
-                  v-if="account.costStats.formatted?.dailyCost"
-                  class="text-xs text-gray-600 dark:text-gray-400"
-                >
-                  今日: {{ account.costStats.formatted.dailyCost }}
-                </span>
-              </div>
-              <div
-                v-else-if="account.costStats && account.costStats.error"
-                class="text-red-500 dark:text-red-400"
-              >
-                加载失败
-              </div>
-              <div v-else class="text-gray-400 dark:text-gray-500">暂无数据</div>
             </div>
 
             <!-- 代理配置 -->
@@ -1346,68 +1445,10 @@
                 {{ account.priority || 50 }}
               </span>
             </div>
-
-            <!-- 调度策略 -->
-            <div class="flex items-center justify-between text-xs">
-              <span class="text-gray-500 dark:text-gray-400">调度策略</span>
-              <div class="flex flex-col items-end gap-1">
-                <div
-                  :class="[
-                    'flex items-center gap-1 rounded px-2 py-1 text-xs font-medium',
-                    getStrategyColor(account.schedulingStrategy || 'least_recent')
-                  ]"
-                >
-                  <i :class="getStrategyIcon(account.schedulingStrategy || 'least_recent')" />
-                  <span>{{ getStrategyName(account.schedulingStrategy || 'least_recent') }}</span>
-                </div>
-                <!-- 策略特殊参数 -->
-                <div
-                  v-if="
-                    account.schedulingStrategy === 'weighted_random' && account.schedulingWeight
-                  "
-                  class="text-xs text-gray-600 dark:text-gray-300"
-                >
-                  权重: {{ account.schedulingWeight }}
-                </div>
-                <div
-                  v-else-if="account.schedulingStrategy === 'sequential' && account.sequentialOrder"
-                  class="text-xs text-gray-600 dark:text-gray-300"
-                >
-                  顺序: {{ account.sequentialOrder }}
-                </div>
-              </div>
-            </div>
           </div>
 
           <!-- 操作按钮 -->
           <div class="mt-3 flex gap-2 border-t border-gray-100 pt-3">
-            <button
-              v-if="
-                ['claude', 'openai-responses'].includes(account.platform) &&
-                (account.status === 'unauthorized' ||
-                  account.status !== 'active' ||
-                  account.rateLimitStatus?.isRateLimited ||
-                  account.rateLimitStatus === 'limited' ||
-                  !account.isActive)
-              "
-              class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-700 transition-colors hover:bg-yellow-100"
-              :disabled="account.isResetting"
-              @click="resetAccountStatus(account)"
-            >
-              <i :class="['fas fa-redo', account.isResetting ? 'animate-spin' : '']" />
-              重置
-            </button>
-            <button
-              v-if="account.platform === 'openai-responses'"
-              class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 transition-colors hover:bg-blue-100"
-              :disabled="account.isResettingUsage"
-              @click="resetOpenAIResponsesUsage(account)"
-            >
-              <i
-                :class="['fas fa-tachometer-alt', account.isResettingUsage ? 'animate-spin' : '']"
-              />
-              清空
-            </button>
             <button
               class="flex flex-1 items-center justify-center gap-1 rounded-lg px-3 py-2 text-xs transition-colors"
               :class="
@@ -1420,6 +1461,15 @@
             >
               <i :class="['fas', account.schedulable ? 'fa-pause' : 'fa-play']" />
               {{ account.schedulable ? '暂停' : '启用' }}
+            </button>
+
+            <button
+              v-if="canViewUsage(account)"
+              class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-600 transition-colors hover:bg-indigo-100"
+              @click="openAccountUsageModal(account)"
+            >
+              <i class="fas fa-chart-line" />
+              详情
             </button>
 
             <button
@@ -1441,26 +1491,119 @@
       </div>
     </div>
 
+    <div
+      v-if="!accountsLoading && sortedAccounts.length > 0"
+      class="mt-4 flex flex-col items-center justify-between gap-4 sm:mt-6 sm:flex-row"
+    >
+      <div class="flex w-full flex-col items-center gap-3 sm:w-auto sm:flex-row">
+        <span class="text-xs text-gray-600 dark:text-gray-400 sm:text-sm">
+          共 {{ sortedAccounts.length }} 条记录
+        </span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-600 dark:text-gray-400 sm:text-sm">每页显示</span>
+          <select
+            v-model="pageSize"
+            class="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 transition-colors hover:border-gray-300 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-gray-500 sm:text-sm"
+            @change="currentPage = 1"
+          >
+            <option v-for="size in pageSizeOptions" :key="size" :value="size">
+              {{ size }}
+            </option>
+          </select>
+          <span class="text-xs text-gray-600 dark:text-gray-400 sm:text-sm">条</span>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 sm:py-1 sm:text-sm"
+          :disabled="currentPage === 1"
+          @click="currentPage--"
+        >
+          <i class="fas fa-chevron-left" />
+        </button>
+
+        <div class="flex items-center gap-1">
+          <button
+            v-if="shouldShowFirstPage"
+            class="hidden rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 sm:block"
+            @click="currentPage = 1"
+          >
+            1
+          </button>
+
+          <span
+            v-if="showLeadingEllipsis"
+            class="hidden px-2 text-sm text-gray-500 dark:text-gray-400 sm:block"
+          >
+            ...
+          </span>
+
+          <button
+            v-for="page in pageNumbers"
+            :key="page"
+            :class="[
+              'rounded-md border px-3 py-1 text-xs font-medium transition-colors sm:text-sm',
+              page === currentPage
+                ? 'border-blue-500 bg-blue-50 text-blue-600 dark:border-blue-400 dark:bg-blue-500/10 dark:text-blue-300'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+            ]"
+            @click="currentPage = page"
+          >
+            {{ page }}
+          </button>
+
+          <span
+            v-if="showTrailingEllipsis"
+            class="hidden px-2 text-sm text-gray-500 dark:text-gray-400 sm:block"
+          >
+            ...
+          </span>
+
+          <button
+            v-if="shouldShowLastPage"
+            class="hidden rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 sm:block"
+            @click="currentPage = totalPages"
+          >
+            {{ totalPages }}
+          </button>
+        </div>
+
+        <button
+          class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 sm:py-1 sm:text-sm"
+          :disabled="currentPage === totalPages || totalPages === 0"
+          @click="currentPage++"
+        >
+          <i class="fas fa-chevron-right" />
+        </button>
+      </div>
+    </div>
+
     <!-- 添加账户模态框 -->
     <AccountForm
-      v-if="showCreateAccountModal"
-      @close="showCreateAccountModal = false"
+      v-if="showCreateAccountModal && (!newAccountPlatform || newAccountPlatform !== 'ccr')"
+      @close="closeCreateAccountModal"
+      @platform-changed="newAccountPlatform = $event"
+      @success="handleCreateSuccess"
+    />
+    <CcrAccountForm
+      v-else-if="showCreateAccountModal && newAccountPlatform === 'ccr'"
+      @close="closeCreateAccountModal"
       @success="handleCreateSuccess"
     />
 
     <!-- 编辑账户模态框 -->
-    <AccountForm
-      v-if="showEditAccountModal"
+    <CcrAccountForm
+      v-if="showEditAccountModal && editingAccount && editingAccount.platform === 'ccr'"
       :account="editingAccount"
       @close="showEditAccountModal = false"
       @success="handleEditSuccess"
     />
-
-    <BulkImportModal
-      v-if="showBulkImportModal"
-      :show="showBulkImportModal"
-      @close="showBulkImportModal = false"
-      @imported="handleBulkImportSuccess"
+    <AccountForm
+      v-else-if="showEditAccountModal"
+      :account="editingAccount"
+      @close="showEditAccountModal = false"
+      @success="handleEditSuccess"
     />
 
     <!-- 确认弹窗 -->
@@ -1473,6 +1616,18 @@
       @cancel="handleCancel"
       @confirm="handleConfirm"
     />
+
+    <AccountUsageDetailModal
+      v-if="showAccountUsageModal"
+      :account="selectedAccountForUsage || {}"
+      :generated-at="accountUsageGeneratedAt"
+      :history="accountUsageHistory"
+      :loading="accountUsageLoading"
+      :overview="accountUsageOverview"
+      :show="showAccountUsageModal"
+      :summary="accountUsageSummary"
+      @close="closeAccountUsageModal"
+    />
   </div>
 </template>
 
@@ -1481,19 +1636,14 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import { useConfirm } from '@/composables/useConfirm'
-import { formatNumber, getAverageTokensPerRequest } from '@/utils/format'
-import { useAccountsStore } from '@/stores/accounts'
 import AccountForm from '@/components/accounts/AccountForm.vue'
+import CcrAccountForm from '@/components/accounts/CcrAccountForm.vue'
+import AccountUsageDetailModal from '@/components/accounts/AccountUsageDetailModal.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
-import RateLimitCountdown from '@/components/common/RateLimitCountdown.vue'
-import ClaudeResetCountdown from '@/components/common/ClaudeResetCountdown.vue'
 
 // 使用确认弹窗
 const { showConfirmModal, confirmOptions, showConfirm, handleConfirm, handleCancel } = useConfirm()
-
-// 使用accounts store
-const accountsStore = useAccountsStore()
 
 // 数据状态
 const accounts = ref([])
@@ -1506,15 +1656,43 @@ const accountGroups = ref([])
 const groupFilter = ref('all')
 const platformFilter = ref('all')
 const searchKeyword = ref('')
+const PAGE_SIZE_STORAGE_KEY = 'accountsPageSize'
+const getInitialPageSize = () => {
+  const saved = localStorage.getItem(PAGE_SIZE_STORAGE_KEY)
+  if (saved) {
+    const parsedSize = parseInt(saved, 10)
+    if ([10, 20, 50, 100].includes(parsedSize)) {
+      return parsedSize
+    }
+  }
+  return 10
+}
+const pageSizeOptions = [10, 20, 50, 100]
+const pageSize = ref(getInitialPageSize())
+const currentPage = ref(1)
+
+// 多选状态
+const selectedAccounts = ref([])
+const selectAllChecked = ref(false)
+const isIndeterminate = ref(false)
 const showCheckboxes = ref(false)
-const selectedAccountIds = ref([])
+
+// 账号使用详情弹窗状态
+const showAccountUsageModal = ref(false)
+const accountUsageLoading = ref(false)
+const selectedAccountForUsage = ref(null)
+const accountUsageHistory = ref([])
+const accountUsageSummary = ref({})
+const accountUsageOverview = ref({})
+const accountUsageGeneratedAt = ref('')
+
+const supportedUsagePlatforms = ['claude', 'claude-console', 'openai', 'openai-responses', 'gemini']
 
 // 缓存状态标志
 const apiKeysLoaded = ref(false)
 const groupsLoaded = ref(false)
 const groupMembersLoaded = ref(false)
-const accountGroupMap = ref(new Map())
-const claudeOAuthUsage = ref({}) // OAuth 账户使用量数据
+const accountGroupMap = ref(new Map()) // Map<accountId, Array<groupInfo>>
 
 // 下拉选项数据
 const sortOptions = ref([
@@ -1522,7 +1700,6 @@ const sortOptions = ref([
   { value: 'dailyTokens', label: '按今日Token排序', icon: 'fa-coins' },
   { value: 'dailyRequests', label: '按今日请求数排序', icon: 'fa-chart-line' },
   { value: 'totalTokens', label: '按总Token排序', icon: 'fa-database' },
-  { value: 'totalRequests', label: '按总请求数排序', icon: 'fa-paper-plane' },
   { value: 'lastUsed', label: '按最后使用排序', icon: 'fa-clock' }
 ])
 
@@ -1530,11 +1707,12 @@ const platformOptions = ref([
   { value: 'all', label: '所有平台', icon: 'fa-globe' },
   { value: 'claude', label: 'Claude', icon: 'fa-brain' },
   { value: 'claude-console', label: 'Claude Console', icon: 'fa-terminal' },
-  { value: 'gemini', label: 'Gemini', icon: 'fa-google' },
+  { value: 'gemini', label: 'Gemini', icon: 'fab fa-google' },
   { value: 'openai', label: 'OpenAi', icon: 'fa-openai' },
-  { value: 'openai-responses', label: 'OpenAI Responses', icon: 'fa-comments' },
   { value: 'azure_openai', label: 'Azure OpenAI', icon: 'fab fa-microsoft' },
-  { value: 'bedrock', label: 'Bedrock', icon: 'fab fa-aws' }
+  { value: 'bedrock', label: 'Bedrock', icon: 'fab fa-aws' },
+  { value: 'openai-responses', label: 'OpenAI-Responses', icon: 'fa-server' },
+  { value: 'ccr', label: 'CCR', icon: 'fa-code-branch' }
 ])
 
 const groupOptions = computed(() => {
@@ -1543,12 +1721,9 @@ const groupOptions = computed(() => {
     { value: 'ungrouped', label: '未分组账户', icon: 'fa-user' }
   ]
   accountGroups.value.forEach((group) => {
-    const strategyName = getStrategyNameShort(group.schedulingStrategy || 'least_recent')
-    const platformName =
-      group.platform === 'claude' ? 'Claude' : group.platform === 'gemini' ? 'Gemini' : 'OpenAI'
     options.push({
       value: group.id,
-      label: `${group.name} (${platformName} | ${strategyName})`,
+      label: `${group.name} (${group.platform === 'claude' ? 'Claude' : group.platform === 'gemini' ? 'Gemini' : 'OpenAI'})`,
       icon:
         group.platform === 'claude'
           ? 'fa-brain'
@@ -1560,41 +1735,130 @@ const groupOptions = computed(() => {
   return options
 })
 
+const shouldShowCheckboxes = computed(() => showCheckboxes.value)
+
 // 模态框状态
 const showCreateAccountModal = ref(false)
+const newAccountPlatform = ref(null) // 跟踪新建账户选择的平台
 const showEditAccountModal = ref(false)
-const showBulkImportModal = ref(false)
 const editingAccount = ref(null)
 
-// 计算排序后的账户列表
-const sortedAccounts = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase()
-  let sourceAccounts = accounts.value
+const collectAccountSearchableStrings = (account) => {
+  const values = new Set()
 
-  if (keyword) {
-    sourceAccounts = sourceAccounts.filter((account) => {
-      const fields = [
-        account.name,
-        account.email,
-        account.username,
-        account.platform,
-        account.type,
-        account.accountType,
-        account.groupInfo?.name
-      ]
+  const baseFields = [
+    account?.name,
+    account?.email,
+    account?.accountName,
+    account?.owner,
+    account?.ownerName,
+    account?.ownerDisplayName,
+    account?.displayName,
+    account?.username,
+    account?.identifier,
+    account?.alias,
+    account?.title,
+    account?.label
+  ]
 
-      return fields.some((field) => {
-        if (field === undefined || field === null) {
-          return false
+  baseFields.forEach((field) => {
+    if (typeof field === 'string') {
+      const trimmed = field.trim()
+      if (trimmed) {
+        values.add(trimmed)
+      }
+    }
+  })
+
+  if (Array.isArray(account?.groupInfos)) {
+    account.groupInfos.forEach((group) => {
+      if (group && typeof group.name === 'string') {
+        const trimmed = group.name.trim()
+        if (trimmed) {
+          values.add(trimmed)
         }
-        return field.toString().toLowerCase().includes(keyword)
-      })
+      }
     })
   }
 
-  if (!accountsSortBy.value) {
-    return [...sourceAccounts]
+  Object.entries(account || {}).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      const lowerKey = key.toLowerCase()
+      if (lowerKey.includes('name') || lowerKey.includes('email')) {
+        const trimmed = value.trim()
+        if (trimmed) {
+          values.add(trimmed)
+        }
+      }
+    }
+  })
+
+  return Array.from(values)
+}
+
+const accountMatchesKeyword = (account, normalizedKeyword) => {
+  if (!normalizedKeyword) return true
+  return collectAccountSearchableStrings(account).some((value) =>
+    value.toLowerCase().includes(normalizedKeyword)
+  )
+}
+
+const canViewUsage = (account) => !!account && supportedUsagePlatforms.includes(account.platform)
+
+const openAccountUsageModal = async (account) => {
+  if (!canViewUsage(account)) {
+    showToast('该账户类型暂不支持查看详情', 'warning')
+    return
   }
+
+  selectedAccountForUsage.value = account
+  showAccountUsageModal.value = true
+  accountUsageLoading.value = true
+  accountUsageHistory.value = []
+  accountUsageSummary.value = {}
+  accountUsageOverview.value = {}
+  accountUsageGeneratedAt.value = ''
+
+  try {
+    const response = await apiClient.get(
+      `/admin/accounts/${account.id}/usage-history?platform=${account.platform}&days=30`
+    )
+
+    if (response.success) {
+      const data = response.data || {}
+      accountUsageHistory.value = data.history || []
+      accountUsageSummary.value = data.summary || {}
+      accountUsageOverview.value = data.overview || {}
+      accountUsageGeneratedAt.value = data.generatedAt || ''
+    } else {
+      showToast(response.error || '加载账号使用详情失败', 'error')
+    }
+  } catch (error) {
+    showToast('加载账号使用详情失败', 'error')
+  } finally {
+    accountUsageLoading.value = false
+  }
+}
+
+const closeAccountUsageModal = () => {
+  showAccountUsageModal.value = false
+  accountUsageLoading.value = false
+  selectedAccountForUsage.value = null
+}
+
+// 计算排序后的账户列表
+const sortedAccounts = computed(() => {
+  let sourceAccounts = accounts.value
+
+  const keyword = searchKeyword.value.trim()
+  if (keyword) {
+    const normalizedKeyword = keyword.toLowerCase()
+    sourceAccounts = sourceAccounts.filter((account) =>
+      accountMatchesKeyword(account, normalizedKeyword)
+    )
+  }
+
+  if (!accountsSortBy.value) return sourceAccounts
 
   const sorted = [...sourceAccounts].sort((a, b) => {
     let aVal = a[accountsSortBy.value]
@@ -1608,11 +1872,8 @@ const sortedAccounts = computed(() => {
       aVal = a.usage?.daily?.requests || 0
       bVal = b.usage?.daily?.requests || 0
     } else if (accountsSortBy.value === 'totalTokens') {
-      aVal = a.usage?.total?.tokens || 0
-      bVal = b.usage?.total?.tokens || 0
-    } else if (accountsSortBy.value === 'totalRequests') {
-      aVal = a.usage?.total?.requests || 0
-      bVal = b.usage?.total?.requests || 0
+      aVal = a.usage?.total?.allTokens || 0
+      bVal = b.usage?.total?.allTokens || 0
     }
 
     // 处理最后使用时间
@@ -1631,26 +1892,127 @@ const sortedAccounts = computed(() => {
     if (aVal > bVal) return accountsSortOrder.value === 'asc' ? 1 : -1
     return 0
   })
+
   return sorted
 })
 
-const selectedAccountSet = computed(() => new Set(selectedAccountIds.value))
-const selectedCount = computed(() => selectedAccountIds.value.length)
-const allVisibleSelected = computed(() => {
-  if (!showCheckboxes.value) return false
-  const visibleAccounts = sortedAccounts.value
-  if (visibleAccounts.length === 0) {
-    return false
-  }
-  const currentSelected = selectedAccountSet.value
-  return visibleAccounts.every((account) => currentSelected.has(account.id))
+const totalPages = computed(() => {
+  const total = sortedAccounts.value.length
+  return Math.ceil(total / pageSize.value) || 0
 })
+
+const pageNumbers = computed(() => {
+  const total = totalPages.value
+  const current = currentPage.value
+  const pages = []
+
+  if (total <= 7) {
+    for (let i = 1; i <= total; i++) {
+      pages.push(i)
+    }
+  } else {
+    let start = Math.max(1, current - 2)
+    let end = Math.min(total, current + 2)
+
+    if (current <= 3) {
+      end = 5
+    } else if (current >= total - 2) {
+      start = total - 4
+    }
+
+    for (let i = start; i <= end; i++) {
+      pages.push(i)
+    }
+  }
+
+  return pages
+})
+
+const shouldShowFirstPage = computed(() => {
+  const pages = pageNumbers.value
+  if (pages.length === 0) return false
+  return pages[0] > 1
+})
+
+const shouldShowLastPage = computed(() => {
+  const pages = pageNumbers.value
+  if (pages.length === 0) return false
+  return pages[pages.length - 1] < totalPages.value
+})
+
+const showLeadingEllipsis = computed(() => {
+  const pages = pageNumbers.value
+  if (pages.length === 0) return false
+  return shouldShowFirstPage.value && pages[0] > 2
+})
+
+const showTrailingEllipsis = computed(() => {
+  const pages = pageNumbers.value
+  if (pages.length === 0) return false
+  return shouldShowLastPage.value && pages[pages.length - 1] < totalPages.value - 1
+})
+
+const paginatedAccounts = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return sortedAccounts.value.slice(start, end)
+})
+
+const updateSelectAllState = () => {
+  const currentIds = paginatedAccounts.value.map((account) => account.id)
+  const selectedInCurrentPage = currentIds.filter((id) =>
+    selectedAccounts.value.includes(id)
+  ).length
+  const totalInCurrentPage = currentIds.length
+
+  if (selectedInCurrentPage === 0) {
+    selectAllChecked.value = false
+    isIndeterminate.value = false
+  } else if (selectedInCurrentPage === totalInCurrentPage) {
+    selectAllChecked.value = true
+    isIndeterminate.value = false
+  } else {
+    selectAllChecked.value = false
+    isIndeterminate.value = true
+  }
+}
+
+const handleSelectAll = () => {
+  if (selectAllChecked.value) {
+    paginatedAccounts.value.forEach((account) => {
+      if (!selectedAccounts.value.includes(account.id)) {
+        selectedAccounts.value.push(account.id)
+      }
+    })
+  } else {
+    const currentIds = new Set(paginatedAccounts.value.map((account) => account.id))
+    selectedAccounts.value = selectedAccounts.value.filter((id) => !currentIds.has(id))
+  }
+  updateSelectAllState()
+}
+
+const toggleSelectionMode = () => {
+  showCheckboxes.value = !showCheckboxes.value
+  if (!showCheckboxes.value) {
+    selectedAccounts.value = []
+    selectAllChecked.value = false
+    isIndeterminate.value = false
+  } else {
+    updateSelectAllState()
+  }
+}
+
+const cleanupSelectedAccounts = () => {
+  const validIds = new Set(accounts.value.map((account) => account.id))
+  selectedAccounts.value = selectedAccounts.value.filter((id) => validIds.has(id))
+  updateSelectAllState()
+}
 
 // 加载账户列表
 const loadAccounts = async (forceReload = false) => {
   accountsLoading.value = true
   try {
-    // 构建查询参数
+    // 构建查询参数（用于其他筛选情况）
     const params = {}
     if (platformFilter.value !== 'all') {
       params.platform = platformFilter.value
@@ -1671,7 +2033,8 @@ const loadAccounts = async (forceReload = false) => {
         apiClient.get('/admin/gemini-accounts', { params }),
         apiClient.get('/admin/openai-accounts', { params }),
         apiClient.get('/admin/azure-openai-accounts', { params }),
-        apiClient.get('/admin/openai-responses-accounts', { params })
+        apiClient.get('/admin/openai-responses-accounts', { params }),
+        apiClient.get('/admin/ccr-accounts', { params })
       )
     } else {
       // 只请求指定平台，其他平台设为null占位
@@ -1753,14 +2116,37 @@ const loadAccounts = async (forceReload = false) => {
             apiClient.get('/admin/openai-responses-accounts', { params })
           )
           break
+        case 'ccr':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure 占位
+            apiClient.get('/admin/ccr-accounts', { params })
+          )
+          break
+        default:
+          // 默认情况下返回空数组
+          requests.push(
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] })
+          )
+          break
       }
     }
 
     // 使用缓存机制加载 API Keys 和分组数据
     await Promise.all([loadApiKeys(forceReload), loadAccountGroups(forceReload)])
 
-    // 加载分组成员关系（需要在分组数据加载完成后）
-    await loadGroupMembers(forceReload)
+    // 后端账户API已经包含分组信息，不需要单独加载分组成员关系
+    // await loadGroupMembers(forceReload)
 
     const [
       claudeData,
@@ -1769,7 +2155,8 @@ const loadAccounts = async (forceReload = false) => {
       geminiData,
       openaiData,
       azureOpenaiData,
-      openaiResponsesData
+      openaiResponsesData,
+      ccrData
     ] = await Promise.all(requests)
 
     const allAccounts = []
@@ -1780,18 +2167,20 @@ const loadAccounts = async (forceReload = false) => {
         const boundApiKeysCount = apiKeys.value.filter(
           (key) => key.claudeAccountId === acc.id
         ).length
-        // 检查是否属于某个分组
-        const groupInfo = accountGroupMap.value.get(acc.id) || null
-        return { ...acc, platform: 'claude', boundApiKeysCount, groupInfo }
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'claude', boundApiKeysCount }
       })
       allAccounts.push(...claudeAccounts)
     }
 
     if (claudeConsoleData.success) {
       const claudeConsoleAccounts = (claudeConsoleData.data || []).map((acc) => {
-        // Claude Console账户暂时不支持直接绑定
-        const groupInfo = accountGroupMap.value.get(acc.id) || null
-        return { ...acc, platform: 'claude-console', boundApiKeysCount: 0, groupInfo }
+        // 计算每个Claude Console账户绑定的API Key数量
+        const boundApiKeysCount = apiKeys.value.filter(
+          (key) => key.claudeConsoleAccountId === acc.id
+        ).length
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'claude-console', boundApiKeysCount }
       })
       allAccounts.push(...claudeConsoleAccounts)
     }
@@ -1799,8 +2188,8 @@ const loadAccounts = async (forceReload = false) => {
     if (bedrockData.success) {
       const bedrockAccounts = (bedrockData.data || []).map((acc) => {
         // Bedrock账户暂时不支持直接绑定
-        const groupInfo = accountGroupMap.value.get(acc.id) || null
-        return { ...acc, platform: 'bedrock', boundApiKeysCount: 0, groupInfo }
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'bedrock', boundApiKeysCount: 0 }
       })
       allAccounts.push(...bedrockAccounts)
     }
@@ -1811,8 +2200,8 @@ const loadAccounts = async (forceReload = false) => {
         const boundApiKeysCount = apiKeys.value.filter(
           (key) => key.geminiAccountId === acc.id
         ).length
-        const groupInfo = accountGroupMap.value.get(acc.id) || null
-        return { ...acc, platform: 'gemini', boundApiKeysCount, groupInfo }
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'gemini', boundApiKeysCount }
       })
       allAccounts.push(...geminiAccounts)
     }
@@ -1822,8 +2211,8 @@ const loadAccounts = async (forceReload = false) => {
         const boundApiKeysCount = apiKeys.value.filter(
           (key) => key.openaiAccountId === acc.id
         ).length
-        const groupInfo = accountGroupMap.value.get(acc.id) || null
-        return { ...acc, platform: 'openai', boundApiKeysCount, groupInfo }
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'openai', boundApiKeysCount }
       })
       allAccounts.push(...openaiAccounts)
     }
@@ -1833,33 +2222,90 @@ const loadAccounts = async (forceReload = false) => {
         const boundApiKeysCount = apiKeys.value.filter(
           (key) => key.azureOpenaiAccountId === acc.id
         ).length
-        const groupInfo = accountGroupMap.value.get(acc.id) || null
-        return { ...acc, platform: 'azure_openai', boundApiKeysCount, groupInfo }
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'azure_openai', boundApiKeysCount }
       })
       allAccounts.push(...azureOpenaiAccounts)
     }
 
     if (openaiResponsesData && openaiResponsesData.success) {
-      const responsesAccounts = (openaiResponsesData.data || []).map((acc) => {
-        const groupInfo = accountGroupMap.value.get(acc.id) || null
-        return { ...acc, platform: 'openai-responses', boundApiKeysCount: 0, groupInfo }
+      const openaiResponsesAccounts = (openaiResponsesData.data || []).map((acc) => {
+        // 计算每个OpenAI-Responses账户绑定的API Key数量
+        // OpenAI-Responses账户使用 responses: 前缀
+        const boundApiKeysCount = apiKeys.value.filter(
+          (key) => key.openaiAccountId === `responses:${acc.id}`
+        ).length
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'openai-responses', boundApiKeysCount }
       })
-      allAccounts.push(...responsesAccounts)
+      allAccounts.push(...openaiResponsesAccounts)
     }
 
-    // 为Claude账户加载费用统计信息
-    await loadCostStatsForAccounts(allAccounts)
+    // CCR 账户
+    if (ccrData && ccrData.success) {
+      const ccrAccounts = (ccrData.data || []).map((acc) => {
+        // CCR 不支持 API Key 绑定，固定为 0
+        return { ...acc, platform: 'ccr', boundApiKeysCount: 0 }
+      })
+      allAccounts.push(...ccrAccounts)
+    }
 
-    accounts.value = allAccounts
+    // 根据分组筛选器过滤账户
+    let filteredAccounts = allAccounts
+    if (groupFilter.value !== 'all') {
+      if (groupFilter.value === 'ungrouped') {
+        // 筛选未分组的账户（没有 groupInfos 或 groupInfos 为空数组）
+        filteredAccounts = allAccounts.filter((account) => {
+          return !account.groupInfos || account.groupInfos.length === 0
+        })
+      } else {
+        // 筛选属于特定分组的账户
+        filteredAccounts = allAccounts.filter((account) => {
+          if (!account.groupInfos || account.groupInfos.length === 0) {
+            return false
+          }
+          // 检查账户是否属于选中的分组
+          return account.groupInfos.some((group) => group.id === groupFilter.value)
+        })
+      }
+    }
 
-    // 加载 Claude OAuth 账户的使用量数据（异步，不阻塞页面）
-    if (platformFilter.value === 'all' || platformFilter.value === 'claude') {
-      loadClaudeOAuthUsage()
+    accounts.value = filteredAccounts
+    cleanupSelectedAccounts()
+
+    // 异步加载 Claude OAuth 账户的 usage 数据
+    if (filteredAccounts.some((acc) => acc.platform === 'claude')) {
+      loadClaudeUsage().catch((err) => {
+        console.debug('Claude usage loading failed:', err)
+      })
     }
   } catch (error) {
     showToast('加载账户失败', 'error')
   } finally {
     accountsLoading.value = false
+  }
+}
+
+// 异步加载 Claude 账户的 Usage 数据
+const loadClaudeUsage = async () => {
+  try {
+    const response = await apiClient.get('/admin/claude-accounts/usage')
+    if (response.success && response.data) {
+      const usageMap = response.data
+
+      // 更新账户列表中的 claudeUsage 数据
+      accounts.value = accounts.value.map((account) => {
+        if (account.platform === 'claude' && usageMap[account.id]) {
+          return {
+            ...account,
+            claudeUsage: usageMap[account.id]
+          }
+        }
+        return account
+      })
+    }
+  } catch (error) {
+    console.debug('Failed to load Claude usage data:', error)
   }
 }
 
@@ -1875,27 +2321,16 @@ const sortAccounts = (field) => {
   }
 }
 
-const clearSearch = () => {
-  if (!searchKeyword.value) return
-  searchKeyword.value = ''
-}
-
-// 计算平均每请求Token数（使用优化的工具函数）
-const formatAverageTokensPerRequest = (totalTokens, totalRequests) => {
-  const usage = {
-    tokens: totalTokens || 0,
-    requests: totalRequests || 0
+// 格式化数字（与原版保持一致）
+const formatNumber = (num) => {
+  if (num === null || num === undefined) return '0'
+  const number = Number(num)
+  if (number >= 1000000) {
+    return (number / 1000000).toFixed(2)
+  } else if (number >= 1000) {
+    return (number / 1000000).toFixed(4)
   }
-  return getAverageTokensPerRequest(usage)
-}
-
-// 格式化费用显示
-const formatCost = (cost) => {
-  if (cost == null || cost === undefined || isNaN(cost)) return '0.00'
-  const numCost = parseFloat(cost)
-  if (numCost === 0) return '0.00'
-  if (numCost < 0.01) return '<0.01'
-  return numCost.toFixed(2)
+  return (number / 1000000).toFixed(6)
 }
 
 // 格式化最后使用时间
@@ -1914,6 +2349,11 @@ const formatLastUsed = (dateString) => {
   return date.toLocaleDateString('zh-CN')
 }
 
+const clearSearch = () => {
+  searchKeyword.value = ''
+  currentPage.value = 1
+}
+
 // 加载API Keys列表（缓存版本）
 const loadApiKeys = async (forceReload = false) => {
   if (!forceReload && apiKeysLoaded.value) {
@@ -1927,7 +2367,7 @@ const loadApiKeys = async (forceReload = false) => {
       apiKeysLoaded.value = true
     }
   } catch (error) {
-    console.error('Failed to load API keys:', error)
+    // 静默处理错误
   }
 }
 
@@ -1944,37 +2384,7 @@ const loadAccountGroups = async (forceReload = false) => {
       groupsLoaded.value = true
     }
   } catch (error) {
-    console.error('Failed to load account groups:', error)
-  }
-}
-
-// 加载分组成员关系（缓存版本）
-const loadGroupMembers = async (forceReload = false) => {
-  if (!forceReload && groupMembersLoaded.value) {
-    return // 使用缓存数据
-  }
-
-  try {
-    // 重置映射
-    accountGroupMap.value.clear()
-
-    // 获取所有分组的成员信息
-    for (const group of accountGroups.value) {
-      try {
-        const membersResponse = await apiClient.get(`/admin/account-groups/${group.id}/members`)
-        if (membersResponse.success) {
-          const members = membersResponse.data || []
-          members.forEach((member) => {
-            accountGroupMap.value.set(member.id, group)
-          })
-        }
-      } catch (error) {
-        console.error(`Failed to load members for group ${group.id}:`, error)
-      }
-    }
-    groupMembersLoaded.value = true
-  } catch (error) {
-    console.error('Failed to load group members:', error)
+    // 静默处理错误
   }
 }
 
@@ -1988,11 +2398,13 @@ const clearCache = () => {
 
 // 按平台筛选账户
 const filterByPlatform = () => {
+  currentPage.value = 1
   loadAccounts()
 }
 
 // 按分组筛选账户
 const filterByGroup = () => {
+  currentPage.value = 1
   loadAccounts()
 }
 
@@ -2047,9 +2459,48 @@ const formatRemainingTime = (minutes) => {
   return `${mins}分钟`
 }
 
+// 格式化限流时间（支持显示天数）
+const formatRateLimitTime = (minutes) => {
+  if (!minutes || minutes <= 0) return ''
+
+  // 转换为整数，避免小数
+  minutes = Math.floor(minutes)
+
+  // 计算天数、小时和分钟
+  const days = Math.floor(minutes / 1440) // 1天 = 1440分钟
+  const remainingAfterDays = minutes % 1440
+  const hours = Math.floor(remainingAfterDays / 60)
+  const mins = remainingAfterDays % 60
+
+  // 根据时间长度返回不同格式
+  if (days > 0) {
+    // 超过1天，显示天数和小时
+    if (hours > 0) {
+      return `${days}天${hours}小时`
+    }
+    return `${days}天`
+  } else if (hours > 0) {
+    // 超过1小时但不到1天，显示小时和分钟
+    if (mins > 0) {
+      return `${hours}小时${mins}分钟`
+    }
+    return `${hours}小时`
+  } else {
+    // 不到1小时，只显示分钟
+    return `${mins}分钟`
+  }
+}
+
 // 打开创建账户模态框
 const openCreateAccountModal = () => {
+  newAccountPlatform.value = null // 重置选择的平台
   showCreateAccountModal.value = true
+}
+
+// 关闭创建账户模态框
+const closeCreateAccountModal = () => {
+  showCreateAccountModal.value = false
+  newAccountPlatform.value = null
 }
 
 // 编辑账户
@@ -2058,18 +2509,22 @@ const editAccount = (account) => {
   showEditAccountModal.value = true
 }
 
-const getBoundKeysCount = (account) => {
+const getBoundApiKeysForAccount = (account) => {
+  if (!account || !account.id) return []
   return apiKeys.value.filter((key) => {
+    const accountId = account.id
     return (
-      key.claudeAccountId === account.id ||
-      key.geminiAccountId === account.id ||
-      key.openaiAccountId === account.id ||
-      key.azureOpenaiAccountId === account.id
+      key.claudeAccountId === accountId ||
+      key.claudeConsoleAccountId === accountId ||
+      key.geminiAccountId === accountId ||
+      key.openaiAccountId === accountId ||
+      key.azureOpenaiAccountId === accountId ||
+      key.openaiAccountId === `responses:${accountId}`
     )
-  }).length
+  })
 }
 
-const getAccountDeleteEndpoint = (account) => {
+const resolveAccountDeleteEndpoint = (account) => {
   switch (account.platform) {
     case 'claude':
       return `/admin/claude-accounts/${account.id}`
@@ -2077,152 +2532,159 @@ const getAccountDeleteEndpoint = (account) => {
       return `/admin/claude-console-accounts/${account.id}`
     case 'bedrock':
       return `/admin/bedrock-accounts/${account.id}`
-    case 'gemini':
-      return `/admin/gemini-accounts/${account.id}`
     case 'openai':
       return `/admin/openai-accounts/${account.id}`
     case 'azure_openai':
       return `/admin/azure-openai-accounts/${account.id}`
     case 'openai-responses':
       return `/admin/openai-responses-accounts/${account.id}`
+    case 'ccr':
+      return `/admin/ccr-accounts/${account.id}`
+    case 'gemini':
+      return `/admin/gemini-accounts/${account.id}`
     default:
       return null
   }
 }
 
-const toggleSelectionMode = () => {
-  showCheckboxes.value = !showCheckboxes.value
-  if (!showCheckboxes.value) {
-    selectedAccountIds.value = []
+const performAccountDeletion = async (account) => {
+  const endpoint = resolveAccountDeleteEndpoint(account)
+  if (!endpoint) {
+    return { success: false, message: '不支持的账户类型' }
   }
-}
-
-const handleAccountCheckboxChange = (account, checked) => {
-  if (!showCheckboxes.value) {
-    return
-  }
-
-  const ids = selectedAccountIds.value
-  if (checked) {
-    if (!selectedAccountSet.value.has(account.id)) {
-      selectedAccountIds.value = [...ids, account.id]
-    }
-  } else if (selectedAccountSet.value.has(account.id)) {
-    selectedAccountIds.value = ids.filter((id) => id !== account.id)
-  }
-}
-
-const toggleSelectAll = (checked) => {
-  if (!showCheckboxes.value) return
-  if (checked) {
-    selectedAccountIds.value = sortedAccounts.value.map((account) => account.id)
-  } else {
-    selectedAccountIds.value = []
-  }
-}
-
-const isAccountSelected = (accountId) => selectedAccountSet.value.has(accountId)
-
-const cleanupSelectedAccounts = () => {
-  if (!selectedAccountIds.value.length) return
-  const availableIds = new Set(accounts.value.map((account) => account.id))
-  selectedAccountIds.value = selectedAccountIds.value.filter((id) => availableIds.has(id))
-}
-
-const batchDeleteAccounts = async () => {
-  if (!selectedAccountIds.value.length) {
-    return
-  }
-
-  const accountMap = new Map(accounts.value.map((account) => [account.id, account]))
-  const targets = selectedAccountIds.value
-    .map((id) => accountMap.get(id))
-    .filter((account) => !!account)
-
-  if (!targets.length) {
-    showToast('未找到选中的账户', 'warning')
-    return
-  }
-
-  const blocked = targets.filter((account) => getBoundKeysCount(account) > 0)
-  if (blocked.length > 0) {
-    const names = blocked.map((account) => account.name || account.id).join(', ')
-    showToast(`请先解绑以下账户的 API Key: ${names}`, 'error')
-    return
-  }
-
-  const confirmed = await showConfirm(
-    '批量删除账户',
-    `确定要删除选中的 ${targets.length} 个账户吗？此操作不可恢复。`,
-    '删除',
-    '取消'
-  )
-
-  if (!confirmed) return
 
   try {
-    for (const account of targets) {
-      const endpoint = getAccountDeleteEndpoint(account)
-      if (!endpoint) continue
-      const response = await apiClient.delete(endpoint)
-      if (!response?.success) {
-        throw new Error(response?.message || `删除账户 ${account.name || account.id} 失败`)
-      }
+    const data = await apiClient.delete(endpoint)
+    if (data.success) {
+      return { success: true, data }
     }
-
-    showToast(`已删除 ${targets.length} 个账户`, 'success')
-    selectedAccountIds.value = []
-    showCheckboxes.value = false
-    groupMembersLoaded.value = false
-    await loadAccounts(true)
+    return { success: false, message: data.message || '删除失败' }
   } catch (error) {
-    console.error(error)
-    showToast(error.message || '批量删除失败', 'error')
+    const message = error.response?.data?.message || error.message || '删除失败'
+    return { success: false, message }
   }
 }
 
 // 删除账户
 const deleteAccount = async (account) => {
-  // 检查是否有API Key绑定到此账号
-  const boundKeysCount = getBoundKeysCount(account)
+  const boundKeys = getBoundApiKeysForAccount(account)
+  const boundKeysCount = boundKeys.length
 
+  let confirmMessage = `确定要删除账户 "${account.name}" 吗？`
   if (boundKeysCount > 0) {
-    showToast(
-      `无法删除此账号，有 ${boundKeysCount} 个API Key绑定到此账号，请先解绑所有API Key`,
-      'error'
-    )
-    return
+    confirmMessage += `\n\n⚠️ 注意：此账号有 ${boundKeysCount} 个 API Key 绑定。`
+    confirmMessage += `\n删除后，这些 API Key 将自动切换为共享池模式。`
   }
+  confirmMessage += '\n\n此操作不可恢复。'
 
-  const confirmed = await showConfirm(
-    '删除账户',
-    `确定要删除账户 "${account.name}" 吗？\n\n此操作不可恢复。`,
-    '删除',
-    '取消'
-  )
+  const confirmed = await showConfirm('删除账户', confirmMessage, '删除', '取消')
 
   if (!confirmed) return
 
-  try {
-    const endpoint = getAccountDeleteEndpoint(account)
-    if (!endpoint) {
-      showToast('当前账户类型暂不支持删除', 'warning')
-      return
-    }
+  const result = await performAccountDeletion(account)
 
-    const data = await apiClient.delete(endpoint)
-
-    if (data.success) {
-      showToast('账户已删除', 'success')
-      // 清空分组成员缓存，因为账户可能从分组中移除
-      groupMembersLoaded.value = false
-      loadAccounts()
-    } else {
-      showToast(data.message || '删除失败', 'error')
+  if (result.success) {
+    const data = result.data
+    let toastMessage = '账户已成功删除'
+    if (data?.unboundKeys > 0) {
+      toastMessage += `，${data.unboundKeys} 个 API Key 已切换为共享池模式`
     }
-  } catch (error) {
-    showToast('删除失败', 'error')
+    showToast(toastMessage, 'success')
+
+    selectedAccounts.value = selectedAccounts.value.filter((id) => id !== account.id)
+    updateSelectAllState()
+
+    groupMembersLoaded.value = false
+    apiKeysLoaded.value = false
+    loadAccounts()
+    loadApiKeys(true)
+  } else {
+    showToast(result.message || '删除失败', 'error')
   }
+}
+
+// 批量删除账户
+const batchDeleteAccounts = async () => {
+  if (selectedAccounts.value.length === 0) {
+    showToast('请先选择要删除的账户', 'warning')
+    return
+  }
+
+  const accountsMap = new Map(accounts.value.map((item) => [item.id, item]))
+  const targets = selectedAccounts.value
+    .map((id) => accountsMap.get(id))
+    .filter((account) => !!account)
+
+  if (targets.length === 0) {
+    showToast('选中的账户已不存在', 'warning')
+    selectedAccounts.value = []
+    updateSelectAllState()
+    return
+  }
+
+  let confirmMessage = `确定要删除选中的 ${targets.length} 个账户吗？此操作不可恢复。`
+  const boundInfo = targets
+    .map((account) => ({ account, boundKeys: getBoundApiKeysForAccount(account) }))
+    .filter((item) => item.boundKeys.length > 0)
+
+  if (boundInfo.length > 0) {
+    confirmMessage += '\n\n⚠️ 以下账户存在绑定的 API Key，将自动解绑：'
+    boundInfo.forEach(({ account, boundKeys }) => {
+      const displayName = account.name || account.email || account.accountName || account.id
+      confirmMessage += `\n- ${displayName}: ${boundKeys.length} 个`
+    })
+    confirmMessage += '\n删除后，这些 API Key 将切换为共享池模式。'
+  }
+
+  confirmMessage += '\n\n请再次确认是否继续。'
+
+  const confirmed = await showConfirm('批量删除账户', confirmMessage, '删除', '取消')
+  if (!confirmed) return
+
+  let successCount = 0
+  let failedCount = 0
+  let totalUnboundKeys = 0
+  const failedDetails = []
+
+  for (const account of targets) {
+    const result = await performAccountDeletion(account)
+    if (result.success) {
+      successCount += 1
+      totalUnboundKeys += result.data?.unboundKeys || 0
+    } else {
+      failedCount += 1
+      failedDetails.push({
+        name: account.name || account.email || account.accountName || account.id,
+        message: result.message || '删除失败'
+      })
+    }
+  }
+
+  if (successCount > 0) {
+    let toastMessage = `成功删除 ${successCount} 个账户`
+    if (totalUnboundKeys > 0) {
+      toastMessage += `，${totalUnboundKeys} 个 API Key 已切换为共享池模式`
+    }
+    showToast(toastMessage, failedCount > 0 ? 'warning' : 'success')
+
+    selectedAccounts.value = []
+    selectAllChecked.value = false
+    isIndeterminate.value = false
+
+    groupMembersLoaded.value = false
+    apiKeysLoaded.value = false
+    await loadAccounts(true)
+  }
+
+  if (failedCount > 0) {
+    const detailMessage = failedDetails.map((item) => `${item.name}: ${item.message}`).join('\n')
+    showToast(
+      `有 ${failedCount} 个账户删除失败:\n${detailMessage}`,
+      successCount > 0 ? 'warning' : 'error'
+    )
+  }
+
+  updateSelectAllState()
 }
 
 // 重置账户状态
@@ -2245,15 +2707,22 @@ const resetAccountStatus = async (account) => {
 
   try {
     account.isResetting = true
-    let endpoint = null
-    if (account.platform === 'claude') {
-      endpoint = `/admin/claude-accounts/${account.id}/reset-status`
+
+    // 根据账户平台选择不同的 API 端点
+    let endpoint = ''
+    if (account.platform === 'openai') {
+      endpoint = `/admin/openai-accounts/${account.id}/reset-status`
     } else if (account.platform === 'openai-responses') {
       endpoint = `/admin/openai-responses-accounts/${account.id}/reset-status`
-    }
-
-    if (!endpoint) {
-      showToast('当前账户类型暂不支持状态重置', 'warning')
+    } else if (account.platform === 'claude') {
+      endpoint = `/admin/claude-accounts/${account.id}/reset-status`
+    } else if (account.platform === 'claude-console') {
+      endpoint = `/admin/claude-console-accounts/${account.id}/reset-status`
+    } else if (account.platform === 'ccr') {
+      endpoint = `/admin/ccr-accounts/${account.id}/reset-status`
+    } else {
+      showToast('不支持的账户类型', 'error')
+      account.isResetting = false
       return
     }
 
@@ -2261,7 +2730,8 @@ const resetAccountStatus = async (account) => {
 
     if (data.success) {
       showToast('账户状态已重置', 'success')
-      loadAccounts()
+      // 强制刷新，绕过前端缓存，确保最终一致性
+      loadAccounts(true)
     } else {
       showToast(data.message || '状态重置失败', 'error')
     }
@@ -2269,44 +2739,6 @@ const resetAccountStatus = async (account) => {
     showToast('状态重置失败', 'error')
   } finally {
     account.isResetting = false
-  }
-}
-
-const resetOpenAIResponsesUsage = async (account) => {
-  if (account.platform !== 'openai-responses' || account.isResettingUsage) {
-    return
-  }
-
-  let confirmed = false
-  if (window.showConfirm) {
-    confirmed = await window.showConfirm(
-      '重置每日用量',
-      '确定要清空该账户的每日使用量吗？',
-      '确定重置',
-      '取消'
-    )
-  } else {
-    confirmed = confirm('确定要清空该账户的每日使用量吗？')
-  }
-
-  if (!confirmed) return
-
-  try {
-    account.isResettingUsage = true
-    const response = await apiClient.post(
-      `/admin/openai-responses-accounts/${account.id}/reset-usage`
-    )
-
-    if (response.success) {
-      showToast('每日使用量已重置', 'success')
-      loadAccounts()
-    } else {
-      showToast(response.message || '每日使用量重置失败', 'error')
-    }
-  } catch (error) {
-    showToast('每日使用量重置失败', 'error')
-  } finally {
-    account.isResettingUsage = false
   }
 }
 
@@ -2330,6 +2762,10 @@ const toggleSchedulable = async (account) => {
       endpoint = `/admin/openai-accounts/${account.id}/toggle-schedulable`
     } else if (account.platform === 'azure_openai') {
       endpoint = `/admin/azure-openai-accounts/${account.id}/toggle-schedulable`
+    } else if (account.platform === 'openai-responses') {
+      endpoint = `/admin/openai-responses-accounts/${account.id}/toggle-schedulable`
+    } else if (account.platform === 'ccr') {
+      endpoint = `/admin/ccr-accounts/${account.id}/toggle-schedulable`
     } else {
       showToast('该账户类型暂不支持调度控制', 'warning')
       return
@@ -2368,12 +2804,6 @@ const handleEditSuccess = () => {
   loadAccounts()
 }
 
-const handleBulkImportSuccess = () => {
-  // 导入完成后刷新列表，保持分组状态一致
-  clearCache()
-  loadAccounts()
-}
-
 // 获取 Claude 账号的添加方式
 const getClaudeAuthType = (account) => {
   // 基于 lastRefreshAt 判断：如果为空说明是 Setup Token（不能刷新），否则是 OAuth
@@ -2406,13 +2836,7 @@ const getClaudeAccountType = (account) => {
           ? JSON.parse(account.subscriptionInfo)
           : account.subscriptionInfo
 
-      // 添加调试日志
-      console.log('Account subscription info:', {
-        accountName: account.name,
-        subscriptionInfo: info,
-        hasClaudeMax: info.hasClaudeMax,
-        hasClaudePro: info.hasClaudePro
-      })
+      // 订阅信息已解析
 
       // 根据 has_claude_max 和 has_claude_pro 判断
       if (info.hasClaudeMax === true) {
@@ -2424,14 +2848,105 @@ const getClaudeAccountType = (account) => {
       }
     } catch (e) {
       // 解析失败，返回默认值
-      console.error('Failed to parse subscription info:', e)
       return 'Claude'
     }
   }
 
   // 没有订阅信息，保持原有显示
-  console.log('No subscription info for account:', account.name)
   return 'Claude'
+}
+
+// 获取停止调度的原因
+const getSchedulableReason = (account) => {
+  if (account.schedulable !== false) return null
+
+  // Claude Console 账户的错误状态
+  if (account.platform === 'claude-console') {
+    if (account.status === 'unauthorized') {
+      return 'API Key无效或已过期（401错误）'
+    }
+    if (account.overloadStatus === 'overloaded') {
+      return '服务过载（529错误）'
+    }
+    if (account.rateLimitStatus === 'limited') {
+      return '触发限流（429错误）'
+    }
+    if (account.status === 'blocked' && account.errorMessage) {
+      return account.errorMessage
+    }
+  }
+
+  // Claude 官方账户的错误状态
+  if (account.platform === 'claude') {
+    if (account.status === 'unauthorized') {
+      return '认证失败（401错误）'
+    }
+    if (account.status === 'temp_error' && account.errorMessage) {
+      return account.errorMessage
+    }
+    if (account.status === 'error' && account.errorMessage) {
+      return account.errorMessage
+    }
+    if (account.isRateLimited) {
+      return '触发限流（429错误）'
+    }
+    // 自动停止调度的原因
+    if (account.stoppedReason) {
+      return account.stoppedReason
+    }
+    // 检查5小时限制自动停止标志（备用方案）
+    if (account.fiveHourAutoStopped === 'true' || account.fiveHourAutoStopped === true) {
+      return '5小时使用量接近限制，已自动停止调度'
+    }
+  }
+
+  // OpenAI 账户的错误状态
+  if (account.platform === 'openai') {
+    if (account.status === 'unauthorized') {
+      return '认证失败（401错误）'
+    }
+    // 检查限流状态 - 兼容嵌套的 rateLimitStatus 对象
+    if (
+      (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
+      account.isRateLimited
+    ) {
+      return '触发限流（429错误）'
+    }
+    if (account.status === 'error' && account.errorMessage) {
+      return account.errorMessage
+    }
+  }
+
+  // OpenAI-Responses 账户的错误状态
+  if (account.platform === 'openai-responses') {
+    if (account.status === 'unauthorized') {
+      return '认证失败（401错误）'
+    }
+    // 检查限流状态 - 兼容嵌套的 rateLimitStatus 对象
+    if (
+      (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
+      account.isRateLimited
+    ) {
+      return '触发限流（429错误）'
+    }
+    if (account.status === 'error' && account.errorMessage) {
+      return account.errorMessage
+    }
+    if (account.status === 'rateLimited') {
+      return '触发限流（429错误）'
+    }
+  }
+
+  // 通用原因
+  if (account.stoppedReason) {
+    return account.stoppedReason
+  }
+  if (account.errorMessage) {
+    return account.errorMessage
+  }
+
+  // 默认为手动停止
+  return '手动停止调度'
 }
 
 // 获取账户状态文本
@@ -2448,6 +2963,8 @@ const getAccountStatusText = (account) => {
     account.rateLimitStatus === 'limited'
   )
     return '限流中'
+  // 检查是否临时错误
+  if (account.status === 'temp_error') return '临时异常'
   // 检查是否错误
   if (account.status === 'error' || !account.isActive) return '错误'
   // 检查是否可调度
@@ -2470,6 +2987,9 @@ const getAccountStatusClass = (account) => {
     (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
     account.rateLimitStatus === 'limited'
   ) {
+    return 'bg-orange-100 text-orange-800'
+  }
+  if (account.status === 'temp_error') {
     return 'bg-orange-100 text-orange-800'
   }
   if (account.status === 'error' || !account.isActive) {
@@ -2497,6 +3017,9 @@ const getAccountStatusDotClass = (account) => {
   ) {
     return 'bg-orange-500'
   }
+  if (account.status === 'temp_error') {
+    return 'bg-orange-500'
+  }
   if (account.status === 'error' || !account.isActive) {
     return 'bg-red-500'
   }
@@ -2519,10 +3042,293 @@ const formatRelativeTime = (dateString) => {
   return formatLastUsed(dateString)
 }
 
+// 获取会话窗口进度条的样式类
+const getSessionProgressBarClass = (status, account = null) => {
+  // 根据状态返回不同的颜色类，包含防御性检查
+  if (!status) {
+    // 无状态信息时默认为蓝色
+    return 'bg-gradient-to-r from-blue-500 to-indigo-600'
+  }
+
+  // 检查账号是否处于限流状态
+  const isRateLimited =
+    account &&
+    (account.isRateLimited ||
+      account.status === 'rate_limited' ||
+      (account.rateLimitStatus && account.rateLimitStatus.isRateLimited) ||
+      account.rateLimitStatus === 'limited')
+
+  // 如果账号处于限流状态，显示红色
+  if (isRateLimited) {
+    return 'bg-gradient-to-r from-red-500 to-red-600'
+  }
+
+  // 转换为小写进行比较，避免大小写问题
+  const normalizedStatus = String(status).toLowerCase()
+
+  if (normalizedStatus === 'rejected') {
+    // 被拒绝 - 红色
+    return 'bg-gradient-to-r from-red-500 to-red-600'
+  } else if (normalizedStatus === 'allowed_warning') {
+    // 警告状态 - 橙色/黄色
+    return 'bg-gradient-to-r from-yellow-500 to-orange-500'
+  } else {
+    // 正常状态（allowed 或其他） - 蓝色
+    return 'bg-gradient-to-r from-blue-500 to-indigo-600'
+  }
+}
+
+// ====== Claude OAuth Usage 相关函数 ======
+
+// 判断 Claude 账户是否为 OAuth 授权
+const isClaudeOAuth = (account) => {
+  return account.authType === 'oauth'
+}
+
+// 格式化 Claude 使用率百分比
+const formatClaudeUsagePercent = (window) => {
+  if (!window || window.utilization === null || window.utilization === undefined) {
+    return '-'
+  }
+  return `${window.utilization}%`
+}
+
+// 获取 Claude 使用率宽度
+const getClaudeUsageWidth = (window) => {
+  if (!window || window.utilization === null || window.utilization === undefined) {
+    return '0%'
+  }
+  return `${window.utilization}%`
+}
+
+// 获取 Claude 使用率进度条颜色
+const getClaudeUsageBarClass = (window) => {
+  const util = window?.utilization || 0
+  if (util < 60) {
+    return 'bg-gradient-to-r from-blue-500 to-indigo-600'
+  }
+  if (util < 90) {
+    return 'bg-gradient-to-r from-yellow-500 to-orange-500'
+  }
+  return 'bg-gradient-to-r from-red-500 to-red-600'
+}
+
+// 格式化 Claude 剩余时间
+const formatClaudeRemaining = (window) => {
+  if (!window || !window.remainingSeconds) {
+    return '-'
+  }
+
+  const seconds = window.remainingSeconds
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+
+  if (days > 0) {
+    if (hours > 0) {
+      return `${days}天${hours}小时`
+    }
+    return `${days}天`
+  }
+  if (hours > 0) {
+    if (minutes > 0) {
+      return `${hours}小时${minutes}分钟`
+    }
+    return `${hours}小时`
+  }
+  if (minutes > 0) {
+    return `${minutes}分钟`
+  }
+  return `${Math.floor(seconds % 60)}秒`
+}
+
+// 归一化 OpenAI 会话窗口使用率
+const normalizeCodexUsagePercent = (usageItem) => {
+  if (!usageItem) {
+    return null
+  }
+
+  const basePercent =
+    typeof usageItem.usedPercent === 'number' && !Number.isNaN(usageItem.usedPercent)
+      ? usageItem.usedPercent
+      : null
+
+  const resetAfterSeconds =
+    typeof usageItem.resetAfterSeconds === 'number' && !Number.isNaN(usageItem.resetAfterSeconds)
+      ? usageItem.resetAfterSeconds
+      : null
+
+  const remainingSeconds =
+    typeof usageItem.remainingSeconds === 'number' ? usageItem.remainingSeconds : null
+
+  const resetAtMs = usageItem.resetAt ? Date.parse(usageItem.resetAt) : null
+
+  const resetElapsed =
+    resetAfterSeconds !== null &&
+    ((remainingSeconds !== null && remainingSeconds <= 0) ||
+      (resetAtMs !== null && !Number.isNaN(resetAtMs) && Date.now() >= resetAtMs))
+
+  if (resetElapsed) {
+    return 0
+  }
+
+  if (basePercent === null) {
+    return null
+  }
+
+  return Math.max(0, Math.min(100, basePercent))
+}
+
+// OpenAI 限额进度条颜色
+const getCodexUsageBarClass = (usageItem) => {
+  const percent = normalizeCodexUsagePercent(usageItem)
+  if (percent === null) {
+    return 'bg-gradient-to-r from-gray-300 to-gray-400'
+  }
+  if (percent >= 90) {
+    return 'bg-gradient-to-r from-red-500 to-red-600'
+  }
+  if (percent >= 75) {
+    return 'bg-gradient-to-r from-yellow-500 to-orange-500'
+  }
+  return 'bg-gradient-to-r from-emerald-500 to-teal-500'
+}
+
+// 百分比显示
+const formatCodexUsagePercent = (usageItem) => {
+  const percent = normalizeCodexUsagePercent(usageItem)
+  if (percent === null) {
+    return '--'
+  }
+  return `${percent.toFixed(1)}%`
+}
+
+// 进度条宽度
+const getCodexUsageWidth = (usageItem) => {
+  const percent = normalizeCodexUsagePercent(usageItem)
+  if (percent === null) {
+    return '0%'
+  }
+  return `${percent}%`
+}
+
+// 时间窗口标签
+const getCodexWindowLabel = (type) => {
+  if (type === 'secondary') {
+    return '周限'
+  }
+  return '5h'
+}
+
+// 格式化剩余时间
+const formatCodexRemaining = (usageItem) => {
+  if (!usageItem) {
+    return '--'
+  }
+
+  let seconds = usageItem.remainingSeconds
+  if (seconds === null || seconds === undefined) {
+    seconds = usageItem.resetAfterSeconds
+  }
+
+  if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) {
+    return '--'
+  }
+
+  seconds = Math.max(0, Math.floor(Number(seconds)))
+
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+
+  if (days > 0) {
+    if (hours > 0) {
+      return `${days}天${hours}小时`
+    }
+    return `${days}天`
+  }
+  if (hours > 0) {
+    if (minutes > 0) {
+      return `${hours}小时${minutes}分钟`
+    }
+    return `${hours}小时`
+  }
+  if (minutes > 0) {
+    return `${minutes}分钟`
+  }
+  return `${secs}秒`
+}
+
+// 格式化费用显示
+const formatCost = (cost) => {
+  if (!cost || cost === 0) return '0.0000'
+  if (cost < 0.0001) return cost.toExponential(2)
+  if (cost < 0.01) return cost.toFixed(6)
+  if (cost < 1) return cost.toFixed(4)
+  return cost.toFixed(2)
+}
+
+// 额度使用百分比（Claude Console）
+const getQuotaUsagePercent = (account) => {
+  const used = Number(account?.usage?.daily?.cost || 0)
+  const quota = Number(account?.dailyQuota || 0)
+  if (!quota || quota <= 0) return 0
+  return (used / quota) * 100
+}
+
+// 额度进度条颜色（Claude Console）
+const getQuotaBarClass = (percent) => {
+  if (percent >= 90) return 'bg-red-500'
+  if (percent >= 70) return 'bg-yellow-500'
+  return 'bg-green-500'
+}
+
+// 剩余额度（Claude Console）
+const formatRemainingQuota = (account) => {
+  const used = Number(account?.usage?.daily?.cost || 0)
+  const quota = Number(account?.dailyQuota || 0)
+  if (!quota || quota <= 0) return '0.00'
+  return Math.max(0, quota - used).toFixed(2)
+}
+
+// 计算每日费用（使用后端返回的精确费用数据）
+const calculateDailyCost = (account) => {
+  if (!account.usage || !account.usage.daily) return '0.0000'
+
+  // 如果后端已经返回了计算好的费用，直接使用
+  if (account.usage.daily.cost !== undefined) {
+    return formatCost(account.usage.daily.cost)
+  }
+
+  // 如果后端没有返回费用（旧版本），返回0
+  return '0.0000'
+}
+
 // 切换调度状态
 // const toggleDispatch = async (account) => {
 //   await toggleSchedulable(account)
 // }
+
+watch(searchKeyword, () => {
+  currentPage.value = 1
+  updateSelectAllState()
+})
+
+watch(pageSize, (newSize) => {
+  localStorage.setItem(PAGE_SIZE_STORAGE_KEY, newSize.toString())
+  updateSelectAllState()
+})
+
+watch(
+  () => sortedAccounts.value.length,
+  () => {
+    if (currentPage.value > totalPages.value) {
+      currentPage.value = totalPages.value || 1
+    }
+    updateSelectAllState()
+  }
+)
 
 // 监听排序选择变化
 watch(accountSortBy, (newVal) => {
@@ -2531,7 +3337,6 @@ watch(accountSortBy, (newVal) => {
     dailyTokens: 'dailyTokens',
     dailyRequests: 'dailyRequests',
     totalTokens: 'totalTokens',
-    totalRequests: 'totalRequests',
     lastUsed: 'lastUsed'
   }
 
@@ -2540,317 +3345,29 @@ watch(accountSortBy, (newVal) => {
   }
 })
 
+watch(currentPage, () => {
+  updateSelectAllState()
+})
+
+watch(paginatedAccounts, () => {
+  updateSelectAllState()
+})
+
 watch(accounts, () => {
   cleanupSelectedAccounts()
 })
-
-watch(sortedAccounts, () => {
-  if (!showCheckboxes.value) return
-  cleanupSelectedAccounts()
-})
-
-// 🔄 加载 Claude OAuth 账户的使用量数据
-const loadClaudeOAuthUsage = async () => {
-  try {
-    const response = await apiClient.get('/admin/claude-accounts/usage')
-    if (response.success && response.data) {
-      claudeOAuthUsage.value = response.data
-    }
-  } catch (error) {
-    console.warn('Failed to load Claude OAuth usage:', error)
-  }
-}
-
-// 📊 判断是否是 OAuth 账户
-const isClaudeOAuth = (account) => {
-  if (!account || account.platform !== 'claude') return false
-  const scopes = account.scopes || []
-  return scopes.includes('user:profile') && scopes.includes('user:inference')
-}
-
-// 🎨 获取使用量进度条颜色
-const getClaudeUsageBarClass = (utilization) => {
-  if (utilization === null || utilization === undefined) return 'bg-gray-300'
-  if (utilization < 0.5) return 'bg-gradient-to-r from-green-500 to-green-600'
-  if (utilization < 0.8) return 'bg-gradient-to-r from-yellow-500 to-yellow-600'
-  return 'bg-gradient-to-r from-red-500 to-red-600'
-}
-
-// 📏 计算使用量进度条宽度
-const getClaudeUsageWidth = (utilization) => {
-  if (utilization === null || utilization === undefined) return '0%'
-  return Math.min(100, Math.max(0, utilization * 100)).toFixed(1) + '%'
-}
-
-// 🔢 格式化使用量百分比
-const formatClaudeUsagePercent = (utilization) => {
-  if (utilization === null || utilization === undefined) return 'N/A'
-  return (utilization * 100).toFixed(1) + '%'
-}
-
-// ⏱️ 格式化剩余时间
-const formatClaudeRemaining = (remainingSeconds) => {
-  if (!remainingSeconds || remainingSeconds <= 0) return '已重置'
-  const hours = Math.floor(remainingSeconds / 3600)
-  const minutes = Math.floor((remainingSeconds % 3600) / 60)
-  if (hours > 0) return `${hours}小时${minutes}分钟`
-  return `${minutes}分钟`
-}
 
 onMounted(() => {
   // 首次加载时强制刷新所有数据
   loadAccounts(true)
 })
-
-// 调度策略相关辅助函数
-const getStrategyName = (strategy) => {
-  const strategyNames = {
-    round_robin: '轮询',
-    least_used: '最少使用',
-    least_recent: '最近最少',
-    random: '随机',
-    weighted_random: '加权随机',
-    sequential: '顺序'
-  }
-  return strategyNames[strategy] || '未知'
-}
-
-const getStrategyIcon = (strategy) => {
-  const strategyIcons = {
-    round_robin: 'fas fa-sync-alt text-blue-500',
-    least_used: 'fas fa-chart-bar text-green-500',
-    least_recent: 'fas fa-clock text-orange-500',
-    random: 'fas fa-random text-purple-500',
-    weighted_random: 'fas fa-weight-hanging text-orange-600',
-    sequential: 'fas fa-sort-numeric-down text-indigo-500'
-  }
-  return strategyIcons[strategy] || 'fas fa-question text-gray-400'
-}
-
-// 分组调度策略相关辅助函数
-const getStrategyNameShort = (strategy) => {
-  const names = {
-    round_robin: '轮询',
-    least_used: '最少使用',
-    least_recent: '最近最少',
-    random: '随机',
-    weighted_random: '加权随机',
-    sequential: '顺序'
-  }
-  return names[strategy] || '最近最少'
-}
-
-const getStrategyIconCompact = (strategy) => {
-  const icons = {
-    round_robin: 'fas fa-sync-alt',
-    least_used: 'fas fa-chart-bar',
-    least_recent: 'fas fa-clock',
-    random: 'fas fa-random',
-    weighted_random: 'fas fa-balance-scale',
-    sequential: 'fas fa-list-ol'
-  }
-  return icons[strategy] || 'fas fa-clock'
-}
-
-const getStrategyColorCompact = (strategy) => {
-  const colors = {
-    round_robin: 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400',
-    least_used: 'bg-green-100 text-green-600 dark:bg-green-900/50 dark:text-green-400',
-    least_recent: 'bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400',
-    random: 'bg-purple-100 text-purple-600 dark:bg-purple-900/50 dark:text-purple-400',
-    weighted_random: 'bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400',
-    sequential: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-400'
-  }
-  return (
-    colors[strategy] || 'bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400'
-  )
-}
-
-const getGroupSchedulingDetails = (groupInfo) => {
-  if (!groupInfo.schedulingStrategy) return ''
-
-  let details = ''
-  if (groupInfo.schedulingStrategy === 'weighted_random' && groupInfo.schedulingWeight) {
-    details = `默认权重: ${groupInfo.schedulingWeight}`
-  } else if (groupInfo.schedulingStrategy === 'sequential' && groupInfo.sequentialOrder) {
-    details = `起始位置: ${groupInfo.sequentialOrder}`
-  }
-  return details
-}
-
-const getStrategyColor = (strategy) => {
-  const strategyColors = {
-    round_robin:
-      'bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-700',
-    least_used:
-      'bg-green-100 text-green-800 border border-green-200 dark:bg-green-900/30 dark:text-green-200 dark:border-green-700',
-    least_recent:
-      'bg-orange-100 text-orange-800 border border-orange-200 dark:bg-orange-900/30 dark:text-orange-200 dark:border-orange-700',
-    random:
-      'bg-purple-100 text-purple-800 border border-purple-200 dark:bg-purple-900/30 dark:text-purple-200 dark:border-purple-700',
-    weighted_random:
-      'bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700',
-    sequential:
-      'bg-indigo-100 text-indigo-800 border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200 dark:border-indigo-700'
-  }
-  return (
-    strategyColors[strategy] ||
-    'bg-gray-100 text-gray-800 border border-gray-200 dark:bg-gray-900/30 dark:text-gray-200 dark:border-gray-700'
-  )
-}
-
-// 处理限流过期
-const handleRateLimitExpired = (account) => {
-  // 限流已过期，刷新该账户的状态
-  loadAccounts()
-  showToast(`账户 ${account.name} 的限流状态已重置`, 'success')
-}
-
-// 处理限流时间更新
-const handleRateLimitUpdate = async () => {
-  try {
-    // 每分钟检查一次是否需要刷新账户状态
-    const now = Date.now()
-    const lastRefresh = handleRateLimitUpdate._lastRefresh || 0
-    const refreshInterval = 60 * 1000 // 60秒
-
-    if (now - lastRefresh > refreshInterval) {
-      handleRateLimitUpdate._lastRefresh = now
-
-      // 检查是否有限流状态即将过期的账户（5分钟内）
-      const accountsNearExpiry = accounts.value.filter((account) => {
-        if (!account.rateLimitStatus || !account.rateLimitStatus.isRateLimited) {
-          return false
-        }
-
-        const endTime = new Date(account.rateLimitStatus.rateLimitEndAt)
-        const remaining = endTime - new Date()
-        return remaining > 0 && remaining < 5 * 60 * 1000 // 5分钟
-      })
-
-      if (accountsNearExpiry.length > 0) {
-        console.info(`即将有 ${accountsNearExpiry.length} 个账户解除限流`)
-
-        // 可以在这里添加更多的预处理逻辑
-        // 比如预加载下一批可用账户等
-      }
-
-      // 如果有账户限流状态变化，考虑局部刷新
-      const hasStatusChanges = accounts.value.some(
-        (account) =>
-          account.rateLimitStatus &&
-          account.rateLimitStatus.isRateLimited &&
-          account.rateLimitStatus.minutesRemaining <= 1
-      )
-
-      if (hasStatusChanges) {
-        // 静默刷新账户数据，不显示loading状态
-        await loadAccounts(false)
-      }
-    }
-  } catch (error) {
-    console.error('处理限流更新时出错:', error)
-  }
-}
-
-// 处理Claude重置时间更新
-const handleClaudeResetUpdate = () => {
-  // Claude 5小时重置倒计时更新，暂时无需特殊处理
-  // 可以在这里添加日志或其他逻辑
-}
-
-// 为账户加载费用统计信息
-const loadCostStatsForAccounts = async (allAccounts) => {
-  try {
-    // 筛选支持费用统计的账户
-    const accountsWithCostStats = allAccounts.filter((account) => {
-      // 目前所有平台都支持费用统计
-      return ['claude', 'claude-console', 'gemini', 'openai', 'azure_openai', 'bedrock'].includes(
-        account.platform
-      )
-    })
-
-    if (accountsWithCostStats.length === 0) {
-      return
-    }
-
-    // 并行获取所有账户的费用统计
-    const costStatsPromises = accountsWithCostStats.map(async (account) => {
-      try {
-        const costStats = await accountsStore.getAccountCostStats(
-          account.id,
-          account.platform,
-          'all'
-        )
-        return { accountId: account.id, costStats }
-      } catch (error) {
-        console.warn(`获取账户 ${account.id} (${account.platform}) 的费用统计失败:`, error)
-        return {
-          accountId: account.id,
-          costStats: {
-            totalCost: 0,
-            hasCostStats: false,
-            error: error.message
-          }
-        }
-      }
-    })
-
-    const results = await Promise.all(costStatsPromises)
-
-    // 将费用统计数据附加到账户对象上
-    results.forEach(({ accountId, costStats }) => {
-      const account = allAccounts.find((acc) => acc.id === accountId)
-      if (account) {
-        account.costStats = costStats
-      }
-    })
-  } catch (error) {
-    console.error('加载账户费用统计失败:', error)
-  }
-}
 </script>
 
 <style scoped>
 .table-container {
   overflow-x: auto;
   border-radius: 12px;
-}
-
-/* 表格水平滚动优化 */
-.table-scroll-wrapper {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
-}
-
-.table-scroll-wrapper::-webkit-scrollbar {
-  height: 6px;
-}
-
-.table-scroll-wrapper::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.table-scroll-wrapper::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.5);
-  border-radius: 3px;
-}
-
-.table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.7);
-}
-
-/* 1024px分辨率专项优化 */
-@media (min-width: 1024px) and (max-width: 1279px) {
-  .table-container table {
-    font-size: 0.8rem;
-  }
-
-  .table-container th,
-  .table-container td {
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-  }
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .table-row {

@@ -1,76 +1,11 @@
+const { v4: uuidv4 } = require('uuid')
+const config = require('../../config/config')
 const apiKeyService = require('../services/apiKeyService')
 const userService = require('../services/userService')
 const logger = require('../utils/logger')
-const database = require('../models/database')
-const { RateLimiterRedis } = require('rate-limiter-flexible')
-const config = require('../../config/config')
-const { unifiedLogServiceFactory } = require('../services/UnifiedLogServiceFactory')
-const { dynamicConfigManager } = require('../services/dynamicConfigService')
-const { costLimitService } = require('../services/costLimitService')
-
-// 🔧 请求日志配置缓存和动态检查机制
-let cachedRequestLoggingConfig = {
-  enabled: config.requestLogging?.enabled || false,
-  lastUpdate: 0,
-  isUpdating: false
-}
-
-/**
- * 高性能请求日志配置检查（零阻塞）
- * 使用内存缓存 + 异步更新策略，确保主请求路径不被阻塞
- * @returns {boolean} 是否启用请求日志记录
- */
-const isRequestLoggingEnabled = () => {
-  const now = Date.now()
-  const cacheAge = now - cachedRequestLoggingConfig.lastUpdate
-
-  // 如果缓存新鲜（小于30秒），直接返回缓存值
-  if (cacheAge < 30000) {
-    return cachedRequestLoggingConfig.enabled
-  }
-
-  // 如果缓存过期但没有在更新中，触发异步更新
-  if (!cachedRequestLoggingConfig.isUpdating) {
-    cachedRequestLoggingConfig.isUpdating = true
-
-    // 异步更新配置，不阻塞当前请求
-    setImmediate(async () => {
-      try {
-        const enabled = await dynamicConfigManager.getConfig(
-          'requestLogging.enabled',
-          config.requestLogging?.enabled || false
-        )
-
-        cachedRequestLoggingConfig = {
-          enabled,
-          lastUpdate: Date.now(),
-          isUpdating: false
-        }
-
-        logger.debug(`📊 Request logging config updated: enabled=${enabled}`)
-      } catch (error) {
-        // 更新失败时保持当前缓存，重置更新标志
-        cachedRequestLoggingConfig.isUpdating = false
-        logger.debug('Failed to update request logging config, using cached value:', error.message)
-      }
-    })
-  }
-
-  // 返回当前缓存值（可能稍微过时，但保证零阻塞）
-  return cachedRequestLoggingConfig.enabled
-}
-
-// 监听动态配置变更事件，立即更新缓存
-dynamicConfigManager.on('configChanged', ({ key, value }) => {
-  if (key === 'requestLogging.enabled') {
-    cachedRequestLoggingConfig = {
-      enabled: value,
-      lastUpdate: Date.now(),
-      isUpdating: false
-    }
-    logger.info(`📊 Request logging config changed: enabled=${value}`)
-  }
-})
+const redis = require('../models/redis')
+// const { RateLimiterRedis } = require('rate-limiter-flexible') // 暂时未使用
+const ClientValidator = require('../validators/clientValidator')
 
 // 🔑 API Key验证中间件（优化版）
 const authenticateApiKey = async (req, res, next) => {
@@ -114,80 +49,70 @@ const authenticateApiKey = async (req, res, next) => {
       })
     }
 
-    // 🔒 检查客户端限制
+    // 🔒 检查客户端限制（使用新的验证器）
     if (
       validation.keyData.enableClientRestriction &&
       validation.keyData.allowedClients?.length > 0
     ) {
-      const userAgent = req.headers['user-agent'] || ''
-      const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
-
-      // 记录客户端限制检查开始
-      logger.api(
-        `🔍 Checking client restriction for key: ${validation.keyData.id} (${validation.keyData.name})`
+      // 使用新的 ClientValidator 进行验证
+      const validationResult = ClientValidator.validateRequest(
+        validation.keyData.allowedClients,
+        req
       )
-      logger.api(`   User-Agent: "${userAgent}"`)
-      logger.api(`   Allowed clients: ${validation.keyData.allowedClients.join(', ')}`)
 
-      let clientAllowed = false
-      let matchedClient = null
-
-      // 获取预定义客户端列表，如果配置不存在则使用默认值
-      const predefinedClients = config.clientRestrictions?.predefinedClients || []
-      const allowCustomClients = config.clientRestrictions?.allowCustomClients || false
-
-      // 遍历允许的客户端列表
-      for (const allowedClientId of validation.keyData.allowedClients) {
-        // 在预定义客户端列表中查找
-        const predefinedClient = predefinedClients.find((client) => client.id === allowedClientId)
-
-        if (predefinedClient) {
-          // 使用预定义的正则表达式匹配 User-Agent
-          if (
-            predefinedClient.userAgentPattern &&
-            predefinedClient.userAgentPattern.test(userAgent)
-          ) {
-            clientAllowed = true
-            matchedClient = predefinedClient.name
-            break
-          }
-        } else if (allowCustomClients) {
-          // 如果允许自定义客户端，这里可以添加自定义客户端的验证逻辑
-          // 目前暂时跳过自定义客户端
-          continue
-        }
-      }
-
-      if (!clientAllowed) {
+      if (!validationResult.allowed) {
+        const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
         logger.security(
-          `🚫 Client restriction failed for key: ${validation.keyData.id} (${validation.keyData.name}) from ${clientIP}, User-Agent: ${userAgent}`
+          `🚫 Client restriction failed for key: ${validation.keyData.id} (${validation.keyData.name}) from ${clientIP}`
         )
         return res.status(403).json({
           error: 'Client not allowed',
           message: 'Your client is not authorized to use this API key',
-          allowedClients: validation.keyData.allowedClients
+          allowedClients: validation.keyData.allowedClients,
+          userAgent: validationResult.userAgent
         })
       }
 
+      // 验证通过
       logger.api(
-        `✅ Client validated: ${matchedClient} for key: ${validation.keyData.id} (${validation.keyData.name})`
+        `✅ Client validated: ${validationResult.clientName} (${validationResult.matchedClient}) for key: ${validation.keyData.id} (${validation.keyData.name})`
       )
-      logger.api(`   Matched client: ${matchedClient} with User-Agent: "${userAgent}"`)
     }
 
     // 检查并发限制
     const concurrencyLimit = validation.keyData.concurrencyLimit || 0
     if (concurrencyLimit > 0) {
-      const currentConcurrency = await database.incrConcurrency(validation.keyData.id)
+      const concurrencyConfig = config.concurrency || {}
+      const leaseSeconds = Math.max(concurrencyConfig.leaseSeconds || 900, 30)
+      const rawRenewInterval =
+        typeof concurrencyConfig.renewIntervalSeconds === 'number'
+          ? concurrencyConfig.renewIntervalSeconds
+          : 60
+      let renewIntervalSeconds = rawRenewInterval
+      if (renewIntervalSeconds > 0) {
+        const maxSafeRenew = Math.max(leaseSeconds - 5, 15)
+        renewIntervalSeconds = Math.min(Math.max(renewIntervalSeconds, 15), maxSafeRenew)
+      } else {
+        renewIntervalSeconds = 0
+      }
+      const requestId = uuidv4()
+
+      const currentConcurrency = await redis.incrConcurrency(
+        validation.keyData.id,
+        requestId,
+        leaseSeconds
+      )
       logger.api(
         `📈 Incremented concurrency for key: ${validation.keyData.id} (${validation.keyData.name}), current: ${currentConcurrency}, limit: ${concurrencyLimit}`
       )
 
       if (currentConcurrency > concurrencyLimit) {
         // 如果超过限制，立即减少计数
-        await database.decrConcurrency(validation.keyData.id)
+        await redis.decrConcurrency(validation.keyData.id, requestId)
         logger.security(
-          `🚦 Concurrency limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name}), current: ${currentConcurrency - 1}, limit: ${concurrencyLimit}`
+          `🚦 Concurrency limit exceeded for key: ${validation.keyData.id} (${
+            validation.keyData.name
+          }), current: ${currentConcurrency - 1}, limit: ${concurrencyLimit}`
         )
         return res.status(429).json({
           error: 'Concurrency limit exceeded',
@@ -197,14 +122,39 @@ const authenticateApiKey = async (req, res, next) => {
         })
       }
 
+      const renewIntervalMs =
+        renewIntervalSeconds > 0 ? Math.max(renewIntervalSeconds * 1000, 15000) : 0
+
       // 使用标志位确保只减少一次
       let concurrencyDecremented = false
+      let leaseRenewInterval = null
+
+      if (renewIntervalMs > 0) {
+        leaseRenewInterval = setInterval(() => {
+          redis
+            .refreshConcurrencyLease(validation.keyData.id, requestId, leaseSeconds)
+            .catch((error) => {
+              logger.error(
+                `Failed to refresh concurrency lease for key ${validation.keyData.id}:`,
+                error
+              )
+            })
+        }, renewIntervalMs)
+
+        if (typeof leaseRenewInterval.unref === 'function') {
+          leaseRenewInterval.unref()
+        }
+      }
 
       const decrementConcurrency = async () => {
         if (!concurrencyDecremented) {
           concurrencyDecremented = true
+          if (leaseRenewInterval) {
+            clearInterval(leaseRenewInterval)
+            leaseRenewInterval = null
+          }
           try {
-            const newCount = await database.decrConcurrency(validation.keyData.id)
+            const newCount = await redis.decrConcurrency(validation.keyData.id, requestId)
             logger.api(
               `📉 Decremented concurrency for key: ${validation.keyData.id} (${validation.keyData.name}), new count: ${newCount}`
             )
@@ -243,6 +193,7 @@ const authenticateApiKey = async (req, res, next) => {
       req.concurrencyInfo = {
         apiKeyId: validation.keyData.id,
         apiKeyName: validation.keyData.name,
+        requestId,
         decrementConcurrency
       }
     }
@@ -250,77 +201,75 @@ const authenticateApiKey = async (req, res, next) => {
     // 检查时间窗口限流
     const rateLimitWindow = validation.keyData.rateLimitWindow || 0
     const rateLimitRequests = validation.keyData.rateLimitRequests || 0
+    const rateLimitCost = validation.keyData.rateLimitCost || 0 // 新增：费用限制
 
-    if (rateLimitWindow > 0 && (rateLimitRequests > 0 || validation.keyData.tokenLimit > 0)) {
+    // 兼容性检查：如果tokenLimit仍有值，使用tokenLimit；否则使用rateLimitCost
+    const hasRateLimits =
+      rateLimitWindow > 0 &&
+      (rateLimitRequests > 0 || validation.keyData.tokenLimit > 0 || rateLimitCost > 0)
+
+    if (hasRateLimits) {
       const windowStartKey = `rate_limit:window_start:${validation.keyData.id}`
       const requestCountKey = `rate_limit:requests:${validation.keyData.id}`
       const tokenCountKey = `rate_limit:tokens:${validation.keyData.id}`
+      const costCountKey = `rate_limit:cost:${validation.keyData.id}` // 新增：费用计数器
 
       const now = Date.now()
       const windowDuration = rateLimitWindow * 60 * 1000 // 转换为毫秒
 
-      // 获取数据库客户端，避免重复连接检查
-      const dbClient = database.getClient()
-      if (!dbClient) {
-        logger.warn('⚠️ database client not available for rate limiter')
-        // 如果数据库客户端不可用，跳过限流检查
-        logger.debug('Skipping rate limit check due to database unavailability')
+      // 获取窗口开始时间
+      let windowStart = await redis.getClient().get(windowStartKey)
+
+      if (!windowStart) {
+        // 第一次请求，设置窗口开始时间
+        await redis.getClient().set(windowStartKey, now, 'PX', windowDuration)
+        await redis.getClient().set(requestCountKey, 0, 'PX', windowDuration)
+        await redis.getClient().set(tokenCountKey, 0, 'PX', windowDuration)
+        await redis.getClient().set(costCountKey, 0, 'PX', windowDuration) // 新增：重置费用
+        windowStart = now
       } else {
-        // 获取窗口开始时间
-        let windowStart = await dbClient.get(windowStartKey)
+        windowStart = parseInt(windowStart)
 
-        if (!windowStart) {
-          // 第一次请求，设置窗口开始时间
-          // 使用原子操作确保所有键同时设置
-          const pipeline = dbClient.pipeline()
-          pipeline.set(windowStartKey, now, 'PX', windowDuration)
-          pipeline.set(requestCountKey, 0, 'PX', windowDuration)
-          pipeline.set(tokenCountKey, 0, 'PX', windowDuration)
-          await pipeline.exec()
+        // 检查窗口是否已过期
+        if (now - windowStart >= windowDuration) {
+          // 窗口已过期，重置
+          await redis.getClient().set(windowStartKey, now, 'PX', windowDuration)
+          await redis.getClient().set(requestCountKey, 0, 'PX', windowDuration)
+          await redis.getClient().set(tokenCountKey, 0, 'PX', windowDuration)
+          await redis.getClient().set(costCountKey, 0, 'PX', windowDuration) // 新增：重置费用
           windowStart = now
-          logger.debug(`🚀 Initialized rate limit window for API Key: ${validation.keyData.id}`)
-        } else {
-          windowStart = parseInt(windowStart)
-
-          // 检查窗口是否已过期
-          if (now - windowStart >= windowDuration) {
-            // 窗口已过期，重置所有键
-            const pipeline = dbClient.pipeline()
-            pipeline.set(windowStartKey, now, 'PX', windowDuration)
-            pipeline.set(requestCountKey, 0, 'PX', windowDuration)
-            pipeline.set(tokenCountKey, 0, 'PX', windowDuration)
-            await pipeline.exec()
-            windowStart = now
-            logger.debug(`🔄 Reset expired rate limit window for API Key: ${validation.keyData.id}`)
-          }
         }
+      }
 
-        // 获取当前计数
-        const currentRequests = parseInt((await dbClient.get(requestCountKey)) || '0')
-        const currentTokens = parseInt((await dbClient.get(tokenCountKey)) || '0')
+      // 获取当前计数
+      const currentRequests = parseInt((await redis.getClient().get(requestCountKey)) || '0')
+      const currentTokens = parseInt((await redis.getClient().get(tokenCountKey)) || '0')
+      const currentCost = parseFloat((await redis.getClient().get(costCountKey)) || '0') // 新增：当前费用
 
-        // 检查请求次数限制
-        if (rateLimitRequests > 0 && currentRequests >= rateLimitRequests) {
-          const resetTime = new Date(windowStart + windowDuration)
-          const remainingMinutes = Math.ceil((resetTime - now) / 60000)
+      // 检查请求次数限制
+      if (rateLimitRequests > 0 && currentRequests >= rateLimitRequests) {
+        const resetTime = new Date(windowStart + windowDuration)
+        const remainingMinutes = Math.ceil((resetTime - now) / 60000)
 
-          logger.security(
-            `🚦 Rate limit exceeded (requests) for key: ${validation.keyData.id} (${validation.keyData.name}), requests: ${currentRequests}/${rateLimitRequests}`
-          )
+        logger.security(
+          `🚦 Rate limit exceeded (requests) for key: ${validation.keyData.id} (${validation.keyData.name}), requests: ${currentRequests}/${rateLimitRequests}`
+        )
 
-          return res.status(429).json({
-            error: 'Rate limit exceeded',
-            message: `已达到请求次数限制 (${rateLimitRequests} 次)，将在 ${remainingMinutes} 分钟后重置`,
-            currentRequests,
-            requestLimit: rateLimitRequests,
-            resetAt: resetTime.toISOString(),
-            remainingMinutes
-          })
-        }
+        return res.status(429).json({
+          error: 'Rate limit exceeded',
+          message: `已达到请求次数限制 (${rateLimitRequests} 次)，将在 ${remainingMinutes} 分钟后重置`,
+          currentRequests,
+          requestLimit: rateLimitRequests,
+          resetAt: resetTime.toISOString(),
+          remainingMinutes
+        })
+      }
 
-        // 检查Token使用量限制
-        const tokenLimit = parseInt(validation.keyData.tokenLimit)
-        if (tokenLimit > 0 && currentTokens >= tokenLimit) {
+      // 兼容性检查：优先使用Token限制（历史数据），否则使用费用限制
+      const tokenLimit = parseInt(validation.keyData.tokenLimit)
+      if (tokenLimit > 0) {
+        // 使用Token限制（向后兼容）
+        if (currentTokens >= tokenLimit) {
           const resetTime = new Date(windowStart + windowDuration)
           const remainingMinutes = Math.ceil((resetTime - now) / 60000)
 
@@ -337,59 +286,146 @@ const authenticateApiKey = async (req, res, next) => {
             remainingMinutes
           })
         }
+      } else if (rateLimitCost > 0) {
+        // 使用费用限制（新功能）
+        if (currentCost >= rateLimitCost) {
+          const resetTime = new Date(windowStart + windowDuration)
+          const remainingMinutes = Math.ceil((resetTime - now) / 60000)
 
-        // 增加请求计数
-        await dbClient.incr(requestCountKey)
+          logger.security(
+            `💰 Rate limit exceeded (cost) for key: ${validation.keyData.id} (${
+              validation.keyData.name
+            }), cost: $${currentCost.toFixed(2)}/$${rateLimitCost}`
+          )
 
-        // 存储限流信息到请求对象
-        req.rateLimitInfo = {
-          windowStart,
-          windowDuration,
-          requestCountKey,
-          tokenCountKey,
-          currentRequests: currentRequests + 1,
-          currentTokens,
-          rateLimitRequests,
-          tokenLimit
+          return res.status(429).json({
+            error: 'Rate limit exceeded',
+            message: `已达到费用限制 ($${rateLimitCost})，将在 ${remainingMinutes} 分钟后重置`,
+            currentCost,
+            costLimit: rateLimitCost,
+            resetAt: resetTime.toISOString(),
+            remainingMinutes
+          })
         }
+      }
+
+      // 增加请求计数
+      await redis.getClient().incr(requestCountKey)
+
+      // 存储限流信息到请求对象
+      req.rateLimitInfo = {
+        windowStart,
+        windowDuration,
+        requestCountKey,
+        tokenCountKey,
+        costCountKey, // 新增：费用计数器
+        currentRequests: currentRequests + 1,
+        currentTokens,
+        currentCost, // 新增：当前费用
+        rateLimitRequests,
+        tokenLimit,
+        rateLimitCost // 新增：费用限制
       }
     }
 
-    // 🔧 增强费用限制检查（向下兼容 + 多时间周期支持）
-    const costCheckResult = await costLimitService.checkCostLimits(
-      validation.keyData.id,
-      validation.keyData
-    )
+    // 检查每日费用限制
+    const dailyCostLimit = validation.keyData.dailyCostLimit || 0
+    if (dailyCostLimit > 0) {
+      const dailyCost = validation.keyData.dailyCost || 0
 
-    // 处理费用限制违规
-    if (!costCheckResult.allowed) {
-      const violationResponse = costLimitService.formatViolationResponse(costCheckResult.violations)
+      if (dailyCost >= dailyCostLimit) {
+        logger.security(
+          `💰 Daily cost limit exceeded for key: ${validation.keyData.id} (${
+            validation.keyData.name
+          }), cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
+        )
 
-      logger.security(
-        `💰 Cost limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name}), violations: ${costCheckResult.violations.length}, check time: ${costCheckResult.checkDuration || 0}ms`
+        return res.status(429).json({
+          error: 'Daily cost limit exceeded',
+          message: `已达到每日费用限制 ($${dailyCostLimit})`,
+          currentCost: dailyCost,
+          costLimit: dailyCostLimit,
+          resetAt: new Date(new Date().setHours(24, 0, 0, 0)).toISOString() // 明天0点重置
+        })
+      }
+
+      // 记录当前费用使用情况
+      logger.api(
+        `💰 Cost usage for key: ${validation.keyData.id} (${
+          validation.keyData.name
+        }), current: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
       )
-
-      return res.status(429).json(violationResponse)
     }
 
-    // 处理费用使用预警
-    if (costCheckResult.warnings && costCheckResult.warnings.length > 0) {
-      const formattedWarnings = costLimitService.formatWarnings(costCheckResult.warnings)
+    // 检查总费用限制
+    const totalCostLimit = validation.keyData.totalCostLimit || 0
+    if (totalCostLimit > 0) {
+      const totalCost = validation.keyData.totalCost || 0
 
-      logger.warn(
-        `💰 Cost usage warning for key: ${validation.keyData.id} (${validation.keyData.name}), warnings: ${costCheckResult.warnings.length}`
+      if (totalCost >= totalCostLimit) {
+        logger.security(
+          `💰 Total cost limit exceeded for key: ${validation.keyData.id} (${
+            validation.keyData.name
+          }), cost: $${totalCost.toFixed(2)}/$${totalCostLimit}`
+        )
+
+        return res.status(429).json({
+          error: 'Total cost limit exceeded',
+          message: `已达到总费用限制 ($${totalCostLimit})`,
+          currentCost: totalCost,
+          costLimit: totalCostLimit
+        })
+      }
+
+      logger.api(
+        `💰 Total cost usage for key: ${validation.keyData.id} (${
+          validation.keyData.name
+        }), current: $${totalCost.toFixed(2)}/$${totalCostLimit}`
       )
-
-      // 将预警信息添加到请求对象，供后续中间件或路由使用
-      req.costWarnings = formattedWarnings
     }
 
-    // 记录费用限制检查通过（debug 级别，避免过多日志）
-    if (costCheckResult.checkDuration > 50) {
-      // 只在检查时间较长时记录，用于性能监控
-      logger.debug(
-        `💰 Cost limits check completed for key: ${validation.keyData.id} (${validation.keyData.name}), time: ${costCheckResult.checkDuration}ms`
-      )
+    // 检查 Opus 周费用限制（仅对 Opus 模型生效）
+    const weeklyOpusCostLimit = validation.keyData.weeklyOpusCostLimit || 0
+    if (weeklyOpusCostLimit > 0) {
+      // 从请求中获取模型信息
+      const requestBody = req.body || {}
+      const model = requestBody.model || ''
+
+      // 判断是否为 Opus 模型
+      if (model && model.toLowerCase().includes('claude-opus')) {
+        const weeklyOpusCost = validation.keyData.weeklyOpusCost || 0
+
+        if (weeklyOpusCost >= weeklyOpusCostLimit) {
+          logger.security(
+            `💰 Weekly Opus cost limit exceeded for key: ${validation.keyData.id} (${
+              validation.keyData.name
+            }), cost: $${weeklyOpusCost.toFixed(2)}/$${weeklyOpusCostLimit}`
+          )
+
+          // 计算下周一的重置时间
+          const now = new Date()
+          const dayOfWeek = now.getDay()
+          const daysUntilMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek) % 7 || 7
+          const resetDate = new Date(now)
+          resetDate.setDate(now.getDate() + daysUntilMonday)
+          resetDate.setHours(0, 0, 0, 0)
+
+          return res.status(429).json({
+            error: 'Weekly Opus cost limit exceeded',
+            message: `已达到 Opus 模型周费用限制 ($${weeklyOpusCostLimit})`,
+            currentCost: weeklyOpusCost,
+            costLimit: weeklyOpusCostLimit,
+            resetAt: resetDate.toISOString() // 下周一重置
+          })
+        }
+
+        // 记录当前 Opus 费用使用情况
+        logger.api(
+          `💰 Opus weekly cost usage for key: ${validation.keyData.id} (${
+            validation.keyData.name
+          }), current: $${weeklyOpusCost.toFixed(2)}/$${weeklyOpusCostLimit}`
+        )
+      }
     }
 
     // 将验证信息添加到请求对象（只包含必要信息）
@@ -406,24 +442,15 @@ const authenticateApiKey = async (req, res, next) => {
       concurrencyLimit: validation.keyData.concurrencyLimit,
       rateLimitWindow: validation.keyData.rateLimitWindow,
       rateLimitRequests: validation.keyData.rateLimitRequests,
+      rateLimitCost: validation.keyData.rateLimitCost, // 新增：费用限制
       enableModelRestriction: validation.keyData.enableModelRestriction,
       restrictedModels: validation.keyData.restrictedModels,
       enableClientRestriction: validation.keyData.enableClientRestriction,
       allowedClients: validation.keyData.allowedClients,
-
-      // 🔧 增强费用限制支持（向下兼容 + 扩展支持）
-      dailyCostLimit: validation.keyData.dailyCostLimit, // 向下兼容
-      dailyCost: validation.keyData.dailyCost, // 向下兼容
-
-      // 扩展费用限制字段（可选）
-      weeklyCostLimit: validation.keyData.weeklyCostLimit || 0,
-      monthlyCostLimit: validation.keyData.monthlyCostLimit || 0,
-      totalCostLimit: validation.keyData.totalCostLimit || 0,
-
-      // 费用限制检查结果
-      costLimits: costCheckResult.limits || {},
-      currentCosts: costCheckResult.currentCosts || {},
-
+      dailyCostLimit: validation.keyData.dailyCostLimit,
+      dailyCost: validation.keyData.dailyCost,
+      totalCostLimit: validation.keyData.totalCostLimit,
+      totalCost: validation.keyData.totalCost,
       usage: validation.keyData.usage
     }
     req.usage = validation.keyData.usage
@@ -483,7 +510,7 @@ const authenticateAdmin = async (req, res, next) => {
 
     // 获取管理员会话（带超时处理）
     const adminSession = await Promise.race([
-      database.getSession(token),
+      redis.getSession(token),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Session lookup timeout')), 5000)
       )
@@ -497,52 +524,36 @@ const authenticateAdmin = async (req, res, next) => {
       })
     }
 
-    // 🎯 智能会话活跃性检查
+    // 检查会话活跃性（可选：检查最后活动时间）
     const now = new Date()
     const lastActivity = new Date(adminSession.lastActivity || adminSession.loginTime)
     const inactiveDuration = now - lastActivity
     const maxInactivity = 24 * 60 * 60 * 1000 // 24小时
 
-    // 增加会话活跃度阈值检查
-    const sessionAge = now - new Date(adminSession.loginTime)
-    const isLongSession = sessionAge > 2 * 60 * 60 * 1000 // 超过2小时的长会话
-
     if (inactiveDuration > maxInactivity) {
       logger.security(
-        `🔒 Expired admin session for ${adminSession.username} from ${req.ip || 'unknown'} (inactive: ${Math.floor(inactiveDuration / 60000)}min)`
+        `🔒 Expired admin session for ${adminSession.username} from ${req.ip || 'unknown'}`
       )
-      await database.deleteSession(token) // 清理过期会话
+      await redis.deleteSession(token) // 清理过期会话
       return res.status(401).json({
         error: 'Session expired',
         message: 'Admin session has expired due to inactivity'
       })
     }
 
-    // 对于长期活跃会话给出警告（可能存在异常轮询）
-    if (isLongSession && inactiveDuration < 60 * 1000) {
-      logger.debug(
-        `⚠️ Highly active long session detected: ${adminSession.username} (${Math.floor(sessionAge / 60000)}min old, last activity: ${Math.floor(inactiveDuration / 1000)}s ago)`
+    // 更新最后活动时间（异步，不阻塞请求）
+    redis
+      .setSession(
+        token,
+        {
+          ...adminSession,
+          lastActivity: now.toISOString()
+        },
+        86400
       )
-    }
-
-    // 🎯 智能会话更新：减少频繁更新，仅在必要时执行
-    const timeSinceLastUpdate = inactiveDuration // 重用已计算的非活跃时长
-
-    // 只在超过5分钟未更新时才更新会话（减少Redis写入压力）
-    if (timeSinceLastUpdate > 5 * 60 * 1000) {
-      database
-        .setSession(
-          token,
-          {
-            ...adminSession,
-            lastActivity: now.toISOString()
-          },
-          86400
-        )
-        .catch((error) => {
-          logger.debug('Failed to update admin session activity:', error.message)
-        })
-    }
+      .catch((error) => {
+        logger.error('Failed to update admin session activity:', error)
+      })
 
     // 设置管理员信息（只包含必要信息）
     req.admin = {
@@ -553,15 +564,7 @@ const authenticateAdmin = async (req, res, next) => {
     }
 
     const authDuration = Date.now() - startTime
-
-    // 🎯 智能日志记录：减少频繁认证日志，仅在必要时记录
-    if (timeSinceLastUpdate > 5 * 60 * 1000 || authDuration > 100) {
-      // 只在会话更新或认证较慢时记录安全日志
-      logger.security(`🔐 Admin authenticated: ${adminSession.username} in ${authDuration}ms`)
-    } else {
-      // 常规快速认证只记录debug级别
-      logger.debug(`🔐 Admin auth (cached): ${adminSession.username} in ${authDuration}ms`)
-    }
+    logger.security(`🔐 Admin authenticated: ${adminSession.username} in ${authDuration}ms`)
 
     return next()
   } catch (error) {
@@ -580,29 +583,28 @@ const authenticateAdmin = async (req, res, next) => {
   }
 }
 
-// 🔐 用户会话认证中间件
-const authenticateUserSession = async (req, res, next) => {
+// 👤 用户验证中间件
+const authenticateUser = async (req, res, next) => {
   const startTime = Date.now()
 
   try {
-    // 提取会话令牌，支持多种方式
-    const sessionToken = extractSessionToken(req)
+    // 安全提取用户session token，支持多种方式
+    const sessionToken =
+      req.headers['authorization']?.replace(/^Bearer\s+/i, '') ||
+      req.cookies?.userToken ||
+      req.headers['x-user-token']
 
     if (!sessionToken) {
-      logger.security(`🔒 Missing session token attempt from ${req.ip || 'unknown'}`)
+      logger.security(`🔒 Missing user session token attempt from ${req.ip || 'unknown'}`)
       return res.status(401).json({
-        error: 'Missing session token',
-        message: 'Please provide a valid session token'
+        error: 'Missing user session token',
+        message: 'Please login to access this resource'
       })
     }
 
-    // 基本令牌格式验证
-    if (
-      typeof sessionToken !== 'string' ||
-      sessionToken.length < 32 ||
-      sessionToken.length > 1024
-    ) {
-      logger.security(`🔒 Invalid session token format from ${req.ip || 'unknown'}`)
+    // 基本token格式验证
+    if (typeof sessionToken !== 'string' || sessionToken.length < 32 || sessionToken.length > 128) {
+      logger.security(`🔒 Invalid user session token format from ${req.ip || 'unknown'}`)
       return res.status(401).json({
         error: 'Invalid session token format',
         message: 'Session token format is invalid'
@@ -610,58 +612,50 @@ const authenticateUserSession = async (req, res, next) => {
     }
 
     // 验证用户会话
-    const sessionData = await userService.validateUserSession(sessionToken)
+    const sessionValidation = await userService.validateUserSession(sessionToken)
 
-    if (!sessionData || !sessionData.valid) {
-      const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
-      logger.security(`🔒 Invalid user session attempt from ${clientIP}`)
+    if (!sessionValidation) {
+      logger.security(`🔒 Invalid user session token attempt from ${req.ip || 'unknown'}`)
       return res.status(401).json({
-        error: 'Invalid session',
-        message: 'Session expired or invalid'
+        error: 'Invalid session token',
+        message: 'Invalid or expired user session'
       })
     }
 
-    // 获取用户详细信息
-    const userInfo = await userService.getUserById(sessionData.userId)
-    if (!userInfo) {
-      logger.security(`🔒 User not found for session: ${sessionData.userId}`)
-      return res.status(401).json({
-        error: 'User not found',
-        message: 'Associated user account not found'
+    const { session, user } = sessionValidation
+
+    // 检查用户是否被禁用
+    if (!user.isActive) {
+      logger.security(
+        `🔒 Disabled user login attempt: ${user.username} from ${req.ip || 'unknown'}`
+      )
+      return res.status(403).json({
+        error: 'Account disabled',
+        message: 'Your account has been disabled. Please contact administrator.'
       })
     }
 
-    // 设置用户上下文到请求对象
+    // 设置用户信息（只包含必要信息）
     req.user = {
-      id: userInfo.id,
-      username: userInfo.username,
-      email: userInfo.email,
-      fullName: userInfo.fullName,
-      role: userInfo.role,
-      status: userInfo.status,
-      authMethod: userInfo.authMethod,
-      groups: userInfo.groups || []
-    }
-    req.session = {
-      sessionId: sessionData.sessionId,
-      userId: sessionData.userId,
-      token: sessionToken
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: user.displayName,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      sessionToken,
+      sessionCreatedAt: session.createdAt
     }
 
     const authDuration = Date.now() - startTime
-    const userAgent = req.headers['user-agent'] || 'No User-Agent'
-
-    logger.security(
-      `🔐 User session authenticated: ${userInfo.username} (${userInfo.id}) in ${authDuration}ms`
-    )
-    logger.api(`   User-Agent: "${userAgent}"`)
+    logger.info(`👤 User authenticated: ${user.username} (${user.id}) in ${authDuration}ms`)
 
     return next()
   } catch (error) {
     const authDuration = Date.now() - startTime
-    logger.error(`❌ User session authentication error (${authDuration}ms):`, {
+    logger.error(`❌ User authentication error (${authDuration}ms):`, {
       error: error.message,
-      stack: error.stack,
       ip: req.ip,
       userAgent: req.get('User-Agent'),
       url: req.originalUrl
@@ -669,62 +663,90 @@ const authenticateUserSession = async (req, res, next) => {
 
     return res.status(500).json({
       error: 'Authentication error',
-      message: 'Internal server error during authentication'
+      message: 'Internal server error during user authentication'
     })
   }
 }
 
-// 🔄 智能双重认证模式（增强版，API Key优先，智能回退）
-const authenticateDual = async (req, res, next) => {
+// 👤 用户或管理员验证中间件（支持两种身份）
+const authenticateUserOrAdmin = async (req, res, next) => {
   const startTime = Date.now()
 
   try {
-    // 使用增强的认证类型检测
-    const authInfo = detectAuthenticationType(req)
+    // 检查是否有管理员token
+    const adminToken =
+      req.headers['authorization']?.replace(/^Bearer\s+/i, '') ||
+      req.cookies?.adminToken ||
+      req.headers['x-admin-token']
 
-    logger.debug(
-      `🔍 Smart authentication detection: ${authInfo.authType} (confidence: ${authInfo.confidence}%, sources: ${authInfo.detectedSources.join(', ')})`
-    )
+    // 检查是否有用户session token
+    const userToken =
+      req.headers['x-user-token'] ||
+      req.cookies?.userToken ||
+      (!adminToken ? req.headers['authorization']?.replace(/^Bearer\s+/i, '') : null)
 
-    // 优先使用API Key认证（最高优先级）
-    if (authInfo.hasApiKey) {
-      logger.debug(
-        `🔑 Using API Key authentication (sources: ${authInfo.detectedSources.filter((s) => s.includes('key')).join(', ')})`
-      )
-      return authenticateApiKey(req, res, next)
+    // 优先尝试管理员认证
+    if (adminToken) {
+      try {
+        const adminSession = await redis.getSession(adminToken)
+        if (adminSession && Object.keys(adminSession).length > 0) {
+          req.admin = {
+            id: adminSession.adminId || 'admin',
+            username: adminSession.username,
+            sessionId: adminToken,
+            loginTime: adminSession.loginTime
+          }
+          req.userType = 'admin'
+
+          const authDuration = Date.now() - startTime
+          logger.security(`🔐 Admin authenticated: ${adminSession.username} in ${authDuration}ms`)
+          return next()
+        }
+      } catch (error) {
+        logger.debug('Admin authentication failed, trying user authentication:', error.message)
+      }
     }
 
-    // 回退到用户会话认证
-    if (authInfo.hasSessionToken) {
-      logger.debug(
-        `🎫 Using User Session authentication (sources: ${authInfo.detectedSources.filter((s) => s.includes('session') || s.includes('bearer')).join(', ')})`
-      )
-      return authenticateUserSession(req, res, next)
+    // 尝试用户认证
+    if (userToken) {
+      try {
+        const sessionValidation = await userService.validateUserSession(userToken)
+        if (sessionValidation) {
+          const { session, user } = sessionValidation
+
+          if (user.isActive) {
+            req.user = {
+              id: user.id,
+              username: user.username,
+              email: user.email,
+              displayName: user.displayName,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              role: user.role,
+              sessionToken: userToken,
+              sessionCreatedAt: session.createdAt
+            }
+            req.userType = 'user'
+
+            const authDuration = Date.now() - startTime
+            logger.info(`👤 User authenticated: ${user.username} (${user.id}) in ${authDuration}ms`)
+            return next()
+          }
+        }
+      } catch (error) {
+        logger.debug('User authentication failed:', error.message)
+      }
     }
 
-    // 管理员会话认证（如果没有其他认证方式）
-    if (authInfo.hasAdminToken) {
-      logger.debug(
-        `👑 Using Admin Session authentication (sources: ${authInfo.detectedSources.filter((s) => s.includes('admin')).join(', ')})`
-      )
-      return authenticateAdmin(req, res, next)
-    }
-
-    // 没有提供任何认证方式
-    logger.security(`🔒 No authentication provided from ${req.ip || 'unknown'}`)
+    // 如果都失败了，返回未授权
+    logger.security(`🔒 Authentication failed from ${req.ip || 'unknown'}`)
     return res.status(401).json({
       error: 'Authentication required',
-      message: 'Please provide API key, session token, or admin token',
-      supportedMethods: [
-        'API Key (x-api-key, x-goog-api-key, api-key headers, or Authorization Bearer cr_*)',
-        'Session Token (Authorization Bearer, x-session-token header, or sessionToken cookie)',
-        'Admin Token (x-admin-token header or adminToken cookie)'
-      ],
-      detectedSources: authInfo.detectedSources.length > 0 ? authInfo.detectedSources : undefined
+      message: 'Please login as user or admin to access this resource'
     })
   } catch (error) {
     const authDuration = Date.now() - startTime
-    logger.error(`❌ Smart dual authentication error (${authDuration}ms):`, {
+    logger.error(`❌ User/Admin authentication error (${authDuration}ms):`, {
       error: error.message,
       ip: req.ip,
       userAgent: req.get('User-Agent'),
@@ -738,155 +760,61 @@ const authenticateDual = async (req, res, next) => {
   }
 }
 
-// 🔍 会话令牌提取工具函数
-const extractSessionToken = (req) => {
-  // 从Authorization header提取Bearer token（排除API Key格式）
-  const authHeader = req.headers['authorization']
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.replace(/^Bearer\s+/i, '')
-    // 确保不是API Key格式（cr_前缀）
-    if (!token.startsWith('cr_')) {
-      return token
-    }
+// 🛡️ 权限检查中间件
+const requireRole = (allowedRoles) => (req, res, next) => {
+  // 管理员始终有权限
+  if (req.admin) {
+    return next()
   }
 
-  // 从专用session token header提取
-  const sessionHeader = req.headers['x-session-token']
-  if (sessionHeader) {
-    return sessionHeader
-  }
+  // 检查用户角色
+  if (req.user) {
+    const userRole = req.user.role
+    const allowed = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]
 
-  // 从Cookie提取
-  const cookieToken = req.cookies?.sessionToken
-  if (cookieToken) {
-    return cookieToken
-  }
-
-  // 从查询参数提取（开发调试使用，生产环境应禁用）
-  if (process.env.NODE_ENV === 'development') {
-    const queryToken = req.query.session_token
-    if (queryToken) {
-      return queryToken
-    }
-  }
-
-  return null
-}
-
-// 🕵️ 智能认证类型检测工具函数（增强版）
-const detectAuthenticationType = (req) => {
-  const authInfo = {
-    hasApiKey: false,
-    hasSessionToken: false,
-    hasAdminToken: false,
-    authType: 'none',
-    detectedSources: [],
-    confidence: 0
-  }
-
-  // 检测API Key的多种来源
-  const apiKeySources = [
-    { name: 'x-api-key', value: req.headers['x-api-key'] },
-    { name: 'x-goog-api-key', value: req.headers['x-goog-api-key'] },
-    { name: 'api-key', value: req.headers['api-key'] },
-    { name: 'query-key', value: req.query.key }
-  ]
-
-  // 特殊处理Authorization Bearer（需要区分API Key和Session Token）
-  const authHeader = req.headers['authorization']
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.replace(/^Bearer\s+/i, '')
-
-    if (token.startsWith('cr_')) {
-      // Claude Relay API Key格式
-      apiKeySources.push({ name: 'bearer-api-key', value: token })
-    } else if (token.length >= 64 && token.match(/^[a-zA-Z0-9+/=._-]+$/)) {
-      // JWT Session Token格式特征
-      authInfo.hasSessionToken = true
-      authInfo.detectedSources.push('authorization-bearer-jwt')
+    if (allowed.includes(userRole)) {
+      return next()
     } else {
-      // 其他Bearer token格式
-      authInfo.hasSessionToken = true
-      authInfo.detectedSources.push('authorization-bearer-other')
+      logger.security(
+        `🚫 Access denied for user ${req.user.username} (role: ${userRole}) to ${req.originalUrl}`
+      )
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        message: `This resource requires one of the following roles: ${allowed.join(', ')}`
+      })
     }
   }
 
-  // 检查API Key来源
-  for (const source of apiKeySources) {
-    if (source.value && typeof source.value === 'string' && source.value.length > 8) {
-      authInfo.hasApiKey = true
-      authInfo.detectedSources.push(source.name)
-    }
-  }
-
-  // 检测Session Token的其他来源
-  const sessionSources = [
-    { name: 'x-session-token', value: req.headers['x-session-token'] },
-    { name: 'cookie-session', value: req.cookies?.sessionToken }
-  ]
-
-  // 开发环境支持查询参数
-  if (process.env.NODE_ENV === 'development') {
-    sessionSources.push({ name: 'query-session', value: req.query.session_token })
-  }
-
-  for (const source of sessionSources) {
-    if (source.value && typeof source.value === 'string' && source.value.length > 16) {
-      authInfo.hasSessionToken = true
-      authInfo.detectedSources.push(source.name)
-    }
-  }
-
-  // 检测管理员Token
-  const adminSources = [
-    { name: 'x-admin-token', value: req.headers['x-admin-token'] },
-    { name: 'cookie-admin', value: req.cookies?.adminToken }
-  ]
-
-  for (const source of adminSources) {
-    if (source.value && typeof source.value === 'string' && source.value.length > 32) {
-      authInfo.hasAdminToken = true
-      authInfo.detectedSources.push(source.name)
-    }
-  }
-
-  // 确定主要认证类型和置信度
-  if (authInfo.hasApiKey) {
-    authInfo.authType = 'api_key'
-    authInfo.confidence = authInfo.detectedSources.filter((s) => s.includes('key')).length * 30
-  } else if (authInfo.hasAdminToken) {
-    authInfo.authType = 'admin_session'
-    authInfo.confidence = authInfo.detectedSources.filter((s) => s.includes('admin')).length * 40
-  } else if (authInfo.hasSessionToken) {
-    authInfo.authType = 'user_session'
-    authInfo.confidence =
-      authInfo.detectedSources.filter((s) => s.includes('session') || s.includes('bearer')).length *
-      25
-  }
-
-  // 提高多源检测的置信度
-  if (authInfo.detectedSources.length > 1) {
-    authInfo.confidence += 10
-  }
-
-  return authInfo
+  return res.status(401).json({
+    error: 'Authentication required',
+    message: 'Please login to access this resource'
+  })
 }
 
-// 🕵️ 认证类型检测工具函数（保持向后兼容）
-const detectAuthType = (req) => {
-  const enhanced = detectAuthenticationType(req)
-  return {
-    hasApiKey: enhanced.hasApiKey,
-    hasSessionToken: enhanced.hasSessionToken,
-    authType: enhanced.authType
+// 🔒 管理员权限检查中间件
+const requireAdmin = (req, res, next) => {
+  if (req.admin) {
+    return next()
   }
+
+  // 检查是否是admin角色的用户
+  if (req.user && req.user.role === 'admin') {
+    return next()
+  }
+
+  logger.security(
+    `🚫 Admin access denied for ${req.user?.username || 'unknown'} from ${req.ip || 'unknown'}`
+  )
+  return res.status(403).json({
+    error: 'Admin access required',
+    message: 'This resource requires administrator privileges'
+  })
 }
 
 // 注意：使用统计现在直接在/api/v1/messages路由中处理，
 // 以便从Claude API响应中提取真实的usage数据
-// 动态配置支持：请求日志记录现在支持实时配置变更
 
-// 🚦 CORS中间件（优化版）
+// 🚦 CORS中间件（优化版，支持Chrome插件）
 const corsMiddleware = (req, res, next) => {
   const { origin } = req.headers
 
@@ -898,8 +826,11 @@ const corsMiddleware = (req, res, next) => {
     'https://127.0.0.1:3000'
   ]
 
+  // 🆕 检查是否为Chrome插件请求
+  const isChromeExtension = origin && origin.startsWith('chrome-extension://')
+
   // 设置CORS头
-  if (allowedOrigins.includes(origin) || !origin) {
+  if (allowedOrigins.includes(origin) || !origin || isChromeExtension) {
     res.header('Access-Control-Allow-Origin', origin || '*')
   }
 
@@ -913,10 +844,10 @@ const corsMiddleware = (req, res, next) => {
       'Accept',
       'Authorization',
       'x-api-key',
-      'x-goog-api-key',
       'api-key',
       'x-admin-token',
-      'x-session-token'
+      'anthropic-version',
+      'anthropic-dangerous-direct-browser-access'
     ].join(', ')
   )
 
@@ -932,7 +863,7 @@ const corsMiddleware = (req, res, next) => {
   }
 }
 
-// 📝 请求日志中间件（集成高性能日志记录功能）
+// 📝 请求日志中间件（优化版）
 const requestLogger = (req, res, next) => {
   const start = Date.now()
   const requestId = Math.random().toString(36).substring(2, 15)
@@ -946,41 +877,17 @@ const requestLogger = (req, res, next) => {
   const userAgent = req.get('User-Agent') || 'unknown'
   const referer = req.get('Referer') || 'none'
 
-  // 🎯 轻量级数据收集 - 创建日志上下文（< 0.1ms）
-  req._logContext = {
-    requestId,
-    startTime: start,
-    method: req.method,
-    url: req.originalUrl,
-    ip: clientIP,
-    userAgent,
-    referer
-  }
-
-  // 🎯 智能请求日志记录：减少频繁的管理界面请求日志
-  const isHealthCheck = req.originalUrl === '/health'
-  const isAdminAuth = req.originalUrl.includes('/admin/') || req.originalUrl.includes('/web/auth/')
-  const isFrequentCall = isAdminAuth && req.method === 'GET'
-
-  if (!isHealthCheck && !isFrequentCall) {
+  // 记录请求开始
+  if (req.originalUrl !== '/health') {
+    // 避免健康检查日志过多
     logger.info(`▶️ [${requestId}] ${req.method} ${req.originalUrl} | IP: ${clientIP}`)
-  } else if (isFrequentCall) {
-    logger.debug(`▶️ [${requestId}] ${req.method} ${req.originalUrl} | IP: ${clientIP}`)
   }
 
-  // 🚀 优化事件监听器 - 避免重复创建，使用单一监听器处理多种需求
-  let eventHandled = false
-
-  const handleRequestComplete = () => {
-    if (eventHandled) {
-      return
-    }
-    eventHandled = true
-
+  res.on('finish', () => {
     const duration = Date.now() - start
     const contentLength = res.get('Content-Length') || '0'
 
-    // 构建完整日志元数据
+    // 构建日志元数据
     const logMetadata = {
       requestId,
       method: req.method,
@@ -993,7 +900,7 @@ const requestLogger = (req, res, next) => {
       referer
     }
 
-    // 标准 Winston 日志记录（保持现有功能）
+    // 根据状态码选择日志级别
     if (res.statusCode >= 500) {
       logger.error(
         `◀️ [${requestId}] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${duration}ms | ${contentLength}B`,
@@ -1004,14 +911,8 @@ const requestLogger = (req, res, next) => {
         `◀️ [${requestId}] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${duration}ms | ${contentLength}B`,
         logMetadata
       )
-    } else if (!isHealthCheck && !isFrequentCall) {
-      // 只记录非健康检查和非频繁管理请求的成功响应
+    } else if (req.originalUrl !== '/health') {
       logger.request(req.method, req.originalUrl, res.statusCode, duration, logMetadata)
-    } else if (isFrequentCall && duration > 100) {
-      // 频繁请求只在响应时间较长时记录
-      logger.debug(
-        `◀️ [${requestId}] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${duration}ms (slow admin)`
-      )
     }
 
     // API Key相关日志
@@ -1021,96 +922,14 @@ const requestLogger = (req, res, next) => {
       )
     }
 
-    // 用户会话相关日志
-    if (req.user && req.session) {
-      logger.api(
-        `👤 [${requestId}] Request from user ${req.user.username} (${req.user.id}) | ${duration}ms`
-      )
-    }
-
     // 慢请求警告
     if (duration > 5000) {
       logger.warn(
         `🐌 [${requestId}] Slow request detected: ${duration}ms for ${req.method} ${req.originalUrl}`
       )
     }
+  })
 
-    // 🚀 高性能日志记录集成 - 异步非阻塞处理（支持动态配置）
-    if (isRequestLoggingEnabled() && req.apiKey) {
-      // 使用 setImmediate 确保完全异步，零阻塞主请求流程
-      setImmediate(async () => {
-        try {
-          // 确定请求类型用于智能采样
-          let requestType = 'normal'
-          if (res.statusCode >= 400) {
-            requestType = 'error'
-          } else if (duration >= 5000) {
-            // 默认5秒为慢请求阈值
-            requestType = 'slow'
-          }
-
-          // 🎯 关键修复：添加采样器决策检查
-          logger.info(`🔍 REQUEST LOGGING STATUS CHECK - Using UnifiedLogService`)
-
-          // 🔧 使用统一日志服务记录请求（中间件级别）
-          try {
-            const unifiedLogService = await unifiedLogServiceFactory.getSingleton()
-
-            const logData = {
-              // 从现有上下文复用数据
-              requestId: req._logContext.requestId,
-              method: req._logContext.method,
-              path: req._logContext.url,
-              statusCode: res.statusCode,
-              responseTime: duration,
-              userAgent: req._logContext.userAgent,
-              ipAddress: req._logContext.ip,
-
-              // API Key 信息
-              keyId: req.apiKey.id,
-              keyName: req.apiKey.name,
-
-              // 请求类型（用于分析）
-              requestType,
-
-              // 可选的模型和token信息（如果存在）
-              model: req.body?.model || '',
-              tokens: req._tokenUsage?.total || 0,
-              inputTokens: req._tokenUsage?.input || 0,
-              outputTokens: req._tokenUsage?.output || 0,
-
-              // 错误信息
-              error: res.statusCode >= 400 ? `HTTP ${res.statusCode}` : null,
-
-              // 请求和响应数据
-              requestHeaders: req.headers,
-              responseHeaders: res.getHeaders(),
-              requestBody: req.body,
-              timestamp: Date.now()
-            }
-
-            await unifiedLogService.logRequest(req.apiKey.id, logData)
-            logger.debug(
-              `📊 Request logged with UnifiedLogService: ${req.method} ${req.originalUrl} - ${duration}ms`
-            )
-          } catch (unifiedLogError) {
-            logger.warn(
-              `⚠️ UnifiedLogService middleware logging failed: ${unifiedLogError.message}`
-            )
-          }
-        } catch (logError) {
-          // 静默处理日志错误，不影响主请求流程
-          logger.info('❌ High-performance logging error (non-critical):', logError.message)
-        }
-      })
-    }
-  }
-
-  // 优化的事件监听 - 使用 once 避免重复处理
-  res.once('finish', handleRequestComplete)
-  res.once('close', handleRequestComplete)
-
-  // 错误处理（独立监听器）
   res.on('error', (error) => {
     const duration = Date.now() - start
     logger.error(`💥 [${requestId}] Response error after ${duration}ms:`, error)
@@ -1193,9 +1012,7 @@ const errorHandler = (error, req, res, _next) => {
     ip: req.ip || 'unknown',
     userAgent: req.get('User-Agent') || 'unknown',
     apiKey: req.apiKey ? req.apiKey.id : 'none',
-    admin: req.admin ? req.admin.username : 'none',
-    user: req.user ? req.user.username : 'none',
-    session: req.session ? req.session.sessionId : 'none'
+    admin: req.admin ? req.admin.username : 'none'
   })
 
   // 确定HTTP状态码
@@ -1263,48 +1080,41 @@ const errorHandler = (error, req, res, _next) => {
 }
 
 // 🌐 全局速率限制中间件（延迟初始化）
-let rateLimiter = null
+// const rateLimiter = null // 暂时未使用
 
-const getRateLimiter = () => {
-  try {
-    const client = database.getClient()
-    if (!client) {
-      logger.warn('⚠️ database client not available for rate limiter')
-      // 重置 rateLimiter，下次重新初始化
-      rateLimiter = null
-      return null
-    }
+// 暂时注释掉未使用的函数
+// const getRateLimiter = () => {
+//   if (!rateLimiter) {
+//     try {
+//       const client = redis.getClient()
+//       if (!client) {
+//         logger.warn('⚠️ Redis client not available for rate limiter')
+//         return null
+//       }
+//
+//       rateLimiter = new RateLimiterRedis({
+//         storeClient: client,
+//         keyPrefix: 'global_rate_limit',
+//         points: 1000, // 请求数量
+//         duration: 900, // 15分钟 (900秒)
+//         blockDuration: 900 // 阻塞时间15分钟
+//       })
+//
+//       logger.info('✅ Rate limiter initialized successfully')
+//     } catch (error) {
+//       logger.warn('⚠️ Rate limiter initialization failed, using fallback', { error: error.message })
+//       return null
+//     }
+//   }
+//   return rateLimiter
+// }
 
-    // 检查现有 rateLimiter 的连接状态
-    if (rateLimiter) {
-      // 检查Redis连接状态，如果断开则重新初始化
-      if (client.status !== 'ready') {
-        logger.warn('⚠️ Redis connection not ready, reinitializing rate limiter')
-        rateLimiter = null
-      }
-    }
+const globalRateLimit = async (req, res, next) =>
+  // 已禁用全局IP限流 - 直接跳过所有请求
+  next()
 
-    if (!rateLimiter) {
-      rateLimiter = new RateLimiterRedis({
-        storeClient: client,
-        keyPrefix: 'global_rate_limit',
-        points: 1000, // 请求数量
-        duration: 900, // 15分钟 (900秒)
-        blockDuration: 900 // 阻塞时间15分钟
-      })
-
-      logger.info('✅ Rate limiter initialized successfully')
-    }
-  } catch (error) {
-    logger.warn('⚠️ Rate limiter initialization failed, using fallback', { error: error.message })
-    rateLimiter = null
-    return null
-  }
-
-  return rateLimiter
-}
-
-const globalRateLimit = async (req, res, next) => {
+// 以下代码已被禁用
+/*
   // 跳过健康检查和内部请求
   if (req.path === '/health' || req.path === '/api/health') {
     return next()
@@ -1312,7 +1122,7 @@ const globalRateLimit = async (req, res, next) => {
 
   const limiter = getRateLimiter()
   if (!limiter) {
-    // 如果数据库不可用，直接跳过速率限制
+    // 如果Redis不可用，直接跳过速率限制
     return next()
   }
 
@@ -1340,11 +1150,11 @@ const globalRateLimit = async (req, res, next) => {
       retryAfter: Math.round(msBeforeNext / 1000)
     })
   }
-}
+  */
 
 // 📊 请求大小限制中间件
 const requestSizeLimit = (req, res, next) => {
-  const maxSize = 10 * 1024 * 1024 // 10MB
+  const maxSize = 60 * 1024 * 1024 // 60MB
   const contentLength = parseInt(req.headers['content-length'] || '0')
 
   if (contentLength > maxSize) {
@@ -1359,337 +1169,13 @@ const requestSizeLimit = (req, res, next) => {
   return next()
 }
 
-// 🔧 可配置的增强认证中间件
-const authenticateEnhanced = (options = {}) => {
-  const authConfig = {
-    // 认证模式配置
-    requireApiKey: options.requireApiKey || false,
-    requireUserSession: options.requireUserSession || false,
-    requireAdminSession: options.requireAdminSession || false,
-    allowFallback: options.allowFallback !== false, // 默认允许fallback
-
-    // 组合认证配置
-    requireBoth: options.requireBoth || false, // 同时需要API Key和Session
-    strictMode: options.strictMode || false, // 严格模式，不允许任何fallback
-
-    // 优先级配置
-    priority: options.priority || ['api_key', 'admin_session', 'user_session'],
-
-    // 错误处理配置
-    customErrorHandler: options.customErrorHandler || null,
-    includeDebugInfo: options.includeDebugInfo || false
-  }
-
-  return async (req, res, next) => {
-    const startTime = Date.now()
-
-    try {
-      const authInfo = detectAuthenticationType(req)
-
-      logger.debug(
-        `🔧 Enhanced authentication: config=${JSON.stringify(authConfig)}, detected=${authInfo.authType}`
-      )
-
-      // 严格模式：只允许指定的认证类型
-      if (authConfig.strictMode) {
-        if (authConfig.requireApiKey && !authInfo.hasApiKey) {
-          return handleAuthFailure('API Key required in strict mode', req, res, authConfig)
-        }
-        if (authConfig.requireUserSession && !authInfo.hasSessionToken) {
-          return handleAuthFailure('User session required in strict mode', req, res, authConfig)
-        }
-        if (authConfig.requireAdminSession && !authInfo.hasAdminToken) {
-          return handleAuthFailure('Admin session required in strict mode', req, res, authConfig)
-        }
-      }
-
-      // 组合认证模式：同时需要多种认证
-      if (authConfig.requireBoth) {
-        const missingAuth = []
-        if (authConfig.requireApiKey && !authInfo.hasApiKey) {
-          missingAuth.push('API Key')
-        }
-        if (authConfig.requireUserSession && !authInfo.hasSessionToken) {
-          missingAuth.push('User Session')
-        }
-        if (authConfig.requireAdminSession && !authInfo.hasAdminToken) {
-          missingAuth.push('Admin Session')
-        }
-
-        if (missingAuth.length > 0) {
-          return handleAuthFailure(
-            `Missing required authentication: ${missingAuth.join(', ')}`,
-            req,
-            res,
-            authConfig
-          )
-        }
-
-        // 执行多重认证验证
-        return executeMultipleAuth(req, res, next, authInfo, authConfig)
-      }
-
-      // 单一认证模式：按优先级选择
-      for (const authType of authConfig.priority) {
-        if (authType === 'api_key' && authInfo.hasApiKey) {
-          logger.debug('🔑 Enhanced auth: Using API Key (priority match)')
-          return authenticateApiKey(req, res, next)
-        }
-        if (authType === 'admin_session' && authInfo.hasAdminToken) {
-          logger.debug('👑 Enhanced auth: Using Admin Session (priority match)')
-          return authenticateAdmin(req, res, next)
-        }
-        if (authType === 'user_session' && authInfo.hasSessionToken) {
-          logger.debug('🎫 Enhanced auth: Using User Session (priority match)')
-          return authenticateUserSession(req, res, next)
-        }
-      }
-
-      // 没有找到合适的认证方式
-      return handleAuthFailure('No valid authentication found', req, res, authConfig)
-    } catch (error) {
-      const authDuration = Date.now() - startTime
-      logger.error(`❌ Enhanced authentication error (${authDuration}ms):`, {
-        error: error.message,
-        config: authConfig,
-        ip: req.ip,
-        url: req.originalUrl
-      })
-
-      if (authConfig.customErrorHandler) {
-        return authConfig.customErrorHandler(error, req, res, next)
-      }
-
-      return res.status(500).json({
-        error: 'Authentication error',
-        message: 'Internal server error during enhanced authentication'
-      })
-    }
-  }
-}
-
-// 🎯 获取当前请求的认证上下文
-const getAuthenticationContext = (req) => {
-  const context = {
-    authenticated: false,
-    authType: 'none',
-    user: null,
-    admin: null,
-    apiKey: null,
-    session: null,
-    permissions: [],
-    metadata: {}
-  }
-
-  // API Key 认证上下文
-  if (req.apiKey) {
-    context.authenticated = true
-    context.authType = 'api_key'
-    context.apiKey = {
-      id: req.apiKey.id,
-      name: req.apiKey.name,
-      permissions: req.apiKey.permissions || [],
-      limits: {
-        tokenLimit: req.apiKey.tokenLimit,
-        concurrencyLimit: req.apiKey.concurrencyLimit,
-        rateLimitWindow: req.apiKey.rateLimitWindow,
-        rateLimitRequests: req.apiKey.rateLimitRequests
-      }
-    }
-    context.permissions = req.apiKey.permissions || []
-  }
-
-  // 用户会话认证上下文
-  if (req.user && req.session) {
-    context.authenticated = true
-    context.authType = context.authType === 'api_key' ? 'dual' : 'user_session'
-    context.user = {
-      id: req.user.id,
-      username: req.user.username,
-      email: req.user.email,
-      fullName: req.user.fullName,
-      role: req.user.role,
-      status: req.user.status,
-      groups: req.user.groups || []
-    }
-    context.session = {
-      sessionId: req.session.sessionId,
-      token: req.session.token
-    }
-    context.permissions = [...context.permissions, ...getUserPermissions(req.user)]
-  }
-
-  // 管理员会话认证上下文
-  if (req.admin) {
-    context.authenticated = true
-    context.authType = context.authType !== 'none' ? 'multi_admin' : 'admin_session'
-    context.admin = {
-      id: req.admin.id,
-      username: req.admin.username,
-      sessionId: req.admin.sessionId,
-      loginTime: req.admin.loginTime
-    }
-    context.permissions = [...context.permissions, 'admin:*'] // 管理员拥有所有权限
-  }
-
-  // 添加请求元数据
-  context.metadata = {
-    ip: req.ip || 'unknown',
-    userAgent: req.get('User-Agent') || 'unknown',
-    requestId: req.requestId || 'unknown',
-    timestamp: new Date().toISOString()
-  }
-
-  return context
-}
-
-// 🔧 辅助函数：处理认证失败
-const handleAuthFailure = (message, req, res, authConfig) => {
-  logger.security(`🔒 Enhanced auth failure: ${message} from ${req.ip || 'unknown'}`)
-
-  const response = {
-    error: 'Authentication failed',
-    message
-  }
-
-  if (authConfig.includeDebugInfo) {
-    response.debugInfo = {
-      detectedAuth: detectAuthenticationType(req),
-      config: authConfig,
-      timestamp: new Date().toISOString()
-    }
-  }
-
-  return res.status(401).json(response)
-}
-
-// 🔧 辅助函数：执行多重认证
-const executeMultipleAuth = async (req, res, next, authInfo, authConfig) => {
-  const authResults = []
-
-  // 依次执行各种认证
-  if (authConfig.requireApiKey && authInfo.hasApiKey) {
-    try {
-      await new Promise((resolve, reject) => {
-        authenticateApiKey(req, res, (error) => {
-          if (error) {
-            reject(error)
-          } else {
-            resolve()
-          }
-        })
-      })
-      authResults.push({ type: 'api_key', success: true })
-    } catch (error) {
-      authResults.push({ type: 'api_key', success: false, error: error.message })
-    }
-  }
-
-  if (authConfig.requireUserSession && authInfo.hasSessionToken) {
-    try {
-      await new Promise((resolve, reject) => {
-        authenticateUserSession(req, res, (error) => {
-          if (error) {
-            reject(error)
-          } else {
-            resolve()
-          }
-        })
-      })
-      authResults.push({ type: 'user_session', success: true })
-    } catch (error) {
-      authResults.push({ type: 'user_session', success: false, error: error.message })
-    }
-  }
-
-  if (authConfig.requireAdminSession && authInfo.hasAdminToken) {
-    try {
-      await new Promise((resolve, reject) => {
-        authenticateAdmin(req, res, (error) => {
-          if (error) {
-            reject(error)
-          } else {
-            resolve()
-          }
-        })
-      })
-      authResults.push({ type: 'admin_session', success: true })
-    } catch (error) {
-      authResults.push({ type: 'admin_session', success: false, error: error.message })
-    }
-  }
-
-  // 检查所有必需的认证是否都成功
-  const failedAuth = authResults.filter((r) => !r.success)
-  if (failedAuth.length > 0) {
-    return handleAuthFailure(
-      `Multiple authentication failed: ${failedAuth.map((f) => f.type).join(', ')}`,
-      req,
-      res,
-      authConfig
-    )
-  }
-
-  logger.debug(
-    `✅ Multiple authentication successful: ${authResults.map((r) => r.type).join(', ')}`
-  )
-
-  return next()
-}
-
-// 🔧 辅助函数：获取用户权限
-const getUserPermissions = (user) => {
-  const permissions = []
-
-  // 基于角色的权限
-  if (user.role) {
-    switch (user.role) {
-      case 'admin':
-        permissions.push('user:read', 'user:write', 'user:delete', 'system:read')
-        break
-      case 'moderator':
-        permissions.push('user:read', 'user:write', 'system:read')
-        break
-      case 'user':
-        permissions.push('user:read')
-        break
-    }
-  }
-
-  // 基于组的权限
-  if (user.groups && Array.isArray(user.groups)) {
-    for (const group of user.groups) {
-      switch (group) {
-        case 'api_access':
-          permissions.push('api:access')
-          break
-        case 'advanced_features':
-          permissions.push('features:advanced')
-          break
-      }
-    }
-  }
-
-  return [...new Set(permissions)] // 去重
-}
-
 module.exports = {
-  // 现有的认证函数
   authenticateApiKey,
   authenticateAdmin,
-  authenticateUserSession,
-  authenticateDual,
-
-  // 新增的智能认证函数
-  detectAuthenticationType,
-  authenticateEnhanced,
-  getAuthenticationContext,
-
-  // 兼容性函数
-  extractSessionToken,
-  detectAuthType,
-
-  // 其他中间件
+  authenticateUser,
+  authenticateUserOrAdmin,
+  requireRole,
+  requireAdmin,
   corsMiddleware,
   requestLogger,
   securityMiddleware,

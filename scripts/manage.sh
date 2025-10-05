@@ -288,12 +288,12 @@ check_redis() {
     # 测试Redis连接
     print_info "测试 Redis 连接..."
     if command_exists redis-cli; then
-        local redis_test_cmd="redis-cli -h $REDIS_HOST -p $REDIS_PORT"
+        local redis_args=(-h "$REDIS_HOST" -p "$REDIS_PORT")
         if [ -n "$REDIS_PASSWORD" ]; then
-            redis_test_cmd="$redis_test_cmd -a '$REDIS_PASSWORD'"
+            redis_args+=(-a "$REDIS_PASSWORD")
         fi
-        
-        if $redis_test_cmd ping 2>/dev/null | grep -q "PONG"; then
+
+        if redis-cli "${redis_args[@]}" ping 2>/dev/null | grep -q "PONG"; then
             print_success "Redis 连接成功"
             return 0
         else
@@ -409,7 +409,7 @@ install_service() {
         rm -rf "$APP_DIR"
     fi
     
-    if ! git clone https://github.com/Await-d/claude-relay-service.git "$APP_DIR"; then
+    if ! git clone https://github.com/Wei-Shaw/claude-relay-service.git "$APP_DIR"; then
         print_error "克隆项目失败"
         return 1
     fi
@@ -475,7 +475,7 @@ EOF
         
         # 使用 sparse-checkout 来只获取需要的文件
         git clone --depth 1 --branch web-dist --single-branch \
-            https://github.com/Await-d/claude-relay-service.git \
+            https://github.com/Wei-Shaw/claude-relay-service.git \
             "$TEMP_CLONE_DIR" 2>/dev/null || {
             # 如果 HTTPS 失败，尝试使用当前仓库的 remote URL
             REPO_URL=$(git config --get remote.origin.url)
@@ -678,7 +678,7 @@ update_service() {
             print_info "尝试下载前端文件 (第 $attempt 次)..."
             
             if git clone --depth 1 --branch web-dist --single-branch \
-                https://github.com/Await-d/claude-relay-service.git \
+                https://github.com/Wei-Shaw/claude-relay-service.git \
                 "$TEMP_CLONE_DIR" 2>/dev/null; then
                 clone_success=true
                 break
@@ -937,193 +937,61 @@ stop_service() {
     # 强制停止所有相关进程
     pkill -f "node.*src/app.js" 2>/dev/null || true
     
+    # 等待进程完全退出（最多等待10秒）
+    local wait_count=0
+    while pgrep -f "node.*src/app.js" > /dev/null; do
+        if [ $wait_count -ge 10 ]; then
+            print_warning "进程停止超时，尝试强制终止..."
+            pkill -9 -f "node.*src/app.js" 2>/dev/null || true
+            sleep 1
+            break
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    
+    # 最终确认进程已停止
+    if pgrep -f "node.*src/app.js" > /dev/null; then
+        print_error "无法完全停止服务进程"
+        return 1
+    fi
+    
     print_success "服务已停止"
 }
 
-# 重启服务 - 智能重启优化版本
+# 重启服务
 restart_service() {
-    local strategy=${1:-"graceful"}  # 默认使用graceful策略
-    local skip_warmup=${2:-false}
-    local force_restart=${3:-false}
+    print_info "重启服务..."
     
-    print_info "执行智能重启 (策略: $strategy)..."
-    
-    # 检查是否存在增强版管理器
-    if [ -f "$APP_DIR/scripts/manage-enhanced.js" ] && command_exists node; then
-        print_info "使用增强版重启管理器..."
-        
-        # 构建增强重启命令
-        local enhanced_cmd="node '$APP_DIR/scripts/manage-enhanced.js' restart"
-        enhanced_cmd="$enhanced_cmd --strategy '$strategy'"
-        
-        if [ "$skip_warmup" = "true" ]; then
-            enhanced_cmd="$enhanced_cmd --skip-warmup"
-        fi
-        
-        if [ "$force_restart" = "true" ]; then
-            enhanced_cmd="$enhanced_cmd --force"
-        fi
-        
-        # 执行增强重启
-        if eval $enhanced_cmd; then
-            print_success "智能重启完成!"
-            return 0
-        else
-            print_warning "增强重启失败，回退到标准重启..."
-        fi
-    fi
-    
-    # 回退到传统重启方法
-    print_info "执行传统重启..."
-    
-    # 保存当前PID用于性能监控
-    local old_pid=$(pgrep -f "node.*src/app.js" | head -1)
-    local restart_start_time=$(date +%s%N)
-    
-    # 根据策略选择重启方法
-    case "$strategy" in
-        "fast")
-            fast_restart_service
-            ;;
-        "graceful"|*)
-            graceful_restart_service
-            ;;
-    esac
-    
-    # 计算重启耗时
-    local restart_end_time=$(date +%s%N)
-    local restart_duration=$((($restart_end_time - $restart_start_time) / 1000000))  # 转换为毫秒
-    
-    # 验证重启成功
-    local new_pid=$(pgrep -f "node.*src/app.js" | head -1)
-    if [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ]; then
-        print_success "重启完成! PID: $old_pid -> $new_pid, 耗时: ${restart_duration}ms"
-        
-        # 记录重启性能指标
-        log_restart_metrics "$strategy" "$restart_duration" "success" "$old_pid" "$new_pid"
-    else
-        print_error "重启验证失败"
+    # 停止服务并检查结果
+    if ! stop_service; then
+        print_error "停止服务失败"
         return 1
     fi
-}
-
-# 快速重启策略
-fast_restart_service() {
-    print_info "执行快速重启策略..."
     
-    # 1. 快速停止服务 (短超时)
-    if pgrep -f "node.*src/app.js" > /dev/null; then
-        local pid=$(pgrep -f "node.*src/app.js" | head -1)
-        print_info "快速停止进程 $pid..."
-        
-        # 发送SIGTERM，等待5秒
-        kill $pid 2>/dev/null || true
-        local timeout=5
-        while [ $timeout -gt 0 ] && kill -0 $pid 2>/dev/null; do
-            sleep 1
-            timeout=$((timeout - 1))
-        done
-        
-        # 如果还没停止，强制终止
-        if kill -0 $pid 2>/dev/null; then
-            print_warning "强制终止进程..."
-            kill -9 $pid 2>/dev/null || true
+    # 短暂等待，确保端口释放
+    sleep 1
+    
+    # 启动服务，如果失败则重试
+    local retry_count=0
+    while [ $retry_count -lt 3 ]; do
+        # 清除可能的僵尸进程检测
+        if ! pgrep -f "node.*src/app.js" > /dev/null; then
+            # 进程确实已停止，可以启动
+            if start_service; then
+                return 0
+            fi
         fi
-    fi
-    
-    # 2. 最小化清理
-    rm -f "$APP_DIR/.pid" 2>/dev/null || true
-    
-    # 3. 快速启动 (跳过部分检查)
-    start_service_fast
-}
-
-# 优雅重启策略  
-graceful_restart_service() {
-    print_info "执行优雅重启策略..."
-    
-    # 1. 优雅停止服务
-    stop_service
-    
-    # 2. 等待完全停止
-    sleep 2
-    
-    # 3. 清理残留资源
-    cleanup_service_resources
-    
-    # 4. 完整启动服务
-    start_service
-}
-
-# 快速启动服务
-start_service_fast() {
-    print_info "快速启动服务..."
-    
-    cd "$APP_DIR"
-    
-    # 跳过部分检查，直接启动
-    if command_exists setsid; then
-        setsid nohup node "$APP_DIR/src/app.js" > "$APP_DIR/logs/service.log" 2>&1 < /dev/null &
-        local pid=$!
-        sleep 1
         
-        local real_pid=$(pgrep -f "node.*src/app.js" | head -1)
-        if [ -n "$real_pid" ]; then
-            echo $real_pid > "$APP_DIR/.pid"
-            print_success "快速启动完成 (PID: $real_pid)"
-        else
-            echo $pid > "$APP_DIR/.pid"  
-            print_success "快速启动完成 (PID: $pid)"
+        retry_count=$((retry_count + 1))
+        if [ $retry_count -lt 3 ]; then
+            print_warning "启动失败，等待2秒后重试（第 $retry_count 次）..."
+            sleep 2
         fi
-    else
-        nohup node "$APP_DIR/src/app.js" > "$APP_DIR/logs/service.log" 2>&1 < /dev/null &
-        local pid=$!
-        disown $pid 2>/dev/null || true
-        echo $pid > "$APP_DIR/.pid"
-        print_success "快速启动完成 (PID: $pid)"
-    fi
-}
-
-# 清理服务资源
-cleanup_service_resources() {
-    print_info "清理服务资源..."
+    done
     
-    # 清理PID文件
-    rm -f "$APP_DIR/.pid" 2>/dev/null || true
-    
-    # 清理可能的端口占用 (检查孤儿进程)
-    local orphan_pids=$(pgrep -f "node.*src/app.js" 2>/dev/null || true)
-    if [ -n "$orphan_pids" ]; then
-        print_info "清理孤儿进程: $orphan_pids"
-        echo "$orphan_pids" | xargs kill -9 2>/dev/null || true
-    fi
-    
-    # 确保日志目录存在
-    mkdir -p "$APP_DIR/logs"
-}
-
-# 记录重启性能指标
-log_restart_metrics() {
-    local strategy=$1
-    local duration=$2  
-    local status=$3
-    local old_pid=$4
-    local new_pid=$5
-    
-    local metrics_file="$APP_DIR/logs/restart-metrics.log"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    # 确保日志目录存在
-    mkdir -p "$(dirname "$metrics_file")"
-    
-    # 写入指标日志
-    echo "[$timestamp] strategy=$strategy duration=${duration}ms status=$status old_pid=$old_pid new_pid=$new_pid" >> "$metrics_file"
-    
-    # 保持日志文件不超过1000行
-    if [ -f "$metrics_file" ] && [ $(wc -l < "$metrics_file") -gt 1000 ]; then
-        tail -n 500 "$metrics_file" > "${metrics_file}.tmp"
-        mv "${metrics_file}.tmp" "$metrics_file"
-    fi
+    print_error "重启服务失败"
+    return 1
 }
 
 # 更新模型价格
@@ -1344,7 +1212,7 @@ switch_branch() {
             
             # 下载前端文件
             if git clone --depth 1 --branch "$web_branch" --single-branch \
-                https://github.com/Await-d/claude-relay-service.git \
+                https://github.com/Wei-Shaw/claude-relay-service.git \
                 "$TEMP_CLONE_DIR" 2>/dev/null; then
                 
                 # 复制文件到目标目录
@@ -1487,10 +1355,7 @@ show_help() {
     echo "  uninstall      - 卸载服务"
     echo "  start          - 启动服务"
     echo "  stop           - 停止服务"
-    echo "  restart        - 重启服务 (优雅重启)"
-    echo "  restart:fast   - 快速重启"
-    echo "  restart:graceful - 优雅重启"
-    echo "  restart:zero-downtime - 零停机重启"
+    echo "  restart        - 重启服务"
     echo "  status         - 查看状态"
     echo "  switch-branch  - 切换分支"
     echo "  update-pricing - 更新模型价格数据"
@@ -1651,19 +1516,7 @@ handle_menu_choice() {
                 ;;
             4)
                 echo ""
-                echo "选择重启策略："
-                echo "  1) 快速重启 (fast)"
-                echo "  2) 优雅重启 (graceful)" 
-                echo "  3) 零停机重启 (zero-downtime)"
-                echo -n "请选择重启策略 [1-3, 默认:2]: "
-                read restart_choice
-                
-                case "${restart_choice:-2}" in
-                    1) restart_service "fast" ;;
-                    2) restart_service "graceful" ;;
-                    3) restart_service "zero-downtime" ;;
-                    *) restart_service "graceful" ;;
-                esac
+                restart_service
                 echo -n "按回车键继续..."
                 read
                 ;;
@@ -1861,15 +1714,6 @@ main() {
             ;;
         restart)
             restart_service
-            ;;
-        restart:fast)
-            restart_service "fast"
-            ;;
-        restart:graceful)  
-            restart_service "graceful"
-            ;;
-        restart:zero-downtime)
-            restart_service "zero-downtime"
             ;;
         status)
             show_status

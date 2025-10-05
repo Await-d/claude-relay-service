@@ -15,7 +15,7 @@
  */
 
 const fs = require('fs').promises
-const { getDatabase, initDatabase } = require('../src/models/database')
+const redis = require('../src/models/redis')
 const logger = require('../src/utils/logger')
 const readline = require('readline')
 
@@ -84,25 +84,219 @@ function sanitizeData(data, type) {
   return sanitized
 }
 
+// CSV 字段映射配置
+const CSV_FIELD_MAPPING = {
+  // 基本信息
+  id: 'ID',
+  name: '名称',
+  description: '描述',
+  isActive: '状态',
+  createdAt: '创建时间',
+  lastUsedAt: '最后使用时间',
+  createdBy: '创建者',
+
+  // API Key 信息
+  apiKey: 'API密钥',
+  tokenLimit: '令牌限制',
+
+  // 过期设置
+  expirationMode: '过期模式',
+  expiresAt: '过期时间',
+  activationDays: '激活天数',
+  activationUnit: '激活单位',
+  isActivated: '已激活',
+  activatedAt: '激活时间',
+
+  // 权限设置
+  permissions: '服务权限',
+
+  // 限制设置
+  rateLimitWindow: '速率窗口(分钟)',
+  rateLimitRequests: '请求次数限制',
+  rateLimitCost: '费用限制(美元)',
+  concurrencyLimit: '并发限制',
+  dailyCostLimit: '日费用限制(美元)',
+  totalCostLimit: '总费用限制(美元)',
+  weeklyOpusCostLimit: '周Opus费用限制(美元)',
+
+  // 账户绑定
+  claudeAccountId: 'Claude专属账户',
+  claudeConsoleAccountId: 'Claude控制台账户',
+  geminiAccountId: 'Gemini专属账户',
+  openaiAccountId: 'OpenAI专属账户',
+  azureOpenaiAccountId: 'Azure OpenAI专属账户',
+  bedrockAccountId: 'Bedrock专属账户',
+
+  // 限制配置
+  enableModelRestriction: '启用模型限制',
+  restrictedModels: '限制的模型',
+  enableClientRestriction: '启用客户端限制',
+  allowedClients: '允许的客户端',
+
+  // 标签和用户
+  tags: '标签',
+  userId: '用户ID',
+  userUsername: '用户名',
+
+  // 其他信息
+  icon: '图标'
+}
+
+// 数据格式化函数
+function formatCSVValue(key, value, shouldSanitize = false) {
+  if (!value || value === '' || value === 'null' || value === 'undefined') {
+    return ''
+  }
+
+  switch (key) {
+    case 'apiKey':
+      if (shouldSanitize && value.length > 10) {
+        return `${value.substring(0, 10)}...[已脱敏]`
+      }
+      return value
+
+    case 'isActive':
+    case 'isActivated':
+    case 'enableModelRestriction':
+    case 'enableClientRestriction':
+      return value === 'true' ? '是' : '否'
+
+    case 'expirationMode':
+      return value === 'activation' ? '首次使用后激活' : value === 'fixed' ? '固定时间' : value
+
+    case 'activationUnit':
+      return value === 'hours' ? '小时' : value === 'days' ? '天' : value
+
+    case 'permissions':
+      switch (value) {
+        case 'all':
+          return '全部服务'
+        case 'claude':
+          return '仅Claude'
+        case 'gemini':
+          return '仅Gemini'
+        case 'openai':
+          return '仅OpenAI'
+        default:
+          return value
+      }
+
+    case 'restrictedModels':
+    case 'allowedClients':
+    case 'tags':
+      try {
+        const parsed = JSON.parse(value)
+        return Array.isArray(parsed) ? parsed.join('; ') : value
+      } catch {
+        return value
+      }
+
+    case 'createdAt':
+    case 'lastUsedAt':
+    case 'activatedAt':
+    case 'expiresAt':
+      if (value) {
+        try {
+          return new Date(value).toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          })
+        } catch {
+          return value
+        }
+      }
+      return ''
+
+    case 'rateLimitWindow':
+    case 'rateLimitRequests':
+    case 'concurrencyLimit':
+    case 'activationDays':
+    case 'tokenLimit':
+      return value === '0' || value === 0 ? '无限制' : value
+
+    case 'rateLimitCost':
+    case 'dailyCostLimit':
+    case 'totalCostLimit':
+    case 'weeklyOpusCostLimit':
+      return value === '0' || value === 0 ? '无限制' : `$${value}`
+
+    default:
+      return value
+  }
+}
+
+// 转义 CSV 字段
+function escapeCSVField(field) {
+  if (field === null || field === undefined) {
+    return ''
+  }
+
+  const str = String(field)
+
+  // 如果包含逗号、引号或换行符，需要用引号包围
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    // 先转义引号（双引号变成两个双引号）
+    const escaped = str.replace(/"/g, '""')
+    return `"${escaped}"`
+  }
+
+  return str
+}
+
+// 转换数据为 CSV 格式
+function convertToCSV(exportDataObj, shouldSanitize = false) {
+  if (!exportDataObj.data.apiKeys || exportDataObj.data.apiKeys.length === 0) {
+    throw new Error('CSV format only supports API Keys export. Please use --types=apikeys')
+  }
+
+  const { apiKeys } = exportDataObj.data
+  const fields = Object.keys(CSV_FIELD_MAPPING)
+  const headers = Object.values(CSV_FIELD_MAPPING)
+
+  // 生成标题行
+  const csvLines = [headers.map(escapeCSVField).join(',')]
+
+  // 生成数据行
+  for (const apiKey of apiKeys) {
+    const row = fields.map((field) => {
+      const value = formatCSVValue(field, apiKey[field], shouldSanitize)
+      return escapeCSVField(value)
+    })
+    csvLines.push(row.join(','))
+  }
+
+  return csvLines.join('\n')
+}
+
 // 导出数据
 async function exportData() {
   try {
-    const outputFile = params.output || `backup-${new Date().toISOString().split('T')[0]}.json`
+    const format = params.format || 'json'
+    const fileExtension = format === 'csv' ? '.csv' : '.json'
+    const defaultFileName = `backup-${new Date().toISOString().split('T')[0]}${fileExtension}`
+    const outputFile = params.output || defaultFileName
     const types = params.types ? params.types.split(',') : ['all']
     const shouldSanitize = params.sanitize === true
+
+    // CSV 格式验证
+    if (format === 'csv' && !types.includes('apikeys') && !types.includes('all')) {
+      logger.error('❌ CSV format only supports API Keys export. Please use --types=apikeys')
+      process.exit(1)
+    }
 
     logger.info('🔄 Starting data export...')
     logger.info(`📁 Output file: ${outputFile}`)
     logger.info(`📋 Data types: ${types.join(', ')}`)
+    logger.info(`📄 Output format: ${format.toUpperCase()}`)
     logger.info(`🔒 Sanitize sensitive data: ${shouldSanitize ? 'YES' : 'NO'}`)
 
-    // 连接数据库
-    await initDatabase()
-    const database = await getDatabase()
-    if (typeof database.connect === 'function') {
-      await database.connect()
-    }
-    logger.success('✅ Connected to database')
+    // 连接 Redis
+    await redis.connect()
+    logger.success('✅ Connected to Redis')
 
     const exportDataObj = {
       metadata: {
@@ -117,7 +311,7 @@ async function exportData() {
     // 导出 API Keys
     if (types.includes('all') || types.includes('apikeys')) {
       logger.info('📤 Exporting API Keys...')
-      const keys = await database.keys('apikey:*')
+      const keys = await redis.client.keys('apikey:*')
       const apiKeys = []
 
       for (const key of keys) {
@@ -126,7 +320,7 @@ async function exportData() {
         }
 
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await database.hgetall(key)
+        const data = await redis.client.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           apiKeys.push(shouldSanitize ? sanitizeData(data, 'apikey') : data)
@@ -141,13 +335,13 @@ async function exportData() {
     if (types.includes('all') || types.includes('accounts')) {
       logger.info('📤 Exporting Claude accounts...')
       // 注意：Claude 账户使用 claude:account: 前缀，不是 claude_account:
-      const keys = await database.keys('claude:account:*')
+      const keys = await redis.client.keys('claude:account:*')
       logger.info(`Found ${keys.length} Claude account keys in Redis`)
       const accounts = []
 
       for (const key of keys) {
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await database.hgetall(key)
+        const data = await redis.client.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           // 解析 JSON 字段（如果存在）
@@ -167,13 +361,13 @@ async function exportData() {
 
       // 导出 Gemini 账户
       logger.info('📤 Exporting Gemini accounts...')
-      const geminiKeys = await database.keys('gemini_account:*')
+      const geminiKeys = await redis.client.keys('gemini_account:*')
       logger.info(`Found ${geminiKeys.length} Gemini account keys in Redis`)
       const geminiAccounts = []
 
       for (const key of geminiKeys) {
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await database.hgetall(key)
+        const data = await redis.client.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           geminiAccounts.push(shouldSanitize ? sanitizeData(data, 'gemini_account') : data)
@@ -187,7 +381,7 @@ async function exportData() {
     // 导出管理员
     if (types.includes('all') || types.includes('admins')) {
       logger.info('📤 Exporting admins...')
-      const keys = await database.keys('admin:*')
+      const keys = await redis.client.keys('admin:*')
       const admins = []
 
       for (const key of keys) {
@@ -196,7 +390,7 @@ async function exportData() {
         }
 
         // 使用 hgetall 而不是 get，因为数据存储在哈希表中
-        const data = await database.hgetall(key)
+        const data = await redis.client.hgetall(key)
 
         if (data && Object.keys(data).length > 0) {
           admins.push(shouldSanitize ? sanitizeData(data, 'admin') : data)
@@ -207,8 +401,16 @@ async function exportData() {
       logger.success(`✅ Exported ${admins.length} admins`)
     }
 
-    // 写入文件
-    await fs.writeFile(outputFile, JSON.stringify(exportDataObj, null, 2))
+    // 根据格式写入文件
+    let fileContent
+    if (format === 'csv') {
+      fileContent = convertToCSV(exportDataObj, shouldSanitize)
+      // 添加 UTF-8 BOM 以便 Excel 正确识别中文
+      fileContent = `\ufeff${fileContent}`
+      await fs.writeFile(outputFile, fileContent, 'utf8')
+    } else {
+      await fs.writeFile(outputFile, JSON.stringify(exportDataObj, null, 2))
+    }
 
     // 显示导出摘要
     console.log(`\n${'='.repeat(60)}`)
@@ -238,10 +440,7 @@ async function exportData() {
     logger.error('💥 Export failed:', error)
     process.exit(1)
   } finally {
-    const database = await getDatabase()
-    if (typeof database.disconnect === 'function') {
-      await database.disconnect()
-    }
+    await redis.disconnect()
     rl.close()
   }
 }
@@ -311,13 +510,9 @@ async function importData() {
       return
     }
 
-    // 连接数据库
-    await initDatabase()
-    const database = await getDatabase()
-    if (typeof database.connect === 'function') {
-      await database.connect()
-    }
-    logger.success('✅ Connected to database')
+    // 连接 Redis
+    await redis.connect()
+    logger.success('✅ Connected to Redis')
 
     const stats = {
       imported: 0,
@@ -330,7 +525,7 @@ async function importData() {
       logger.info('\n📥 Importing API Keys...')
       for (const apiKey of importDataObj.data.apiKeys) {
         try {
-          const exists = await database.exists(`apikey:${apiKey.id}`)
+          const exists = await redis.client.exists(`apikey:${apiKey.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -348,12 +543,16 @@ async function importData() {
             }
           }
 
-          // 使用 hmset 存储到哈希表
-          await database.hmset(`apikey:${apiKey.id}`, apiKey)
+          // 使用 hset 存储到哈希表
+          const pipeline = redis.client.pipeline()
+          for (const [field, value] of Object.entries(apiKey)) {
+            pipeline.hset(`apikey:${apiKey.id}`, field, value)
+          }
+          await pipeline.exec()
 
           // 更新哈希映射
           if (apiKey.apiKey && !importDataObj.metadata.sanitized) {
-            await database.hset('apikey:hash_map', apiKey.apiKey, apiKey.id)
+            await redis.client.hset('apikey:hash_map', apiKey.apiKey, apiKey.id)
           }
 
           logger.success(`✅ Imported API Key: ${apiKey.name} (${apiKey.id})`)
@@ -370,7 +569,7 @@ async function importData() {
       logger.info('\n📥 Importing Claude accounts...')
       for (const account of importDataObj.data.claudeAccounts) {
         try {
-          const exists = await database.exists(`claude_account:${account.id}`)
+          const exists = await redis.client.exists(`claude_account:${account.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -388,16 +587,17 @@ async function importData() {
             }
           }
 
-          // 处理对象字段序列化
-          const processedAccount = { ...account }
-          if (
-            processedAccount.claudeAiOauth &&
-            typeof processedAccount.claudeAiOauth === 'object'
-          ) {
-            processedAccount.claudeAiOauth = JSON.stringify(processedAccount.claudeAiOauth)
+          // 使用 hset 存储到哈希表
+          const pipeline = redis.client.pipeline()
+          for (const [field, value] of Object.entries(account)) {
+            // 如果是对象，需要序列化
+            if (field === 'claudeAiOauth' && typeof value === 'object') {
+              pipeline.hset(`claude_account:${account.id}`, field, JSON.stringify(value))
+            } else {
+              pipeline.hset(`claude_account:${account.id}`, field, value)
+            }
           }
-          // 使用 hmset 存储到哈希表
-          await database.hmset(`claude_account:${account.id}`, processedAccount)
+          await pipeline.exec()
           logger.success(`✅ Imported Claude account: ${account.name} (${account.id})`)
           stats.imported++
         } catch (error) {
@@ -412,7 +612,7 @@ async function importData() {
       logger.info('\n📥 Importing Gemini accounts...')
       for (const account of importDataObj.data.geminiAccounts) {
         try {
-          const exists = await database.exists(`gemini_account:${account.id}`)
+          const exists = await redis.client.exists(`gemini_account:${account.id}`)
 
           if (exists && !forceOverwrite) {
             if (skipConflicts) {
@@ -430,8 +630,12 @@ async function importData() {
             }
           }
 
-          // 使用 hmset 存储到哈希表
-          await database.hmset(`gemini_account:${account.id}`, account)
+          // 使用 hset 存储到哈希表
+          const pipeline = redis.client.pipeline()
+          for (const [field, value] of Object.entries(account)) {
+            pipeline.hset(`gemini_account:${account.id}`, field, value)
+          }
+          await pipeline.exec()
           logger.success(`✅ Imported Gemini account: ${account.name} (${account.id})`)
           stats.imported++
         } catch (error) {
@@ -453,10 +657,7 @@ async function importData() {
     logger.error('💥 Import failed:', error)
     process.exit(1)
   } finally {
-    const database = await getDatabase()
-    if (typeof database.disconnect === 'function') {
-      await database.disconnect()
-    }
+    await redis.disconnect()
     rl.close()
   }
 }
@@ -476,8 +677,9 @@ Commands:
   import    Import data from a JSON file to Redis
 
 Export Options:
-  --output=FILE        Output filename (default: backup-YYYY-MM-DD.json)
+  --output=FILE        Output filename (default: backup-YYYY-MM-DD.json/.csv)
   --types=TYPE,...     Data types to export: apikeys,accounts,admins,all (default: all)
+  --format=FORMAT      Output format: json,csv (default: json)
   --sanitize           Remove sensitive data from export
 
 Import Options:
@@ -497,6 +699,12 @@ Examples:
 
   # Export specific data types
   node scripts/data-transfer.js export --types=apikeys,accounts --output=prod-data.json
+  
+  # Export API keys to CSV format
+  node scripts/data-transfer.js export --types=apikeys --format=csv --sanitize
+  
+  # Export to CSV with custom filename
+  node scripts/data-transfer.js export --types=apikeys --format=csv --output=api-keys.csv
 `)
 }
 

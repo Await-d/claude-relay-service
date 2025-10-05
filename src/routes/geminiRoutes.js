@@ -29,6 +29,26 @@ function checkPermissions(apiKeyData, requiredPermission = 'gemini') {
   return permissions === 'all' || permissions === requiredPermission
 }
 
+// 确保请求具有 Gemini 访问权限
+function ensureGeminiPermission(req, res) {
+  const apiKeyData = req.apiKey || {}
+  if (checkPermissions(apiKeyData, 'gemini')) {
+    return true
+  }
+
+  logger.security(
+    `🚫 API Key ${apiKeyData.id || 'unknown'} 缺少 Gemini 权限，拒绝访问 ${req.originalUrl}`
+  )
+
+  res.status(403).json({
+    error: {
+      message: 'This API key does not have permission to access Gemini',
+      type: 'permission_denied'
+    }
+  })
+  return false
+}
+
 // Gemini 消息处理端点
 router.post('/messages', authenticateApiKey, async (req, res) => {
   const startTime = Date.now()
@@ -117,8 +137,6 @@ router.post('/messages', authenticateApiKey, async (req, res) => {
     })
 
     // 发送请求到 Gemini
-    const integrationType = account.integrationType || 'oauth'
-
     const geminiResponse = await sendGeminiRequest({
       messages,
       model,
@@ -130,11 +148,7 @@ router.post('/messages', authenticateApiKey, async (req, res) => {
       apiKeyId: apiKeyData.id,
       signal: abortController.signal,
       projectId: account.projectId,
-      accountId: account.id,
-      integrationType,
-      baseUrl: account.baseUrl,
-      apiKey: account.apiKey,
-      userAgent: account.userAgent
+      accountId: account.id
     })
 
     if (stream) {
@@ -233,16 +247,7 @@ router.get('/models', authenticateApiKey, async (req, res) => {
     }
 
     // 获取模型列表
-    const integrationType = account.integrationType || 'oauth'
-    const models = await getAvailableModels({
-      integrationType,
-      accessToken: account.accessToken,
-      proxy: account.proxy,
-      projectId: account.projectId,
-      baseUrl: account.baseUrl,
-      apiKey: account.apiKey,
-      userAgent: account.userAgent
-    })
+    const models = await getAvailableModels(account.accessToken, account.proxy)
 
     res.json({
       object: 'list',
@@ -324,6 +329,10 @@ router.get('/key-info', authenticateApiKey, async (req, res) => {
 // 共用的 loadCodeAssist 处理函数
 async function handleLoadCodeAssist(req, res) {
   try {
+    if (!ensureGeminiPermission(req, res)) {
+      return undefined
+    }
+
     const sessionHash = sessionHelper.generateSessionHash(req.body)
 
     // 从路径参数或请求体中获取模型名
@@ -334,19 +343,7 @@ async function handleLoadCodeAssist(req, res) {
       requestedModel
     )
     const account = await geminiAccountService.getAccount(accountId)
-    if (!account) {
-      throw new Error('Gemini account not found')
-    }
     const { accessToken, refreshToken, projectId } = account
-    const integrationType = account.integrationType || 'oauth'
-    if (integrationType === 'third_party') {
-      return res.status(400).json({
-        error: {
-          message: 'Third-party Gemini accounts do not support Code Assist endpoints',
-          type: 'unsupported_operation'
-        }
-      })
-    }
 
     const { metadata, cloudaicompanionProject } = req.body
 
@@ -358,24 +355,48 @@ async function handleLoadCodeAssist(req, res) {
       apiKeyId: req.apiKey?.id || 'unknown'
     })
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken)
-
-    // 根据账户配置决定项目ID：
-    // 1. 如果账户有项目ID -> 使用账户的项目ID（强制覆盖）
-    // 2. 如果账户没有项目ID -> 传递 null（移除项目ID）
-    let effectiveProjectId = null
-
-    if (projectId) {
-      // 账户配置了项目ID，强制使用它
-      effectiveProjectId = projectId
-      logger.info('Using account project ID for loadCodeAssist:', effectiveProjectId)
-    } else {
-      // 账户没有配置项目ID，确保不传递项目ID
-      effectiveProjectId = null
-      logger.info('No project ID in account for loadCodeAssist, removing project parameter')
+    // 解析账户的代理配置
+    let proxyConfig = null
+    if (account.proxy) {
+      try {
+        proxyConfig = typeof account.proxy === 'string' ? JSON.parse(account.proxy) : account.proxy
+      } catch (e) {
+        logger.warn('Failed to parse proxy configuration:', e)
+      }
     }
 
-    const response = await geminiAccountService.loadCodeAssist(client, effectiveProjectId)
+    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+
+    // 智能处理项目ID：
+    // 1. 如果账户配置了项目ID -> 使用账户的项目ID（覆盖请求中的）
+    // 2. 如果账户没有项目ID -> 使用请求中的cloudaicompanionProject
+    // 3. 都没有 -> 传null
+    const effectiveProjectId = projectId || cloudaicompanionProject || null
+
+    logger.info('📋 loadCodeAssist项目ID处理逻辑', {
+      accountProjectId: projectId,
+      requestProjectId: cloudaicompanionProject,
+      effectiveProjectId,
+      decision: projectId
+        ? '使用账户配置'
+        : cloudaicompanionProject
+          ? '使用请求参数'
+          : '不使用项目ID'
+    })
+
+    const response = await geminiAccountService.loadCodeAssist(
+      client,
+      effectiveProjectId,
+      proxyConfig
+    )
+
+    // 如果响应中包含 cloudaicompanionProject，保存到账户作为临时项目 ID
+    if (response.cloudaicompanionProject && !account.projectId) {
+      await geminiAccountService.updateTempProjectId(accountId, response.cloudaicompanionProject)
+      logger.info(
+        `📋 Cached temporary projectId from loadCodeAssist: ${response.cloudaicompanionProject}`
+      )
+    }
 
     res.json(response)
   } catch (error) {
@@ -391,6 +412,10 @@ async function handleLoadCodeAssist(req, res) {
 // 共用的 onboardUser 处理函数
 async function handleOnboardUser(req, res) {
   try {
+    if (!ensureGeminiPermission(req, res)) {
+      return undefined
+    }
+
     // 提取请求参数
     const { tierId, cloudaicompanionProject, metadata } = req.body
     const sessionHash = sessionHelper.generateSessionHash(req.body)
@@ -403,19 +428,7 @@ async function handleOnboardUser(req, res) {
       requestedModel
     )
     const account = await geminiAccountService.getAccount(accountId)
-    if (!account) {
-      throw new Error('Gemini account not found')
-    }
     const { accessToken, refreshToken, projectId } = account
-    const integrationType = account.integrationType || 'oauth'
-    if (integrationType === 'third_party') {
-      return res.status(400).json({
-        error: {
-          message: 'Third-party Gemini accounts do not support onboarding endpoints',
-          type: 'unsupported_operation'
-        }
-      })
-    }
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
     logger.info(`OnboardUser request (${version})`, {
@@ -426,22 +439,34 @@ async function handleOnboardUser(req, res) {
       apiKeyId: req.apiKey?.id || 'unknown'
     })
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken)
-
-    // 根据账户配置决定项目ID：
-    // 1. 如果账户有项目ID -> 使用账户的项目ID（强制覆盖）
-    // 2. 如果账户没有项目ID -> 传递 null（移除项目ID）
-    let effectiveProjectId = null
-
-    if (projectId) {
-      // 账户配置了项目ID，强制使用它
-      effectiveProjectId = projectId
-      logger.info('Using account project ID:', effectiveProjectId)
-    } else {
-      // 账户没有配置项目ID，确保不传递项目ID（即使客户端传了也要移除）
-      effectiveProjectId = null
-      logger.info('No project ID in account, removing project parameter')
+    // 解析账户的代理配置
+    let proxyConfig = null
+    if (account.proxy) {
+      try {
+        proxyConfig = typeof account.proxy === 'string' ? JSON.parse(account.proxy) : account.proxy
+      } catch (e) {
+        logger.warn('Failed to parse proxy configuration:', e)
+      }
     }
+
+    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+
+    // 智能处理项目ID：
+    // 1. 如果账户配置了项目ID -> 使用账户的项目ID（覆盖请求中的）
+    // 2. 如果账户没有项目ID -> 使用请求中的cloudaicompanionProject
+    // 3. 都没有 -> 传null
+    const effectiveProjectId = projectId || cloudaicompanionProject || null
+
+    logger.info('📋 onboardUser项目ID处理逻辑', {
+      accountProjectId: projectId,
+      requestProjectId: cloudaicompanionProject,
+      effectiveProjectId,
+      decision: projectId
+        ? '使用账户配置'
+        : cloudaicompanionProject
+          ? '使用请求参数'
+          : '不使用项目ID'
+    })
 
     // 如果提供了 tierId，直接调用 onboardUser
     if (tierId) {
@@ -449,7 +474,8 @@ async function handleOnboardUser(req, res) {
         client,
         tierId,
         effectiveProjectId, // 使用处理后的项目ID
-        metadata
+        metadata,
+        proxyConfig
       )
 
       res.json(response)
@@ -458,7 +484,8 @@ async function handleOnboardUser(req, res) {
       const response = await geminiAccountService.setupUser(
         client,
         effectiveProjectId, // 使用处理后的项目ID
-        metadata
+        metadata,
+        proxyConfig
       )
 
       res.json(response)
@@ -476,6 +503,10 @@ async function handleOnboardUser(req, res) {
 // 共用的 countTokens 处理函数
 async function handleCountTokens(req, res) {
   try {
+    if (!ensureGeminiPermission(req, res)) {
+      return undefined
+    }
+
     // 处理请求体结构，支持直接 contents 或 request.contents
     const requestData = req.body.request || req.body
     const { contents } = requestData
@@ -500,20 +531,6 @@ async function handleCountTokens(req, res) {
       model
     )
     const account = await geminiAccountService.getAccount(accountId)
-    if (!account) {
-      throw new Error('Gemini account not found')
-    }
-
-    const integrationType = account.integrationType || 'oauth'
-    if (integrationType === 'third_party') {
-      return res.status(400).json({
-        error: {
-          message: 'Third-party Gemini accounts do not support countTokens endpoint',
-          type: 'unsupported_operation'
-        }
-      })
-    }
-
     const { accessToken, refreshToken } = account
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
@@ -523,8 +540,18 @@ async function handleCountTokens(req, res) {
       apiKeyId: req.apiKey?.id || 'unknown'
     })
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken)
-    const response = await geminiAccountService.countTokens(client, contents, model)
+    // 解析账户的代理配置
+    let proxyConfig = null
+    if (account.proxy) {
+      try {
+        proxyConfig = typeof account.proxy === 'string' ? JSON.parse(account.proxy) : account.proxy
+      } catch (e) {
+        logger.warn('Failed to parse proxy configuration:', e)
+      }
+    }
+
+    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+    const response = await geminiAccountService.countTokens(client, contents, model, proxyConfig)
 
     res.json(response)
   } catch (error) {
@@ -543,6 +570,10 @@ async function handleCountTokens(req, res) {
 // 共用的 generateContent 处理函数
 async function handleGenerateContent(req, res) {
   try {
+    if (!ensureGeminiPermission(req, res)) {
+      return undefined
+    }
+
     const { project, user_prompt_id, request: requestData } = req.body
     // 从路径参数或请求体中获取模型名
     const model = req.body.model || req.params.modelName || 'gemini-2.5-flash'
@@ -588,18 +619,6 @@ async function handleGenerateContent(req, res) {
       model
     )
     const account = await geminiAccountService.getAccount(accountId)
-    if (!account) {
-      throw new Error('Gemini account not found')
-    }
-    const integrationType = account.integrationType || 'oauth'
-    if (integrationType === 'third_party') {
-      return res.status(400).json({
-        error: {
-          message: 'Third-party Gemini accounts do not support generateContent endpoint',
-          type: 'unsupported_operation'
-        }
-      })
-    }
     const { accessToken, refreshToken } = account
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
@@ -609,8 +628,6 @@ async function handleGenerateContent(req, res) {
       projectId: project || account.projectId,
       apiKeyId: req.apiKey?.id || 'unknown'
     })
-
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken)
 
     // 解析账户的代理配置
     let proxyConfig = null
@@ -622,11 +639,26 @@ async function handleGenerateContent(req, res) {
       }
     }
 
+    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+
+    // 智能处理项目ID：
+    // 1. 如果账户配置了项目ID -> 使用账户的项目ID（覆盖请求中的）
+    // 2. 如果账户没有项目ID -> 使用请求中的项目ID（如果有的话）
+    // 3. 都没有 -> 传null
+    const effectiveProjectId = account.projectId || project || null
+
+    logger.info('📋 项目ID处理逻辑', {
+      accountProjectId: account.projectId,
+      requestProjectId: project,
+      effectiveProjectId,
+      decision: account.projectId ? '使用账户配置' : project ? '使用请求参数' : '不使用项目ID'
+    })
+
     const response = await geminiAccountService.generateContent(
       client,
       { model, request: actualRequestData },
       user_prompt_id,
-      account.projectId, // 始终使用账户配置的项目ID，忽略请求中的project
+      effectiveProjectId, // 使用智能决策的项目ID
       req.apiKey?.id, // 使用 API Key ID 作为 session ID
       proxyConfig // 传递代理配置
     )
@@ -680,6 +712,10 @@ async function handleStreamGenerateContent(req, res) {
   let abortController = null
 
   try {
+    if (!ensureGeminiPermission(req, res)) {
+      return undefined
+    }
+
     const { project, user_prompt_id, request: requestData } = req.body
     // 从路径参数或请求体中获取模型名
     const model = req.body.model || req.params.modelName || 'gemini-2.5-flash'
@@ -725,18 +761,6 @@ async function handleStreamGenerateContent(req, res) {
       model
     )
     const account = await geminiAccountService.getAccount(accountId)
-    if (!account) {
-      throw new Error('Gemini account not found')
-    }
-    const integrationType = account.integrationType || 'oauth'
-    if (integrationType === 'third_party') {
-      return res.status(400).json({
-        error: {
-          message: 'Third-party Gemini accounts do not support streaming generateContent',
-          type: 'unsupported_operation'
-        }
-      })
-    }
     const { accessToken, refreshToken } = account
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
@@ -758,8 +782,6 @@ async function handleStreamGenerateContent(req, res) {
       }
     })
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken)
-
     // 解析账户的代理配置
     let proxyConfig = null
     if (account.proxy) {
@@ -770,11 +792,26 @@ async function handleStreamGenerateContent(req, res) {
       }
     }
 
+    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+
+    // 智能处理项目ID：
+    // 1. 如果账户配置了项目ID -> 使用账户的项目ID（覆盖请求中的）
+    // 2. 如果账户没有项目ID -> 使用请求中的项目ID（如果有的话）
+    // 3. 都没有 -> 传null
+    const effectiveProjectId = account.projectId || project || null
+
+    logger.info('📋 流式请求项目ID处理逻辑', {
+      accountProjectId: account.projectId,
+      requestProjectId: project,
+      effectiveProjectId,
+      decision: account.projectId ? '使用账户配置' : project ? '使用请求参数' : '不使用项目ID'
+    })
+
     const streamResponse = await geminiAccountService.generateContentStream(
       client,
       { model, request: actualRequestData },
       user_prompt_id,
-      account.projectId, // 始终使用账户配置的项目ID，忽略请求中的project
+      effectiveProjectId, // 使用智能决策的项目ID
       req.apiKey?.id, // 使用 API Key ID 作为 session ID
       abortController.signal, // 传递中止信号
       proxyConfig // 传递代理配置
@@ -972,4 +1009,10 @@ router.post(
   handleStreamGenerateContent
 )
 
+// 导出处理函数供标准路由使用
 module.exports = router
+module.exports.handleLoadCodeAssist = handleLoadCodeAssist
+module.exports.handleOnboardUser = handleOnboardUser
+module.exports.handleCountTokens = handleCountTokens
+module.exports.handleGenerateContent = handleGenerateContent
+module.exports.handleStreamGenerateContent = handleStreamGenerateContent

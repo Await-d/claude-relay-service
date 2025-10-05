@@ -6,20 +6,28 @@
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
 [![Redis](https://img.shields.io/badge/Redis-6+-red.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
-[![Docker Build](https://github.com/Await-d/claude-relay-service/actions/workflows/auto-release-pipeline.yml/badge.svg)](https://github.com/Await-d/claude-relay-service/actions/workflows/auto-release-pipeline.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/await2719/claude-relay-service)](https://hub.docker.com/r/await2719/claude-relay-service)
+[![Docker Build](https://github.com/Wei-Shaw/claude-relay-service/actions/workflows/auto-release-pipeline.yml/badge.svg)](https://github.com/Wei-Shaw/claude-relay-service/actions/workflows/auto-release-pipeline.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/weishaw/claude-relay-service)](https://hub.docker.com/r/weishaw/claude-relay-service)
 
 **🔐 自行搭建Claude API中转服务，支持多账户管理**
 
-[English](#english) • [中文文档](#中文文档) • [📸 界面预览](docs/preview.md) • [📢 公告频道](https://t.me/claude_relay_service)
+[English](README_EN.md) • [快速开始](https://pincc.ai/) • [演示站点](https://demo.pincc.ai/admin-next/login) • [公告频道](https://t.me/claude_relay_service)
 
 </div>
 
 ---
 
-## ⭐ 如果觉得有用，点个Star支持一下吧！
+## 💎 Claude/Codex 拼车服务推荐
 
-> 开源不易，你的Star是我持续更新的动力 🚀  
+<div align="center">
+
+| 平台 | 类型 | 服务 | 介绍 |
+|:---|:---|:---|:---|
+| **[pincc.ai](https://pincc.ai/)** | 🏆 **官方运营** | <small>✅ Claude Code<br>✅ Codex CLI</small> | 项目直营，提供稳定的 Claude Code / Codex CLI 拼车服务 |
+| **[ctok.ai](https://ctok.ai/)** | 🤝 合作伙伴 | <small>✅ Claude Code<br>✅ Codex CLI</small> | 社区认证，提供 Claude Code / Codex CLI 拼车 |
+
+
+</div>
 
 ---
 
@@ -39,31 +47,15 @@
 - 👥 **成本分摊**: 想和朋友一起分摊Claude Code Max订阅费用？
 - ⚡ **稳定性**: 第三方镜像站经常故障不稳定，影响效率 ？
 
-[//]: # (如果有以上困惑，那这个项目可能适合你。)
-
-[//]: # ()
-[//]: # (> 💡 **热心网友福利**  )
-
-[//]: # (> 热心网友正在用本项目，正在拼车官方Claude Code Max 20X 200刀版本，是现在最稳定的方案。  )
-
-[//]: # (> 有需要自取: [https://ctok.ai/]&#40;https://ctok.ai/&#41;)
+如果有以上困惑，那这个项目可能适合你。
 
 ### 适合的场景
 
-✅ **找朋友拼车**: 三五好友一起分摊Claude Code Max订阅，Opus爽用  
+✅ **找朋友拼车**: 三五好友一起分摊Claude Code Max订阅  
 ✅ **隐私敏感**: 不想让第三方镜像看到你的对话内容  
 ✅ **技术折腾**: 有基本的技术基础，愿意自己搭建和维护  
 ✅ **稳定需求**: 需要长期稳定的Claude访问，不想受制于镜像站  
 ✅ **地区受限**: 无法直接访问Claude官方服务
-
-### 不适合的场景
-
-❌ **纯小白**: 完全不懂技术，连服务器都不会买  
-❌ **偶尔使用**: 一个月用不了几次，没必要折腾  
-❌ **注册问题**: 无法自行注册Claude账号  
-❌ **支付问题**: 没有支付渠道订阅Claude Code
-
-**如果你只是普通用户，对隐私要求不高，随便玩玩、想快速体验 Claude，那选个你熟知的镜像站会更合适。**
 
 ---
 
@@ -84,31 +76,7 @@
 
 ---
 
-## 🎯 v1.1.0 新功能亮点
-
-### 🧠 智能负载均衡系统
-- **AI驱动调度**: 基于成本、性能、健康状态的多维度智能选择
-- **5种调度策略**: 成本优先、性能优先、均衡调度等，满足不同需求
-- **成本优化**: 自动选择最优账户，可节约15-20%的API使用成本
-- **故障自愈**: 自动故障检测和转移，系统可用性99.9%
-
-### 📊 企业级数据导出
-- **批量导出**: 支持API Key数据的批量导出，JSON/CSV多格式
-- **安全脱敏**: 自动识别25+种敏感信息并安全处理
-- **实时进度**: 导出过程可视化，支持大数据量处理
-- **灵活过滤**: 按时间、状态、使用情况等多维度筛选
-
-### ⚡ 系统性能大幅提升
-- **响应速度**: 整体响应时间从1.2s降低到0.8s（提升33%）
-- **并发能力**: 并发处理能力从500提升到1000+（提升100%）
-- **内存优化**: 内存使用从120MB降低到80MB（降低33%）
-- **查询性能**: 查询速度提升300%，支持更大数据量
-
----
-
 ## 🚀 核心功能
-
-> 📸 **[点击查看界面预览](docs/preview.md)** - 查看Web管理界面的详细截图
 
 ### 基础功能
 
@@ -118,14 +86,11 @@
 
 ### 高级功能
 
-- 🧠 **智能负载均衡**: AI驱动的多维度调度，成本节约15-20%
-- 📤 **API Key批量导出**: 支持JSON、CSV格式，敏感数据自动脱敏
-- 🔄 **智能故障转移**: 账户出问题自动换下一个，99.9%可用性
-- 🚀 **性能优化**: 连接池、缓存，减少延迟，响应速度提升33%
-- 📊 **监控面板**: Web界面查看所有数据，实时负载均衡状态
+- 🔄 **智能切换**: 账户出问题自动换下一个
+- 🚀 **性能优化**: 连接池、缓存，减少延迟
+- 📊 **监控面板**: Web界面查看所有数据
 - 🛡️ **安全控制**: 访问限制、速率控制、客户端限制
 - 🌐 **代理支持**: 支持HTTP/SOCKS5代理
-- 💾 **数据管理**: 支持数据导出、导入和跨系统迁移
 
 ---
 
@@ -161,13 +126,7 @@
 ### 快速安装
 
 ```bash
-# 下载并运行管理脚本
-curl -fsSL https://raw.githubusercontent.com/Await-d/claude-relay-service/main/scripts/manage.sh -o manage.sh
-chmod +x manage.sh
-./manage.sh install
-
-# 安装后可以使用 crs 命令管理服务
-crs  # 显示交互式菜单
+curl -fsSL https://pincc.ai/manage.sh -o manage.sh && chmod +x manage.sh && ./manage.sh install
 ```
 
 ### 脚本功能
@@ -252,7 +211,7 @@ sudo systemctl start redis
 
 ```bash
 # 下载项目
-git clone https://github.com/Await-d/claude-relay-service.git
+git clone https://github.com/Wei-Shaw//claude-relay-service.git
 cd claude-relay-service
 
 # 安装依赖
@@ -277,11 +236,6 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
 
-# Webhook通知配置（可选）
-WEBHOOK_ENABLED=true
-WEBHOOK_URLS=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=your-key
-WEBHOOK_TIMEOUT=10000
-WEBHOOK_RETRIES=3
 ```
 
 **编辑 `config/config.js` 文件：**
@@ -330,60 +284,15 @@ npm run service:status
 
 ## 🐳 Docker 部署
 
-### 使用 Docker Hub 镜像（最简单）
+### Docker compose
 
-> 🚀 使用官方镜像，自动构建，始终保持最新版本
-
+#### 第一步：下载构建docker-compose.yml文件的脚本并执行
 ```bash
-# 拉取镜像（支持 amd64 和 arm64）
-docker pull await2719/claude-relay-service:latest
+curl -fsSL https://pincc.ai/crs-compose.sh -o crs-compose.sh && chmod +x crs-compose.sh && ./crs-compose.sh
+```
 
-# 使用 docker-compose
-# 创建 .env 文件用于 docker-compose 的环境变量：
-cat > .env << 'EOF'
-# 必填：安全密钥（请修改为随机值）
-JWT_SECRET=your-random-secret-key-at-least-32-chars
-ENCRYPTION_KEY=your-32-character-encryption-key
-
-# 可选：管理员凭据
-ADMIN_USERNAME=cr_admin
-ADMIN_PASSWORD=your-secure-password
-EOF
-
-# 创建 docker-compose.yml 文件：
-cat > docker-compose.yml << 'EOF'
-version: '3.8'
-services:
-  claude-relay:
-    image: await2719/claude-relay-service:latest
-    container_name: claude-relay-service
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - JWT_SECRET=${JWT_SECRET}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - REDIS_HOST=redis
-      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
-    volumes:
-      - ./logs:/app/logs
-      - ./data:/app/data
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    container_name: claude-relay-redis
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-
-volumes:
-  redis_data:
-EOF
-
-# 启动服务
+#### 第二步：启动
+```bash
 docker-compose up -d
 ```
 
@@ -396,7 +305,6 @@ docker-compose.yml 已包含：
 - ✅ Redis数据库
 - ✅ 健康检查
 - ✅ 自动重启
-- ✅ 所有配置通过环境变量管理
 
 ### 环境变量说明
 
@@ -486,6 +394,18 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:3000/api/" # 根据实际填写你�
 export ANTHROPIC_AUTH_TOKEN="后台创建的API密钥"
 ```
 
+**VSCode Claude 插件配置：**
+
+如果使用 VSCode 的 Claude 插件，需要在 `~/.claude/config.json` 文件中配置：
+
+```json
+{
+    "primaryApiKey": "crs"
+}
+```
+
+如果该文件不存在，请手动创建。Windows 用户路径为 `C:\Users\你的用户名\.claude\config.json`。
+
 **Gemini CLI 设置环境变量：**
 
 ```bash
@@ -506,151 +426,112 @@ claude
 gemini  # 或其他 Gemini CLI 命令
 ```
 
-**Codex 设置环境变量：**
+**Codex 配置：**
+
+在 `~/.codex/config.toml` 文件**开头**添加以下配置：
+
+```toml
+model_provider = "crs"
+model = "gpt-5-codex"
+model_reasoning_effort = "high"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+
+[model_providers.crs]
+name = "crs"
+base_url = "http://127.0.0.1:3000/openai"  # 根据实际填写你服务器的ip地址或者域名
+wire_api = "responses"
+requires_openai_auth = true
+env_key = "CRS_OAI_KEY"
+```
+
+在 `~/.codex/auth.json` 文件中配置API密钥为 null：
+
+```json
+{
+    "OPENAI_API_KEY": null  
+}
+```
+
+环境变量设置：
 
 ```bash
-export OPENAI_BASE_URL="http://127.0.0.1:3000/openai" # 根据实际填写你服务器的ip地址或者域名
-export OPENAI_API_KEY="后台创建的API密钥"  # 使用后台创建的API密钥
+export CRS_OAI_KEY="后台创建的API密钥"
 ```
+
+> ⚠️ 在通过 Nginx 反向代理 CRS 服务并使用 Codex CLI 时，需要在 http 块中添加 underscores_in_headers on;。因为 Nginx 默认会移除带下划线的请求头（如 session_id），一旦该头被丢弃，多账号环境下的粘性会话功能将失效。
 
 ### 5. 第三方工具API接入
 
-本服务支持多种API端点格式，方便接入不同的第三方工具（如Cherry Studio等）：
+本服务支持多种API端点格式，方便接入不同的第三方工具（如Cherry Studio等）。
 
-**Claude标准格式：**
+#### Cherry Studio 接入示例
+
+Cherry Studio支持多种AI服务的接入，下面是不同账号类型的详细配置：
+
+**1. Claude账号接入：**
 
 ```
-# 如果工具支持Claude标准格式，请使用该接口
+# API地址
 http://你的服务器:3000/claude/
+
+# 模型ID示例
+claude-sonnet-4-20250514  # Claude Sonnet 4
+claude-opus-4-20250514     # Claude Opus 4
 ```
 
-**OpenAI兼容格式：**
+配置步骤：
+- 供应商类型选择"Anthropic"
+- API地址填入：`http://你的服务器:3000/claude/`
+- API Key填入：后台创建的API密钥（cr_开头）
+
+**2. Gemini账号接入：**
 
 ```
-# 适用于需要OpenAI格式的第三方工具
-http://你的服务器:3000/openai/claude/v1/
+# API地址
+http://你的服务器:3000/gemini/
+
+# 模型ID示例
+gemini-2.5-pro             # Gemini 2.5 Pro
 ```
 
-**接入示例：**
+配置步骤：
+- 供应商类型选择"Gemini"
+- API地址填入：`http://你的服务器:3000/gemini/`
+- API Key填入：后台创建的API密钥（cr_开头）
 
-- **Cherry Studio**: 使用OpenAI格式 `http://你的服务器:3000/openai/claude/v1/` 使用Codex cli API `http://你的服务器:3000/openai/responses`
-- **其他支持自定义API的工具**: 根据工具要求选择合适的格式
+**3. Codex接入：**
+
+```
+# API地址
+http://你的服务器:3000/openai/
+
+# 模型ID（固定）
+gpt-5                      # Codex使用固定模型ID
+```
+
+配置步骤：
+- 供应商类型选择"Openai-Response"
+- API地址填入：`http://你的服务器:3000/openai/`
+- API Key填入：后台创建的API密钥（cr_开头）
+- **重要**：Codex只支持Openai-Response标准
+
+#### 其他第三方工具接入
+
+**接入要点：**
+
+- 所有账号类型都使用相同的API密钥（在后台统一创建）
+- 根据不同的路由前缀自动识别账号类型
+- `/claude/` - 使用Claude账号池
+- `/gemini/` - 使用Gemini账号池  
+- `/openai/` - 使用Codex账号（只支持Openai-Response格式）
+- 支持所有标准API端点（messages、models等）
 
 **重要说明：**
 
-- 所有格式都支持相同的功能，仅是路径不同
-- `/api/v1/messages` = `/claude/v1/messages` = `/openai/claude/v1/messages`
-- 选择适合你使用工具的格式即可
-- 支持所有Claude API端点（messages、models等）
-
----
-
-## 📢 Webhook 通知功能
-
-### 功能说明
-
-当系统检测到账号异常时，会自动发送 webhook 通知，支持企业微信、钉钉、飞书、Slack、Discord、Bark 等平台。
-
-### 通知触发场景
-
-- **Claude OAuth 账户**: token 过期或未授权时
-- **Claude Console 账户**: 系统检测到账户被封锁时
-- **Gemini 账户**: token 刷新失败时
-- **手动禁用账户**: 管理员手动禁用账户时
-
-### 配置方法
-
-**1. 环境变量配置**
-
-```bash
-# 启用 webhook 通知
-WEBHOOK_ENABLED=true
-
-# 企业微信 webhook 地址（替换为你的实际地址）
-WEBHOOK_URLS=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=your-key
-
-# 多个地址用逗号分隔
-WEBHOOK_URLS=https://webhook1.com,https://webhook2.com
-
-# 请求超时时间（毫秒，默认10秒）
-WEBHOOK_TIMEOUT=10000
-
-# 重试次数（默认3次）
-WEBHOOK_RETRIES=3
-```
-
-**2. 企业微信设置**
-
-1. 在企业微信群中添加「群机器人」
-2. 获取 webhook 地址：`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx`
-3. 将地址配置到 `WEBHOOK_URLS` 环境变量
-
-**3. Bark 推送设置（iOS）**
-
-Bark 是一个优秀的 iOS 推送应用，支持自定义推送服务器。
-
-1. **安装 Bark 应用**
-   - 从 App Store 下载安装 "Bark" 应用
-   - 打开应用获取设备密钥（类似：`abc123def456`）
-
-2. **管理后台配置**
-   - 登录 Web 管理后台：`http://你的服务器:3000/web`
-   - 进入"系统设置" > "Webhook 配置"
-   - 添加 Bark 平台，配置以下参数：
-     ```json
-     {
-       "name": "我的iPhone",
-       "type": "bark",
-       "url": "https://api.day.app",
-       "deviceKey": "abc123def456",
-       "enabled": true,
-       "sound": "bell",
-       "level": "active",
-       "group": "claude-relay-service"
-     }
-     ```
-
-3. **配置参数说明**
-   - `url`: Bark 服务器地址（默认官方服务器：`https://api.day.app`）
-   - `deviceKey`: 从 Bark 应用获取的设备密钥（必需）
-   - `usePost`: 是否使用 POST 方式（自建服务器可能需要）
-   - `sound`: 通知声音（可选：`bell`、`alarm`、`calypso` 等）
-   - `level`: 中断级别（`passive`、`active`、`critical`）
-   - `group`: 通知分组（可选）
-   - `icon`: 自定义图标 URL（可选）
-   - `clickUrl`: 点击通知打开的链接（可选）
-
-4. **自建 Bark 服务器**
-   如果使用自建服务器，配置示例：
-   ```json
-   {
-     "name": "自建Bark服务器",
-     "type": "bark",
-     "url": "https://your-bark-server.com/push",
-     "deviceKey": "your_device_key",
-     "usePost": true,
-     "enabled": true
-   }
-   ```
-
-### 通知内容格式
-
-系统会发送结构化的通知消息：
-
-```
-账户名称 账号异常，异常代码 ERROR_CODE
-平台：claude-oauth
-时间：2025-08-14 17:30:00
-原因：Token expired
-```
-
-### 测试 Webhook
-
-可以通过管理后台测试 webhook 连通性：
-
-1. 登录管理后台：`http://你的服务器:3000/web`
-2. 访问：`/admin/webhook/test`
-3. 发送测试通知确认配置正确
+- 确保在后台已添加对应类型的账号（Claude/Gemini/Codex）
+- API密钥可以通用，系统会根据路由自动选择账号类型
+- 建议为不同用户创建不同的API密钥便于使用统计
 
 ---
 
@@ -682,28 +563,21 @@ npm run service:stop
 
 当有新版本发布时，按照以下步骤升级服务：
 
-**📚 详细升级指南**: 请查看 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) 获取完整的版本迁移说明
-
-#### 快速升级（v1.0.18+ → v1.1.0）
-
 ```bash
-# 1. 备份数据（重要！）
-docker-compose exec redis redis-cli BGSAVE
-
-# 2. 进入项目目录
+# 1. 进入项目目录
 cd claude-relay-service
 
-# 3. 拉取最新代码
+# 2. 拉取最新代码
 git pull origin main
 
 # 如果遇到 package-lock.json 冲突，使用远程版本
 git checkout --theirs package-lock.json
 git add package-lock.json
 
-# 4. 安装新的依赖（如果有）
+# 3. 安装新的依赖（如果有）
 npm install
 
-# 5. 安装并构建前端
+# 4. 安装并构建前端
 npm run install:web
 npm run build:web
 
@@ -743,23 +617,6 @@ npm run service:status
    - 客户端验证失败时会返回403错误并记录详细信息
    - 通过日志可以查看实际的User-Agent格式，方便配置自定义客户端
 
-### 自定义客户端配置
-
-如需添加自定义客户端，可以修改 `config/config.js` 文件：
-
-```javascript
-clientRestrictions: {
-  predefinedClients: [
-    // ... 现有客户端配置
-    {
-      id: 'my_custom_client',
-      name: 'My Custom Client',
-      description: '我的自定义客户端',
-      userAgentPattern: /^MyClient\/[\d\.]+/i
-    }
-  ]
-}
-```
 
 ### 日志示例
 
@@ -932,28 +789,6 @@ module.exports = {
 - **GitHub Issues**: 提交详细的错误信息
 - **查看文档**: 仔细阅读错误信息和文档
 - **社区讨论**: 看看其他人是否遇到类似问题
-
----
-
-## 📚 完整文档
-
-### 📖 用户文档
-- **[发布说明](RELEASE_NOTES.md)** - v1.1.0 新功能亮点和使用指南
-- **[版本更新日志](CHANGELOG.md)** - 详细的版本历史和改进记录
-- **[部署指南](docs/DEPLOYMENT_GUIDE.md)** - 完整的部署配置和最佳实践
-- **[迁移指南](MIGRATION_GUIDE.md)** - 从旧版本升级的详细步骤
-
-### 🔧 技术文档
-- **[项目总结](docs/UPSTREAM_MERGE_SUMMARY.md)** - 技术架构和功能详解
-- **[负载均衡算法](docs/intelligent-load-balancing-algorithm-design.md)** - 智能调度算法设计
-- **[连接管理架构](docs/connection-session-architecture.md)** - 连接和会话管理
-- **[开发指南](CLAUDE.md)** - 开发者参考文档
-
-### 🎯 快速导航
-- **新用户**: 建议先看 [发布说明](RELEASE_NOTES.md) 了解功能特性
-- **升级用户**: 查看 [迁移指南](MIGRATION_GUIDE.md) 获取升级步骤
-- **开发者**: 参考 [CLAUDE.md](CLAUDE.md) 了解架构和开发指南
-- **运维人员**: 使用 [部署指南](docs/DEPLOYMENT_GUIDE.md) 进行生产部署
 
 ---
 

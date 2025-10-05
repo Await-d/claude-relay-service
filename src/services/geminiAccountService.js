@@ -1,4 +1,4 @@
-const database = require('../models/database')
+const redisClient = require('../models/redis')
 const { v4: uuidv4 } = require('uuid')
 const crypto = require('crypto')
 const config = require('../../config/config')
@@ -16,9 +16,6 @@ const {
 const tokenRefreshService = require('./tokenRefreshService')
 const LRUCache = require('../utils/lruCache')
 
-// Group Service for group-based account selection
-const groupService = require('./groupService')
-
 // Gemini CLI OAuth 配置 - 这些是公开的 Gemini CLI 凭据
 const OAUTH_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com'
 const OAUTH_CLIENT_SECRET = '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'
@@ -35,13 +32,6 @@ let _encryptionKeyCache = null
 
 // 🔄 解密结果缓存，提高解密性能
 const decryptCache = new LRUCache(500)
-
-// 🎯 Group scheduling configuration (consistent with ClaudeAccountService)
-const SCHEDULING_STRATEGIES = ['random', 'round_robin', 'weighted', 'priority', 'least_recent']
-
-// 🗂️ Group session caches for round_robin and state tracking
-const groupRoundRobinCache = new LRUCache(100) // Group round robin state
-const groupSelectionCache = new LRUCache(1000) // Recent selections for least_recent strategy
 
 // 生成加密密钥（使用与 claudeAccountService 相同的方法）
 function generateEncryptionKey() {
@@ -148,11 +138,19 @@ function createOAuth2Client(redirectUri = null, proxyConfig = null) {
   return new OAuth2Client(clientOptions)
 }
 
-// 生成授权 URL (支持 PKCE)
-async function generateAuthUrl(state = null, redirectUri = null) {
+// 生成授权 URL (支持 PKCE 和代理)
+async function generateAuthUrl(state = null, redirectUri = null, proxyConfig = null) {
   // 使用新的 redirect URI
   const finalRedirectUri = redirectUri || 'https://codeassist.google.com/authcode'
-  const oAuth2Client = createOAuth2Client(finalRedirectUri)
+  const oAuth2Client = createOAuth2Client(finalRedirectUri, proxyConfig)
+
+  if (proxyConfig) {
+    logger.info(
+      `🌐 Using proxy for Gemini auth URL generation: ${ProxyHelper.getProxyDescription(proxyConfig)}`
+    )
+  } else {
+    logger.debug('🌐 No proxy configured for Gemini auth URL generation')
+  }
 
   // 生成 PKCE code verifier
   const codeVerifier = await oAuth2Client.generateCodeVerifierAsync()
@@ -179,7 +177,7 @@ async function generateAuthUrl(state = null, redirectUri = null) {
 // 轮询检查 OAuth 授权状态
 async function pollAuthorizationStatus(sessionId, maxAttempts = 60, interval = 2000) {
   let attempts = 0
-  const client = database.getClientSafe()
+  const client = redisClient.getClientSafe()
 
   while (attempts < maxAttempts) {
     try {
@@ -329,36 +327,14 @@ async function createAccount(accountData) {
   const id = uuidv4()
   const now = new Date().toISOString()
 
-  const integrationType = accountData.integrationType || 'oauth'
-  const isThirdParty = integrationType === 'third_party'
-
-  // 第三方账户所需字段
-  let normalizedBaseUrl = ''
-  let encryptedApiKey = ''
-  const userAgent = accountData.userAgent || ''
-
-  if (isThirdParty) {
-    if (!accountData.baseUrl || !accountData.baseUrl.trim()) {
-      throw new Error('Base URL is required for third-party Gemini account')
-    }
-    if (!accountData.apiKey || !accountData.apiKey.trim()) {
-      throw new Error('API key is required for third-party Gemini account')
-    }
-
-    normalizedBaseUrl = accountData.baseUrl.trim()
-    if (normalizedBaseUrl.endsWith('/')) {
-      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1)
-    }
-    encryptedApiKey = encrypt(accountData.apiKey.trim())
-  }
-
-  // 处理 OAuth 凭证数据
-  let geminiOauth = ''
+  // 处理凭证数据
+  let geminiOauth = null
   let accessToken = ''
   let refreshToken = ''
   let expiresAt = ''
 
-  if (!isThirdParty && (accountData.geminiOauth || accountData.accessToken)) {
+  if (accountData.geminiOauth || accountData.accessToken) {
+    // 如果提供了完整的 OAuth 数据
     if (accountData.geminiOauth) {
       geminiOauth =
         typeof accountData.geminiOauth === 'string'
@@ -374,15 +350,17 @@ async function createAccount(accountData) {
       refreshToken = oauthData.refresh_token || ''
       expiresAt = oauthData.expiry_date ? new Date(oauthData.expiry_date).toISOString() : ''
     } else {
+      // 如果只提供了 access token
       ;({ accessToken } = accountData)
       refreshToken = accountData.refreshToken || ''
 
+      // 构造完整的 OAuth 数据
       geminiOauth = JSON.stringify({
         access_token: accessToken,
         refresh_token: refreshToken,
         scope: accountData.scope || OAUTH_SCOPES.join(' '),
         token_type: accountData.tokenType || 'Bearer',
-        expiry_date: accountData.expiryDate || Date.now() + 3600000
+        expiry_date: accountData.expiryDate || Date.now() + 3600000 // 默认1小时
       })
 
       expiresAt = new Date(accountData.expiryDate || Date.now() + 3600000).toISOString()
@@ -391,45 +369,36 @@ async function createAccount(accountData) {
 
   const account = {
     id,
-    platform: 'gemini',
+    platform: 'gemini', // 标识为 Gemini 账户
     name: accountData.name || 'Gemini Account',
     description: accountData.description || '',
     accountType: accountData.accountType || 'shared',
-    integrationType,
     isActive: 'true',
     status: 'active',
 
     // 调度相关
     schedulable: accountData.schedulable !== undefined ? String(accountData.schedulable) : 'true',
-    priority: accountData.priority || 50,
-    schedulingStrategy: accountData.schedulingStrategy || 'least_recent',
-    schedulingWeight: accountData.schedulingWeight || 1,
-    sequentialOrder: accountData.sequentialOrder || 1,
-    roundRobinIndex: 0,
-    usageCount: 0,
-    lastScheduledAt: '',
+    priority: accountData.priority || 50, // 调度优先级 (1-100，数字越小优先级越高)
 
     // OAuth 相关字段（加密存储）
     geminiOauth: geminiOauth ? encrypt(geminiOauth) : '',
     accessToken: accessToken ? encrypt(accessToken) : '',
     refreshToken: refreshToken ? encrypt(refreshToken) : '',
     expiresAt,
-    scopes:
-      !isThirdParty && accountData.geminiOauth ? accountData.scopes || OAUTH_SCOPES.join(' ') : '',
-
-    // 第三方账户字段
-    baseUrl: isThirdParty ? normalizedBaseUrl : accountData.baseUrl || '',
-    apiKey: encryptedApiKey,
-    userAgent,
+    // 只有OAuth方式才有scopes，手动添加的没有
+    scopes: accountData.geminiOauth ? accountData.scopes || OAUTH_SCOPES.join(' ') : '',
 
     // 代理设置
     proxy: accountData.proxy ? JSON.stringify(accountData.proxy) : '',
 
-    // 项目 ID（仅 OAuth 账户使用）
+    // 项目 ID（Google Cloud/Workspace 账号需要）
     projectId: accountData.projectId || '',
 
+    // 临时项目 ID（从 loadCodeAssist 接口自动获取）
+    tempProjectId: accountData.tempProjectId || '',
+
     // 支持的模型列表（可选）
-    supportedModels: accountData.supportedModels || [],
+    supportedModels: accountData.supportedModels || [], // 空数组表示支持所有模型
 
     // 时间戳
     createdAt: now,
@@ -438,15 +407,18 @@ async function createAccount(accountData) {
     lastRefreshAt: ''
   }
 
-  const client = database.getClientSafe()
+  // 保存到 Redis
+  const client = redisClient.getClientSafe()
   await client.hset(`${GEMINI_ACCOUNT_KEY_PREFIX}${id}`, account)
 
+  // 如果是共享账户，添加到共享账户集合
   if (account.accountType === 'shared') {
     await client.sadd(SHARED_GEMINI_ACCOUNTS_KEY, id)
   }
 
   logger.info(`Created Gemini account: ${id}`)
 
+  // 返回时解析代理配置
   const returnAccount = { ...account }
   if (returnAccount.proxy) {
     try {
@@ -456,16 +428,12 @@ async function createAccount(accountData) {
     }
   }
 
-  if (isThirdParty) {
-    returnAccount.apiKey = '***'
-  }
-
   return returnAccount
 }
 
 // 获取账户
 async function getAccount(accountId) {
-  const client = database.getClientSafe()
+  const client = redisClient.getClientSafe()
   const accountData = await client.hgetall(`${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`)
 
   if (!accountData || Object.keys(accountData).length === 0) {
@@ -481,9 +449,6 @@ async function getAccount(accountId) {
   }
   if (accountData.refreshToken) {
     accountData.refreshToken = decrypt(accountData.refreshToken)
-  }
-  if (accountData.apiKey) {
-    accountData.apiKey = decrypt(accountData.apiKey)
   }
 
   // 解析代理配置
@@ -522,39 +487,9 @@ async function updateAccount(accountId, updates) {
     updates.proxy = updates.proxy ? JSON.stringify(updates.proxy) : ''
   }
 
-  if (updates.baseUrl !== undefined) {
-    if (updates.baseUrl) {
-      let normalizedBaseUrl = updates.baseUrl.trim()
-      if (normalizedBaseUrl.endsWith('/')) {
-        normalizedBaseUrl = normalizedBaseUrl.slice(0, -1)
-      }
-      updates.baseUrl = normalizedBaseUrl
-    } else {
-      updates.baseUrl = ''
-    }
-  }
-
-  if (updates.apiKey !== undefined) {
-    updates.apiKey = updates.apiKey ? encrypt(updates.apiKey.trim()) : ''
-  }
-
   // 处理 schedulable 字段，确保正确转换为字符串存储
   if (updates.schedulable !== undefined) {
     updates.schedulable = updates.schedulable.toString()
-  }
-
-  // 处理调度策略字段
-  if (updates.schedulingWeight !== undefined) {
-    updates.schedulingWeight = parseInt(updates.schedulingWeight) || 1
-  }
-  if (updates.sequentialOrder !== undefined) {
-    updates.sequentialOrder = parseInt(updates.sequentialOrder) || 1
-  }
-  if (updates.roundRobinIndex !== undefined) {
-    updates.roundRobinIndex = parseInt(updates.roundRobinIndex) || 0
-  }
-  if (updates.usageCount !== undefined) {
-    updates.usageCount = parseInt(updates.usageCount) || 0
   }
 
   // 加密敏感字段
@@ -577,7 +512,7 @@ async function updateAccount(accountId, updates) {
   }
 
   // 更新账户类型时处理共享账户集合
-  const client = database.getClientSafe()
+  const client = redisClient.getClientSafe()
   if (updates.accountType && updates.accountType !== existingAccount.accountType) {
     if (updates.accountType === 'shared') {
       await client.sadd(SHARED_GEMINI_ACCOUNTS_KEY, accountId)
@@ -662,7 +597,7 @@ async function deleteAccount(accountId) {
   }
 
   // 从 Redis 删除
-  const client = database.getClientSafe()
+  const client = redisClient.getClientSafe()
   await client.del(`${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`)
 
   // 从共享账户集合中移除
@@ -685,7 +620,7 @@ async function deleteAccount(accountId) {
 
 // 获取所有账户
 async function getAllAccounts() {
-  const client = database.getClientSafe()
+  const client = redisClient.getClientSafe()
   const keys = await client.keys(`${GEMINI_ACCOUNT_KEY_PREFIX}*`)
   const accounts = []
 
@@ -711,13 +646,9 @@ async function getAllAccounts() {
       // 不解密敏感字段，只返回基本信息
       accounts.push({
         ...accountData,
-        integrationType: accountData.integrationType || 'oauth',
         geminiOauth: accountData.geminiOauth ? '[ENCRYPTED]' : '',
         accessToken: accountData.accessToken ? '[ENCRYPTED]' : '',
         refreshToken: accountData.refreshToken ? '[ENCRYPTED]' : '',
-        apiKey: accountData.apiKey ? '[ENCRYPTED]' : '',
-        baseUrl: accountData.baseUrl || '',
-        userAgent: accountData.userAgent || '',
         // 添加 scopes 字段用于判断认证方式
         // 处理空字符串和默认值的情况
         scopes:
@@ -746,7 +677,7 @@ async function getAllAccounts() {
 // 选择可用账户（支持专属和共享账户）
 async function selectAvailableAccount(apiKeyId, sessionHash = null) {
   // 首先检查是否有粘性会话
-  const client = database.getClientSafe()
+  const client = redisClient.getClientSafe()
   if (sessionHash) {
     const mappedAccountId = await client.get(`${ACCOUNT_SESSION_MAPPING_PREFIX}${sessionHash}`)
 
@@ -839,316 +770,8 @@ async function selectAvailableAccount(apiKeyId, sessionHash = null) {
   return selectedAccount
 }
 
-// 🎯 Group-based account selection (consistent with ClaudeAccountService)
-async function selectAccountByGroup(userId, options = {}) {
-  try {
-    logger.info(`🎯 Starting group-based Gemini account selection for user: ${userId}`)
-
-    // Get user's groups from GroupService
-    const userGroups = await groupService.getUserGroups(userId)
-
-    if (!userGroups || userGroups.length === 0) {
-      logger.info(`👤 User ${userId} has no groups, falling back to global account selection`)
-      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
-    }
-
-    logger.info(`🏢 User ${userId} belongs to ${userGroups.length} groups`)
-
-    // Collect all Gemini accounts from user's groups
-    const allGroupGeminiAccounts = []
-    const groupAccountMap = new Map() // Track which group each account belongs to
-
-    for (const group of userGroups) {
-      try {
-        const groupAccounts = await groupService.getGroupAccounts(group.id)
-        const geminiAccounts = groupAccounts.geminiAccounts || []
-
-        logger.debug(
-          `📊 Group ${group.name} (${group.id}) has ${geminiAccounts.length} Gemini accounts`
-        )
-
-        for (const accountId of geminiAccounts) {
-          allGroupGeminiAccounts.push(accountId)
-          groupAccountMap.set(accountId, group)
-        }
-      } catch (error) {
-        logger.warn(`⚠️ Failed to get accounts for group ${group.id}: ${error.message}`)
-      }
-    }
-
-    if (allGroupGeminiAccounts.length === 0) {
-      logger.info(`📭 No Gemini accounts found in user's groups, falling back to global selection`)
-      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
-    }
-
-    logger.info(
-      `🔍 Found ${allGroupGeminiAccounts.length} total Gemini accounts across user's groups`
-    )
-
-    // Remove duplicates while preserving group mapping
-    const uniqueAccountIds = [...new Set(allGroupGeminiAccounts)]
-    logger.info(`🎯 ${uniqueAccountIds.length} unique Gemini accounts to evaluate`)
-
-    // Get and filter healthy accounts
-    const healthyAccounts = []
-    for (const accountId of uniqueAccountIds) {
-      try {
-        const account = await getAccount(accountId)
-        if (account && account.isActive === 'true' && !isRateLimited(account)) {
-          // Add group information to account
-          const associatedGroup = groupAccountMap.get(accountId)
-          account._associatedGroup = associatedGroup
-          healthyAccounts.push(account)
-        } else {
-          logger.debug(
-            `⚠️ Gemini account ${accountId} filtered out: ${!account ? 'not found' : account.isActive !== 'true' ? 'inactive' : 'rate limited'}`
-          )
-        }
-      } catch (error) {
-        logger.warn(`⚠️ Error checking Gemini account ${accountId}: ${error.message}`)
-      }
-    }
-
-    if (healthyAccounts.length === 0) {
-      logger.warn(`⚠️ No healthy Gemini accounts found in groups, falling back to global selection`)
-      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
-    }
-
-    logger.info(`✅ ${healthyAccounts.length} healthy Gemini accounts available for selection`)
-
-    // Select account using configured scheduling strategy
-    const selectedAccount = await selectAccountFromGroupPool(healthyAccounts, userId, options)
-
-    if (!selectedAccount) {
-      logger.warn(`⚠️ Group account selection failed, falling back to global selection`)
-      return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
-    }
-
-    // Check and refresh token if needed
-    const isExpired = isTokenExpired(selectedAccount)
-
-    // Record token usage
-    logTokenUsage(
-      selectedAccount.id,
-      selectedAccount.name,
-      'gemini',
-      selectedAccount.expiresAt,
-      isExpired
-    )
-
-    if (isExpired) {
-      await refreshAccountToken(selectedAccount.id)
-      const refreshedAccount = await getAccount(selectedAccount.id)
-      logger.info(
-        `🔄 Refreshed token for selected Gemini account: ${selectedAccount.name} (${selectedAccount.id})`
-      )
-      return refreshedAccount
-    }
-
-    // Create sticky session mapping if requested
-    if (options.sessionHash) {
-      const client = database.getClientSafe()
-      await client.setex(
-        `${ACCOUNT_SESSION_MAPPING_PREFIX}${options.sessionHash}`,
-        3600, // 1 hour expiration
-        selectedAccount.id
-      )
-    }
-
-    // Record account usage
-    await recordAccountUsage(selectedAccount.id)
-
-    const associatedGroup = selectedAccount._associatedGroup
-    logger.success(
-      `🎯 Selected Gemini account: ${selectedAccount.name} (${selectedAccount.id}) from group: ${associatedGroup?.name || 'Unknown'}`
-    )
-
-    // Remove group metadata before returning
-    delete selectedAccount._associatedGroup
-
-    return selectedAccount
-  } catch (error) {
-    logger.error(`❌ Group-based Gemini account selection failed for user ${userId}:`, error)
-
-    // Fallback to global selection
-    logger.info(`🔄 Falling back to global Gemini account selection`)
-    return await selectAvailableAccount(options.apiKeyId, options.sessionHash)
-  }
-}
-
-// 🎲 Select account from group pool using scheduling strategy
-async function selectAccountFromGroupPool(accounts, userId, options = {}) {
-  if (!accounts || accounts.length === 0) {
-    return null
-  }
-
-  if (accounts.length === 1) {
-    return accounts[0]
-  }
-
-  // Get scheduling configuration from user's groups
-  const strategy = await getEffectiveSchedulingStrategy(userId, options)
-  logger.debug(`📋 Using scheduling strategy: ${strategy}`)
-
-  switch (strategy) {
-    case 'random':
-      return selectAccountRandom(accounts)
-
-    case 'round_robin':
-      return await selectAccountRoundRobin(accounts, userId)
-
-    case 'weighted':
-      return selectAccountWeighted(accounts)
-
-    case 'priority':
-      return selectAccountPriority(accounts)
-
-    case 'least_recent':
-    default:
-      return selectAccountLeastRecent(accounts)
-  }
-}
-
-// 🎯 Get effective scheduling strategy for user
-async function getEffectiveSchedulingStrategy(userId, options = {}) {
-  try {
-    // Use explicit strategy if provided
-    if (options.strategy && SCHEDULING_STRATEGIES.includes(options.strategy)) {
-      return options.strategy
-    }
-
-    // Get from user's groups (first group wins, or use default)
-    const userGroups = await groupService.getUserGroups(userId)
-    if (userGroups && userGroups.length > 0) {
-      const schedulingConfig = await groupService.getSchedulingConfig(userGroups[0].id)
-      if (schedulingConfig && schedulingConfig.strategy) {
-        return schedulingConfig.strategy
-      }
-    }
-
-    // Default strategy
-    return 'least_recent'
-  } catch (error) {
-    logger.warn(`⚠️ Failed to get scheduling strategy for user ${userId}: ${error.message}`)
-    return 'least_recent'
-  }
-}
-
-// 🎲 Random selection
-function selectAccountRandom(accounts) {
-  const randomIndex = Math.floor(Math.random() * accounts.length)
-  const selected = accounts[randomIndex]
-  logger.debug(`🎲 Random selection: ${selected.name} (${selected.id})`)
-  return selected
-}
-
-// 🔄 Round robin selection
-async function selectAccountRoundRobin(accounts, userId) {
-  try {
-    const cacheKey = `user_${userId}_gemini`
-    let currentIndex = groupRoundRobinCache.get(cacheKey) || 0
-
-    // Ensure index is within bounds
-    if (currentIndex >= accounts.length) {
-      currentIndex = 0
-    }
-
-    const selected = accounts[currentIndex]
-
-    // Update index for next selection
-    const nextIndex = (currentIndex + 1) % accounts.length
-    groupRoundRobinCache.set(cacheKey, nextIndex)
-
-    logger.debug(
-      `🔄 Round robin selection: ${selected.name} (${selected.id}), next index: ${nextIndex}`
-    )
-    return selected
-  } catch (error) {
-    logger.warn(`⚠️ Round robin selection failed: ${error.message}, falling back to random`)
-    return selectAccountRandom(accounts)
-  }
-}
-
-// ⚖️ Weighted selection
-function selectAccountWeighted(accounts) {
-  try {
-    // Calculate weights (higher schedulingWeight = higher chance)
-    const weightedAccounts = accounts.map((account) => ({
-      account,
-      weight: parseInt(account.schedulingWeight) || 1
-    }))
-
-    const totalWeight = weightedAccounts.reduce((sum, item) => sum + item.weight, 0)
-    let random = Math.random() * totalWeight
-
-    for (const item of weightedAccounts) {
-      random -= item.weight
-      if (random <= 0) {
-        logger.debug(
-          `⚖️ Weighted selection: ${item.account.name} (${item.account.id}), weight: ${item.weight}`
-        )
-        return item.account
-      }
-    }
-
-    // Fallback to last account
-    const fallback = weightedAccounts[weightedAccounts.length - 1].account
-    logger.debug(`⚖️ Weighted selection fallback: ${fallback.name} (${fallback.id})`)
-    return fallback
-  } catch (error) {
-    logger.warn(`⚠️ Weighted selection failed: ${error.message}, falling back to random`)
-    return selectAccountRandom(accounts)
-  }
-}
-
-// 🔝 Priority-based selection
-function selectAccountPriority(accounts) {
-  try {
-    // Sort by priority (lower number = higher priority)
-    const sorted = [...accounts].sort((a, b) => {
-      const priorityA = parseInt(a.priority) || 50
-      const priorityB = parseInt(b.priority) || 50
-      return priorityA - priorityB
-    })
-
-    const selected = sorted[0]
-    logger.debug(
-      `🔝 Priority selection: ${selected.name} (${selected.id}), priority: ${selected.priority || 50}`
-    )
-    return selected
-  } catch (error) {
-    logger.warn(`⚠️ Priority selection failed: ${error.message}, falling back to random`)
-    return selectAccountRandom(accounts)
-  }
-}
-
-// 📅 Least recently used selection
-function selectAccountLeastRecent(accounts) {
-  try {
-    // Sort by lastScheduledAt (oldest first)
-    const sorted = [...accounts].sort((a, b) => {
-      const timeA = a.lastScheduledAt ? new Date(a.lastScheduledAt).getTime() : 0
-      const timeB = b.lastScheduledAt ? new Date(b.lastScheduledAt).getTime() : 0
-      return timeA - timeB
-    })
-
-    const selected = sorted[0]
-    logger.debug(
-      `📅 Least recent selection: ${selected.name} (${selected.id}), last used: ${selected.lastScheduledAt || 'never'}`
-    )
-    return selected
-  } catch (error) {
-    logger.warn(`⚠️ Least recent selection failed: ${error.message}, falling back to random`)
-    return selectAccountRandom(accounts)
-  }
-}
-
 // 检查 token 是否过期
 function isTokenExpired(account) {
-  if ((account.integrationType || 'oauth') === 'third_party') {
-    return false
-  }
-
   if (!account.expiresAt) {
     return true
   }
@@ -1181,19 +804,6 @@ async function refreshAccountToken(accountId) {
     account = await getAccount(accountId)
     if (!account) {
       throw new Error('Account not found')
-    }
-
-    if ((account.integrationType || 'oauth') === 'third_party') {
-      logger.info(
-        `🔄 Skip token refresh for third-party Gemini account: ${account.name} (${accountId})`
-      )
-      return {
-        access_token: '',
-        refresh_token: '',
-        expiry_date: Date.now(),
-        scope: '',
-        token_type: 'api_key'
-      }
     }
 
     if (!account.refreshToken) {
@@ -1366,12 +976,10 @@ async function getAccountRateLimitInfo(accountId) {
   }
 }
 
-// 获取配置的OAuth客户端 - 参考GeminiCliSimulator的getOauthClient方法
-async function getOauthClient(accessToken, refreshToken) {
-  const client = new OAuth2Client({
-    clientId: OAUTH_CLIENT_ID,
-    clientSecret: OAUTH_CLIENT_SECRET
-  })
+// 获取配置的OAuth客户端 - 参考GeminiCliSimulator的getOauthClient方法（支持代理）
+async function getOauthClient(accessToken, refreshToken, proxyConfig = null) {
+  const client = createOAuth2Client(null, proxyConfig)
+
   const creds = {
     access_token: accessToken,
     refresh_token: refreshToken,
@@ -1379,6 +987,14 @@ async function getOauthClient(accessToken, refreshToken) {
       'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.profile openid https://www.googleapis.com/auth/userinfo.email',
     token_type: 'Bearer',
     expiry_date: 1754269905646
+  }
+
+  if (proxyConfig) {
+    logger.info(
+      `🌐 Using proxy for Gemini OAuth client: ${ProxyHelper.getProxyDescription(proxyConfig)}`
+    )
+  } else {
+    logger.debug('🌐 No proxy configured for Gemini OAuth client')
   }
 
   // 设置凭据
@@ -1397,8 +1013,8 @@ async function getOauthClient(accessToken, refreshToken) {
   return client
 }
 
-// 调用 Google Code Assist API 的 loadCodeAssist 方法
-async function loadCodeAssist(client, projectId = null) {
+// 调用 Google Code Assist API 的 loadCodeAssist 方法（支持代理）
+async function loadCodeAssist(client, projectId = null, proxyConfig = null) {
   const axios = require('axios')
   const CODE_ASSIST_ENDPOINT = 'https://cloudcode-pa.googleapis.com'
   const CODE_ASSIST_API_VERSION = 'v1internal'
@@ -1409,16 +1025,24 @@ async function loadCodeAssist(client, projectId = null) {
   const clientMetadata = {
     ideType: 'IDE_UNSPECIFIED',
     platform: 'PLATFORM_UNSPECIFIED',
-    pluginType: 'GEMINI',
-    duetProject: projectId
+    pluginType: 'GEMINI'
+  }
+
+  // 只有当projectId存在时才添加duetProject
+  if (projectId) {
+    clientMetadata.duetProject = projectId
   }
 
   const request = {
-    cloudaicompanionProject: projectId,
     metadata: clientMetadata
   }
 
-  const response = await axios({
+  // 只有当projectId存在时才添加cloudaicompanionProject
+  if (projectId) {
+    request.cloudaicompanionProject = projectId
+  }
+
+  const axiosConfig = {
     url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:loadCodeAssist`,
     method: 'POST',
     headers: {
@@ -1427,7 +1051,20 @@ async function loadCodeAssist(client, projectId = null) {
     },
     data: request,
     timeout: 30000
-  })
+  }
+
+  // 添加代理配置
+  const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
+  if (proxyAgent) {
+    axiosConfig.httpsAgent = proxyAgent
+    logger.info(
+      `🌐 Using proxy for Gemini loadCodeAssist: ${ProxyHelper.getProxyDescription(proxyConfig)}`
+    )
+  } else {
+    logger.debug('🌐 No proxy configured for Gemini loadCodeAssist')
+  }
+
+  const response = await axios(axiosConfig)
 
   logger.info('📋 loadCodeAssist API调用成功')
   return response.data
@@ -1460,8 +1097,8 @@ function getOnboardTier(loadRes) {
   }
 }
 
-// 调用 Google Code Assist API 的 onboardUser 方法（包含轮询逻辑）
-async function onboardUser(client, tierId, projectId, clientMetadata) {
+// 调用 Google Code Assist API 的 onboardUser 方法（包含轮询逻辑，支持代理）
+async function onboardUser(client, tierId, projectId, clientMetadata, proxyConfig = null) {
   const axios = require('axios')
   const CODE_ASSIST_ENDPOINT = 'https://cloudcode-pa.googleapis.com'
   const CODE_ASSIST_API_VERSION = 'v1internal'
@@ -1470,8 +1107,35 @@ async function onboardUser(client, tierId, projectId, clientMetadata) {
 
   const onboardReq = {
     tierId,
-    cloudaicompanionProject: projectId,
     metadata: clientMetadata
+  }
+
+  // 只有当projectId存在时才添加cloudaicompanionProject
+  if (projectId) {
+    onboardReq.cloudaicompanionProject = projectId
+  }
+
+  // 创建基础axios配置
+  const baseAxiosConfig = {
+    url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:onboardUser`,
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    data: onboardReq,
+    timeout: 30000
+  }
+
+  // 添加代理配置
+  const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
+  if (proxyAgent) {
+    baseAxiosConfig.httpsAgent = proxyAgent
+    logger.info(
+      `🌐 Using proxy for Gemini onboardUser: ${ProxyHelper.getProxyDescription(proxyConfig)}`
+    )
+  } else {
+    logger.debug('🌐 No proxy configured for Gemini onboardUser')
   }
 
   logger.info('📋 开始onboardUser API调用', {
@@ -1482,16 +1146,7 @@ async function onboardUser(client, tierId, projectId, clientMetadata) {
   })
 
   // 轮询onboardUser直到长运行操作完成
-  let lroRes = await axios({
-    url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:onboardUser`,
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    data: onboardReq,
-    timeout: 30000
-  })
+  let lroRes = await axios(baseAxiosConfig)
 
   let attempts = 0
   const maxAttempts = 12 // 最多等待1分钟（5秒 * 12次）
@@ -1500,17 +1155,7 @@ async function onboardUser(client, tierId, projectId, clientMetadata) {
     logger.info(`⏳ 等待onboardUser完成... (${attempts + 1}/${maxAttempts})`)
     await new Promise((resolve) => setTimeout(resolve, 5000))
 
-    lroRes = await axios({
-      url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:onboardUser`,
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      data: onboardReq,
-      timeout: 30000
-    })
-
+    lroRes = await axios(baseAxiosConfig)
     attempts++
   }
 
@@ -1522,8 +1167,13 @@ async function onboardUser(client, tierId, projectId, clientMetadata) {
   return lroRes.data
 }
 
-// 完整的用户设置流程 - 参考setup.ts的逻辑
-async function setupUser(client, initialProjectId = null, clientMetadata = null) {
+// 完整的用户设置流程 - 参考setup.ts的逻辑（支持代理）
+async function setupUser(
+  client,
+  initialProjectId = null,
+  clientMetadata = null,
+  proxyConfig = null
+) {
   logger.info('🚀 setupUser 开始', { initialProjectId, hasClientMetadata: !!clientMetadata })
 
   let projectId = initialProjectId || process.env.GOOGLE_CLOUD_PROJECT || null
@@ -1542,7 +1192,7 @@ async function setupUser(client, initialProjectId = null, clientMetadata = null)
 
   // 调用loadCodeAssist
   logger.info('📞 调用 loadCodeAssist...')
-  const loadRes = await loadCodeAssist(client, projectId)
+  const loadRes = await loadCodeAssist(client, projectId, proxyConfig)
   logger.info('✅ loadCodeAssist 完成', {
     hasCloudaicompanionProject: !!loadRes.cloudaicompanionProject
   })
@@ -1565,7 +1215,7 @@ async function setupUser(client, initialProjectId = null, clientMetadata = null)
 
   // 调用onboardUser
   logger.info('📞 调用 onboardUser...', { tierId: tier.id, projectId })
-  const lroRes = await onboardUser(client, tier.id, projectId, clientMetadata)
+  const lroRes = await onboardUser(client, tier.id, projectId, clientMetadata, proxyConfig)
   logger.info('✅ onboardUser 完成', { hasDone: !!lroRes.done, hasResponse: !!lroRes.response })
 
   const result = {
@@ -1579,8 +1229,8 @@ async function setupUser(client, initialProjectId = null, clientMetadata = null)
   return result
 }
 
-// 调用 Code Assist API 计算 token 数量
-async function countTokens(client, contents, model = 'gemini-2.0-flash-exp') {
+// 调用 Code Assist API 计算 token 数量（支持代理）
+async function countTokens(client, contents, model = 'gemini-2.0-flash-exp', proxyConfig = null) {
   const axios = require('axios')
   const CODE_ASSIST_ENDPOINT = 'https://cloudcode-pa.googleapis.com'
   const CODE_ASSIST_API_VERSION = 'v1internal'
@@ -1597,7 +1247,7 @@ async function countTokens(client, contents, model = 'gemini-2.0-flash-exp') {
 
   logger.info('📊 countTokens API调用开始', { model, contentsLength: contents.length })
 
-  const response = await axios({
+  const axiosConfig = {
     url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:countTokens`,
     method: 'POST',
     headers: {
@@ -1606,7 +1256,20 @@ async function countTokens(client, contents, model = 'gemini-2.0-flash-exp') {
     },
     data: request,
     timeout: 30000
-  })
+  }
+
+  // 添加代理配置
+  const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
+  if (proxyAgent) {
+    axiosConfig.httpsAgent = proxyAgent
+    logger.info(
+      `🌐 Using proxy for Gemini countTokens: ${ProxyHelper.getProxyDescription(proxyConfig)}`
+    )
+  } else {
+    logger.debug('🌐 No proxy configured for Gemini countTokens')
+  }
+
+  const response = await axios(axiosConfig)
 
   logger.info('✅ countTokens API调用成功', { totalTokens: response.data.totalTokens })
   return response.data
@@ -1630,12 +1293,20 @@ async function generateContent(
   // 按照 gemini-cli 的转换格式构造请求
   const request = {
     model: requestData.model,
-    project: projectId,
-    user_prompt_id: userPromptId,
     request: {
       ...requestData.request,
       session_id: sessionId
     }
+  }
+
+  // 只有当 userPromptId 存在时才添加
+  if (userPromptId) {
+    request.user_prompt_id = userPromptId
+  }
+
+  // 只有当projectId存在时才添加project字段
+  if (projectId) {
+    request.project = projectId
   }
 
   logger.info('🤖 generateContent API调用开始', {
@@ -1643,6 +1314,12 @@ async function generateContent(
     userPromptId,
     projectId,
     sessionId
+  })
+
+  // 添加详细的请求日志
+  logger.info('📦 generateContent 请求详情', {
+    url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:generateContent`,
+    requestBody: JSON.stringify(request, null, 2)
   })
 
   const axiosConfig = {
@@ -1692,12 +1369,20 @@ async function generateContentStream(
   // 按照 gemini-cli 的转换格式构造请求
   const request = {
     model: requestData.model,
-    project: projectId,
-    user_prompt_id: userPromptId,
     request: {
       ...requestData.request,
       session_id: sessionId
     }
+  }
+
+  // 只有当 userPromptId 存在时才添加
+  if (userPromptId) {
+    request.user_prompt_id = userPromptId
+  }
+
+  // 只有当projectId存在时才添加project字段
+  if (projectId) {
+    request.project = projectId
   }
 
   logger.info('🌊 streamGenerateContent API调用开始', {
@@ -1744,95 +1429,26 @@ async function generateContentStream(
   return response.data // 返回流对象
 }
 
-// 🔄 更新账户调度相关字段（用于调度算法）
-async function updateAccountSchedulingFields(accountId, updates) {
-  try {
-    const client = database.getClientSafe()
-    const accountKey = `${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`
-
-    // 将数字字段转换为字符串存储
-    const processedUpdates = {}
-    Object.keys(updates).forEach((key) => {
-      if (['schedulingWeight', 'sequentialOrder', 'roundRobinIndex', 'usageCount'].includes(key)) {
-        processedUpdates[key] = updates[key].toString()
-      } else {
-        processedUpdates[key] = updates[key]
-      }
-    })
-
-    // 添加更新时间
-    processedUpdates.updatedAt = new Date().toISOString()
-
-    await client.hmset(accountKey, processedUpdates)
-    logger.debug(`🔄 Updated Gemini scheduling fields for account ${accountId}:`, updates)
-    return { success: true }
-  } catch (error) {
-    logger.error(`❌ Failed to update Gemini scheduling fields for account ${accountId}:`, error)
-    throw error
+// 更新账户的临时项目 ID
+async function updateTempProjectId(accountId, tempProjectId) {
+  if (!tempProjectId) {
+    return
   }
-}
-
-// 🔢 增加账户使用计数并更新最后调度时间
-async function recordAccountUsage(accountId) {
-  try {
-    const client = database.getClientSafe()
-    const accountKey = `${GEMINI_ACCOUNT_KEY_PREFIX}${accountId}`
-
-    // 获取当前使用计数
-    const currentUsageCount = await client.hget(accountKey, 'usageCount')
-    const usageCount = parseInt(currentUsageCount || '0') + 1
-
-    // 更新使用计数和最后调度时间
-    await client.hmset(accountKey, {
-      usageCount: usageCount.toString(),
-      lastScheduledAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    })
-
-    logger.debug(`🔢 Recorded usage for Gemini account ${accountId}, new count: ${usageCount}`)
-    return { success: true, usageCount }
-  } catch (error) {
-    logger.error(`❌ Failed to record usage for Gemini account ${accountId}:`, error)
-    throw error
-  }
-}
-
-// 📊 获取账户费用统计
-/**
- * 获取账户费用统计
- * @param {string} accountId - Gemini账户ID
- * @param {Object} options - 选项
- * @param {string} options.period - 时间范围 ('today', 'week', 'month', 'all')
- * @returns {Promise<Object>} 费用统计数据
- */
-async function getAccountCostStats(accountId, options = {}) {
-  const AccountCostService = require('./accountCostService')
 
   try {
-    if (!accountId) {
-      throw new Error('Account ID is required')
+    const account = await getAccount(accountId)
+    if (!account) {
+      logger.warn(`Account ${accountId} not found when updating tempProjectId`)
+      return
     }
 
-    // 获取账户基本信息
-    const accountData = await getAccount(accountId)
-    if (!accountData) {
-      throw new Error('Account not found')
+    // 只有在没有固定项目 ID 的情况下才更新临时项目 ID
+    if (!account.projectId && tempProjectId !== account.tempProjectId) {
+      await updateAccount(accountId, { tempProjectId })
+      logger.info(`Updated tempProjectId for account ${accountId}: ${tempProjectId}`)
     }
-
-    // 使用通用费用统计服务
-    const costStats = await AccountCostService.getAccountCostStats(accountId, 'gemini', options)
-
-    // 添加账户名称
-    costStats.accountName = accountData.name
-
-    logger.debug(
-      `📊 Retrieved cost stats for Gemini account ${accountId}: $${(costStats.totalCost || 0).toFixed(6)} (${options.period || 'all'})`
-    )
-
-    return costStats
   } catch (error) {
-    logger.error(`❌ Failed to get cost stats for Gemini account ${accountId}:`, error)
-    throw error
+    logger.error(`Failed to update tempProjectId for account ${accountId}:`, error)
   }
 }
 
@@ -1847,7 +1463,6 @@ module.exports = {
   deleteAccount,
   getAllAccounts,
   selectAvailableAccount,
-  selectAccountByGroup,
   refreshAccountToken,
   markAccountUsed,
   setAccountRateLimited,
@@ -1862,18 +1477,10 @@ module.exports = {
   decrypt,
   generateEncryptionKey,
   decryptCache, // 暴露缓存对象以便测试和监控
-  // Group scheduling exports
-  SCHEDULING_STRATEGIES,
-  groupRoundRobinCache,
-  groupSelectionCache,
   countTokens,
   generateContent,
   generateContentStream,
-  // 新增调度相关方法
-  updateAccountSchedulingFields,
-  recordAccountUsage,
-  // 费用统计方法
-  getAccountCostStats,
+  updateTempProjectId,
   OAUTH_CLIENT_ID,
   OAUTH_SCOPES
 }
