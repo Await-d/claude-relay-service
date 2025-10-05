@@ -39,24 +39,6 @@ function convertMessagesToGemini(messages) {
 
 // 转换 Gemini 响应到 OpenAI 格式
 function convertGeminiResponse(geminiResponse, model, stream = false) {
-  // 🔍 增强的输入验证
-  if (!geminiResponse) {
-    logger.warn('Empty Gemini response received')
-    return null
-  }
-
-  // 🚨 处理API错误响应
-  if (geminiResponse.error) {
-    const error = new Error(geminiResponse.error.message || 'Gemini API error')
-    error.status = geminiResponse.error.code === 'PERMISSION_DENIED' ? 403 : 400
-    error.error = {
-      message: geminiResponse.error.message || 'Gemini API error',
-      type: 'api_error',
-      code: geminiResponse.error.code || 'unknown'
-    }
-    throw error
-  }
-
   if (stream) {
     // 流式响应
     const candidate = geminiResponse.candidates?.[0]
@@ -65,15 +47,7 @@ function convertGeminiResponse(geminiResponse, model, stream = false) {
     }
 
     const content = candidate.content?.parts?.[0]?.text || ''
-    // 🔧 改进的finishReason处理 - 支持更多v1beta格式
-    let { finishReason } = candidate
-    if (finishReason) {
-      finishReason = finishReason.toLowerCase()
-      // 标准化不同的结束原因格式
-      if (finishReason === 'finish_reason_stop' || finishReason === 'stop') {
-        finishReason = 'stop'
-      }
-    }
+    const finishReason = candidate.finishReason?.toLowerCase()
 
     return {
       id: `chatcmpl-${Date.now()}`,
@@ -91,30 +65,21 @@ function convertGeminiResponse(geminiResponse, model, stream = false) {
       ]
     }
   } else {
-    // 非流式响应 - 增强的v1beta兼容性
+    // 非流式响应
     const candidate = geminiResponse.candidates?.[0]
     if (!candidate) {
-      // 🔧 更详细的错误信息，帮助调试v1beta问题
-      const errorMsg = geminiResponse.promptFeedback
-        ? `Gemini blocked request: ${geminiResponse.promptFeedback.blockReason || 'unknown reason'}`
-        : 'No response candidates from Gemini'
-      throw new Error(errorMsg)
+      throw new Error('No response from Gemini')
     }
 
     const content = candidate.content?.parts?.[0]?.text || ''
-    // 🔧 改进的finishReason处理
-    let finishReason = candidate.finishReason?.toLowerCase() || 'stop'
-    if (finishReason === 'finish_reason_stop') {
-      finishReason = 'stop'
-    }
+    const finishReason = candidate.finishReason?.toLowerCase() || 'stop'
 
-    // 计算 token 使用量 - 支持v1beta的不同响应格式
-    const usage = geminiResponse.usageMetadata ||
-      geminiResponse.usage || {
-        promptTokenCount: 0,
-        candidatesTokenCount: 0,
-        totalTokenCount: 0
-      }
+    // 计算 token 使用量
+    const usage = geminiResponse.usageMetadata || {
+      promptTokenCount: 0,
+      candidatesTokenCount: 0,
+      totalTokenCount: 0
+    }
 
     return {
       id: `chatcmpl-${Date.now()}`,
@@ -132,9 +97,9 @@ function convertGeminiResponse(geminiResponse, model, stream = false) {
         }
       ],
       usage: {
-        prompt_tokens: usage.promptTokenCount || usage.prompt_tokens || 0,
-        completion_tokens: usage.candidatesTokenCount || usage.completion_tokens || 0,
-        total_tokens: usage.totalTokenCount || usage.total_tokens || 0
+        prompt_tokens: usage.promptTokenCount,
+        completion_tokens: usage.candidatesTokenCount,
+        total_tokens: usage.totalTokenCount
       }
     }
   }
@@ -175,33 +140,19 @@ async function* handleStreamResponse(response, model, apiKeyId, accountId = null
         try {
           const data = JSON.parse(jsonData)
 
-          // 🔍 增强的错误检查：处理v1beta可能出现的异常数据结构
-          if (data.error) {
-            logger.error('Gemini API error in stream:', data.error)
-            yield `data: ${JSON.stringify({
-              error: {
-                message: data.error.message || 'Gemini API error',
-                type: 'api_error',
-                code: data.error.code || 'unknown'
-              }
-            })}\n\n`
-            continue
-          }
-
           // 更新使用量统计
           if (data.usageMetadata) {
             totalUsage = data.usageMetadata
           }
 
-          // 转换并发送响应 - 增加空响应处理
+          // 转换并发送响应
           const openaiResponse = convertGeminiResponse(data, model, true)
           if (openaiResponse) {
             yield `data: ${JSON.stringify(openaiResponse)}\n\n`
           }
 
-          // 检查是否结束 - 增强结束条件检测
-          const finishReason = data.candidates?.[0]?.finishReason
-          if (finishReason === 'STOP' || finishReason === 'FINISH_REASON_STOP') {
+          // 检查是否结束
+          if (data.candidates?.[0]?.finishReason === 'STOP') {
             // 记录使用量
             if (apiKeyId && totalUsage.totalTokenCount > 0) {
               await apiKeyService
@@ -223,12 +174,7 @@ async function* handleStreamResponse(response, model, apiKeyId, accountId = null
             return
           }
         } catch (e) {
-          // 🔧 改进的JSON解析错误处理
-          logger.debug('Error parsing JSON line:', e.message, 'Line:', jsonData?.substring(0, 100))
-          // 对于无法解析的数据，尝试直接转发（某些情况下可能是原始SSE数据）
-          if (jsonData && !jsonData.includes('error')) {
-            logger.debug('Attempting to forward unparsed data as-is')
-          }
+          logger.debug('Error parsing JSON line:', e.message, 'Line:', jsonData)
         }
       }
     }
@@ -283,19 +229,17 @@ async function sendGeminiRequest({
   signal,
   projectId,
   location = 'us-central1',
-  accountId = null,
-  integrationType = 'oauth',
-  baseUrl = '',
-  apiKey = '',
-  userAgent = ''
+  accountId = null
 }) {
   // 确保模型名称格式正确
   if (!model.startsWith('models/')) {
     model = `models/${model}`
   }
 
+  // 转换消息格式
   const { contents, systemInstruction } = convertMessagesToGemini(messages)
 
+  // 构建请求体
   const requestBody = {
     contents,
     generationConfig: {
@@ -309,56 +253,30 @@ async function sendGeminiRequest({
     requestBody.systemInstruction = { parts: [{ text: systemInstruction }] }
   }
 
-  const isThirdParty = integrationType === 'third_party'
-  const headers = {
-    'Content-Type': 'application/json'
-  }
+  // 配置请求选项
   let apiUrl
-
-  if (isThirdParty) {
-    if (!baseUrl || !baseUrl.trim()) {
-      throw new Error('Base URL is required for third-party Gemini account')
-    }
-    if (!apiKey || !apiKey.trim()) {
-      throw new Error('API key is required for third-party Gemini account')
-    }
-
-    let normalizedBaseUrl = baseUrl.trim()
-    if (normalizedBaseUrl.endsWith('/')) {
-      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1)
-    }
-
-    apiUrl = `${normalizedBaseUrl}/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}`
-    headers.Authorization = `Bearer ${apiKey.trim()}`
-    headers['x-api-key'] = apiKey.trim()
-    if (userAgent) {
-      headers['User-Agent'] = userAgent
-    }
-    logger.debug(`Using third-party Gemini endpoint: ${apiUrl}`)
+  if (projectId) {
+    // 使用项目特定的 URL 格式（Google Cloud/Workspace 账号）
+    apiUrl = `${GEMINI_API_BASE}/projects/${projectId}/locations/${location}/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}?alt=sse`
+    logger.debug(`Using project-specific URL with projectId: ${projectId}, location: ${location}`)
   } else {
-    if (!accessToken) {
-      throw new Error('Access token is required for Gemini OAuth account')
-    }
-
-    if (projectId) {
-      apiUrl = `${GEMINI_API_BASE}/projects/${projectId}/locations/${location}/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}?alt=sse`
-      logger.debug(`Using project-specific URL with projectId: ${projectId}, location: ${location}`)
-    } else {
-      apiUrl = `${GEMINI_API_BASE}/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}?alt=sse`
-      logger.debug('Using standard URL without projectId')
-    }
-
-    headers.Authorization = `Bearer ${accessToken}`
+    // 使用标准 URL 格式（个人 Google 账号）
+    apiUrl = `${GEMINI_API_BASE}/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}?alt=sse`
+    logger.debug('Using standard URL without projectId')
   }
 
   const axiosConfig = {
     method: 'POST',
     url: apiUrl,
-    headers,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
     data: requestBody,
-    timeout: config.requestTimeout || 120000
+    timeout: config.requestTimeout || 600000
   }
 
+  // 添加代理配置
   const proxyAgent = createProxyAgent(proxy)
   if (proxyAgent) {
     axiosConfig.httpsAgent = proxyAgent
@@ -367,6 +285,7 @@ async function sendGeminiRequest({
     logger.debug('🌐 No proxy configured for Gemini API request')
   }
 
+  // 添加 AbortController 信号支持
   if (signal) {
     axiosConfig.signal = signal
     logger.debug('AbortController signal attached to request')
@@ -377,33 +296,36 @@ async function sendGeminiRequest({
   }
 
   try {
-    logger.debug(`Sending request to Gemini API (${integrationType})`)
+    logger.debug('Sending request to Gemini API')
     const response = await axios(axiosConfig)
 
     if (stream) {
       return handleStreamResponse(response, model, apiKeyId, accountId)
+    } else {
+      // 非流式响应
+      const openaiResponse = convertGeminiResponse(response.data, model, false)
+
+      // 记录使用量
+      if (apiKeyId && openaiResponse.usage) {
+        await apiKeyService
+          .recordUsage(
+            apiKeyId,
+            openaiResponse.usage.prompt_tokens || 0,
+            openaiResponse.usage.completion_tokens || 0,
+            0, // cacheCreateTokens
+            0, // cacheReadTokens
+            model,
+            accountId
+          )
+          .catch((error) => {
+            logger.error('❌ Failed to record Gemini usage:', error)
+          })
+      }
+
+      return openaiResponse
     }
-
-    const openaiResponse = convertGeminiResponse(response.data, model, false)
-
-    if (apiKeyId && openaiResponse.usage) {
-      await apiKeyService
-        .recordUsage(
-          apiKeyId,
-          openaiResponse.usage.prompt_tokens || 0,
-          openaiResponse.usage.completion_tokens || 0,
-          0,
-          0,
-          model,
-          accountId
-        )
-        .catch((error) => {
-          logger.error('❌ Failed to record Gemini usage:', error)
-        })
-    }
-
-    return openaiResponse
   } catch (error) {
+    // 检查是否是请求被中止
     if (error.name === 'CanceledError' || error.code === 'ECONNABORTED') {
       logger.info('Gemini request was aborted by client')
       const err = new Error('Request canceled by client')
@@ -418,6 +340,7 @@ async function sendGeminiRequest({
 
     logger.error('Gemini API request failed:', error.response?.data || error.message)
 
+    // 转换错误格式
     if (error.response) {
       const geminiError = error.response.data?.error
       const err = new Error(geminiError?.message || 'Gemini API request failed')
@@ -441,59 +364,25 @@ async function sendGeminiRequest({
 }
 
 // 获取可用模型列表
-async function getAvailableModels({
-  integrationType = 'oauth',
-  accessToken,
-  proxy,
-  projectId,
-  location = 'us-central1',
-  baseUrl = '',
-  apiKey = '',
-  userAgent = ''
-}) {
-  const isThirdParty = integrationType === 'third_party'
-  const headers = {}
+async function getAvailableModels(accessToken, proxy, projectId, location = 'us-central1') {
   let apiUrl
-
-  if (isThirdParty) {
-    if (!baseUrl || !baseUrl.trim() || !apiKey || !apiKey.trim()) {
-      logger.warn('Third-party Gemini account missing baseUrl or apiKey when listing models')
-      return []
-    }
-
-    let normalizedBaseUrl = baseUrl.trim()
-    if (normalizedBaseUrl.endsWith('/')) {
-      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1)
-    }
-
-    apiUrl = `${normalizedBaseUrl}/models`
-    headers.Authorization = `Bearer ${apiKey.trim()}`
-    headers['x-api-key'] = apiKey.trim()
-    if (userAgent) {
-      headers['User-Agent'] = userAgent
-    }
-    logger.debug(`Fetching models from third-party Gemini endpoint: ${apiUrl}`)
+  if (projectId) {
+    // 使用项目特定的 URL 格式
+    apiUrl = `${GEMINI_API_BASE}/projects/${projectId}/locations/${location}/models`
+    logger.debug(`Fetching models with projectId: ${projectId}, location: ${location}`)
   } else {
-    if (!accessToken) {
-      throw new Error('Access token is required for Gemini OAuth account')
-    }
-
-    if (projectId) {
-      apiUrl = `${GEMINI_API_BASE}/projects/${projectId}/locations/${location}/models`
-      logger.debug(`Fetching models with projectId: ${projectId}, location: ${location}`)
-    } else {
-      apiUrl = `${GEMINI_API_BASE}/models`
-      logger.debug('Fetching models without projectId')
-    }
-
-    headers.Authorization = `Bearer ${accessToken}`
+    // 使用标准 URL 格式
+    apiUrl = `${GEMINI_API_BASE}/models`
+    logger.debug('Fetching models without projectId')
   }
 
   const axiosConfig = {
     method: 'GET',
     url: apiUrl,
-    headers,
-    timeout: 30000
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    },
+    timeout: config.requestTimeout || 600000
   }
 
   const proxyAgent = createProxyAgent(proxy)
@@ -510,6 +399,7 @@ async function getAvailableModels({
     const response = await axios(axiosConfig)
     const models = response.data.models || []
 
+    // 转换为 OpenAI 格式
     return models
       .filter((model) => model.supportedGenerationMethods?.includes('generateContent'))
       .map((model) => ({
@@ -520,6 +410,7 @@ async function getAvailableModels({
       }))
   } catch (error) {
     logger.error('Failed to get Gemini models:', error)
+    // 返回默认模型列表
     return [
       {
         id: 'gemini-2.0-flash-exp',
@@ -538,20 +429,20 @@ async function countTokens({
   accessToken,
   proxy,
   projectId,
-  location = 'us-central1',
-  integrationType = 'oauth',
-  baseUrl = '',
-  apiKey = '',
-  userAgent = ''
+  location = 'us-central1'
 }) {
+  // 确保模型名称格式正确
   if (!model.startsWith('models/')) {
     model = `models/${model}`
   }
 
+  // 转换内容格式 - 支持多种输入格式
   let requestBody
   if (Array.isArray(content)) {
+    // 如果content是数组，直接使用
     requestBody = { contents: content }
   } else if (typeof content === 'string') {
+    // 如果是字符串，转换为Gemini格式
     requestBody = {
       contents: [
         {
@@ -560,61 +451,41 @@ async function countTokens({
       ]
     }
   } else if (content.parts || content.role) {
+    // 如果已经是Gemini格式的单个content
     requestBody = { contents: [content] }
   } else {
+    // 其他情况，尝试直接使用
     requestBody = { contents: content }
   }
 
-  const isThirdParty = integrationType === 'third_party'
+  // 构建API URL - countTokens需要使用generativelanguage API
+  const GENERATIVE_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
   let apiUrl
-  const headers = {
-    'Content-Type': 'application/json'
-  }
-
-  if (isThirdParty) {
-    if (!baseUrl || !baseUrl.trim() || !apiKey || !apiKey.trim()) {
-      throw new Error('Third-party Gemini account requires baseUrl and apiKey for countTokens')
-    }
-
-    let normalizedBaseUrl = baseUrl.trim()
-    if (normalizedBaseUrl.endsWith('/')) {
-      normalizedBaseUrl = normalizedBaseUrl.slice(0, -1)
-    }
-
-    apiUrl = `${normalizedBaseUrl}/${model}:countTokens`
-    headers.Authorization = `Bearer ${apiKey.trim()}`
-    headers['x-api-key'] = apiKey.trim()
-    if (userAgent) {
-      headers['User-Agent'] = userAgent
-    }
+  if (projectId) {
+    // 使用项目特定的 URL 格式（Google Cloud/Workspace 账号）
+    apiUrl = `${GENERATIVE_API_BASE}/projects/${projectId}/locations/${location}/${model}:countTokens`
+    logger.debug(
+      `Using project-specific countTokens URL with projectId: ${projectId}, location: ${location}`
+    )
   } else {
-    if (!accessToken) {
-      throw new Error('Access token is required for Gemini OAuth account')
-    }
-
-    const GENERATIVE_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
-    if (projectId) {
-      apiUrl = `${GENERATIVE_API_BASE}/projects/${projectId}/locations/${location}/${model}:countTokens`
-      logger.debug(
-        `Using project-specific countTokens URL with projectId: ${projectId}, location: ${location}`
-      )
-    } else {
-      apiUrl = `${GENERATIVE_API_BASE}/${model}:countTokens`
-      logger.debug('Using standard countTokens URL without projectId')
-    }
-
-    headers.Authorization = `Bearer ${accessToken}`
-    headers['X-Goog-User-Project'] = projectId || undefined
+    // 使用标准 URL 格式（个人 Google 账号）
+    apiUrl = `${GENERATIVE_API_BASE}/${model}:countTokens`
+    logger.debug('Using standard countTokens URL without projectId')
   }
 
   const axiosConfig = {
     method: 'POST',
     url: apiUrl,
-    headers,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'X-Goog-User-Project': projectId || undefined
+    },
     data: requestBody,
-    timeout: 30000
+    timeout: config.requestTimeout || 600000
   }
 
+  // 添加代理配置
   const proxyAgent = createProxyAgent(proxy)
   if (proxyAgent) {
     axiosConfig.httpsAgent = proxyAgent
@@ -630,17 +501,53 @@ async function countTokens({
     logger.debug(`Request body: ${JSON.stringify(requestBody, null, 2)}`)
     const response = await axios(axiosConfig)
 
+    // 返回符合Gemini API格式的响应
     return {
-      totalTokens: response.data.totalTokens || response.data.total_tokens || 0,
-      promptTokens: response.data.promptTokens || response.data.prompt_tokens || 0,
-      candidatesTokens: response.data.candidatesTokens || response.data.completion_tokens || 0
+      totalTokens: response.data.totalTokens || 0,
+      totalBillableCharacters: response.data.totalBillableCharacters || 0,
+      ...response.data
     }
   } catch (error) {
-    logger.error('Gemini countTokens API request failed:', {
+    logger.error(`Gemini countTokens API request failed for URL: ${apiUrl}`)
+    logger.error(
+      'Request config:',
+      JSON.stringify(
+        {
+          url: apiUrl,
+          headers: axiosConfig.headers,
+          data: requestBody
+        },
+        null,
+        2
+      )
+    )
+    logger.error('Error details:', error.response?.data || error.message)
+
+    // 转换错误格式
+    if (error.response) {
+      const geminiError = error.response.data?.error
+      const errorObj = new Error(
+        geminiError?.message ||
+          `Gemini countTokens API request failed (Status: ${error.response.status})`
+      )
+      errorObj.status = error.response.status
+      errorObj.error = {
+        message:
+          geminiError?.message ||
+          `Gemini countTokens API request failed (Status: ${error.response.status})`,
+        type: geminiError?.code || 'api_error',
+        code: geminiError?.code
+      }
+      throw errorObj
+    }
+
+    const errorObj = new Error(error.message)
+    errorObj.status = 500
+    errorObj.error = {
       message: error.message,
-      response: error.response?.data
-    })
-    throw error
+      type: 'network_error'
+    }
+    throw errorObj
   }
 }
 

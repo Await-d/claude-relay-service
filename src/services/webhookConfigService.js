@@ -1,4 +1,4 @@
-const database = require('../models/database')
+const redis = require('../models/redis')
 const logger = require('../utils/logger')
 const { v4: uuidv4 } = require('uuid')
 
@@ -13,12 +13,22 @@ class WebhookConfigService {
    */
   async getConfig() {
     try {
-      const configStr = await database.client.get(this.DEFAULT_CONFIG_KEY)
+      const configStr = await redis.client.get(this.DEFAULT_CONFIG_KEY)
       if (!configStr) {
         // 返回默认配置
         return this.getDefaultConfig()
       }
-      return JSON.parse(configStr)
+
+      const storedConfig = JSON.parse(configStr)
+      const defaultConfig = this.getDefaultConfig()
+
+      // 合并默认通知类型，确保新增类型有默认值
+      storedConfig.notificationTypes = {
+        ...defaultConfig.notificationTypes,
+        ...(storedConfig.notificationTypes || {})
+      }
+
+      return storedConfig
     } catch (error) {
       logger.error('获取webhook配置失败:', error)
       return this.getDefaultConfig()
@@ -30,13 +40,20 @@ class WebhookConfigService {
    */
   async saveConfig(config) {
     try {
+      const defaultConfig = this.getDefaultConfig()
+
+      config.notificationTypes = {
+        ...defaultConfig.notificationTypes,
+        ...(config.notificationTypes || {})
+      }
+
       // 验证配置
       this.validateConfig(config)
 
       // 添加更新时间
       config.updatedAt = new Date().toISOString()
 
-      await database.client.set(this.DEFAULT_CONFIG_KEY, JSON.stringify(config))
+      await redis.client.set(this.DEFAULT_CONFIG_KEY, JSON.stringify(config))
       logger.info('✅ Webhook配置已保存')
 
       return config
@@ -65,7 +82,6 @@ class WebhookConfigService {
         'telegram',
         'custom',
         'bark',
-        'iyuu',
         'smtp'
       ]
 
@@ -74,23 +90,11 @@ class WebhookConfigService {
           throw new Error(`不支持的平台类型: ${platform.type}`)
         }
 
-        // 特殊平台验证处理
-        if (['bark', 'smtp', 'telegram'].includes(platform.type)) {
-          // 这些平台不强制要求 URL
-        } else {
+        // Bark和SMTP平台不使用标准URL
+        if (!['bark', 'smtp', 'telegram'].includes(platform.type)) {
           if (!platform.url || !this.isValidUrl(platform.url)) {
             throw new Error(`无效的webhook URL: ${platform.url}`)
           }
-        }
-
-        if (platform.type === 'bark') {
-          this.validateBarkConfig(platform)
-        } else if (platform.type === 'iyuu') {
-          this.validateIYUUConfig(platform)
-        } else if (platform.type === 'telegram') {
-          this.validateTelegramConfig(platform)
-        } else if (platform.type === 'smtp') {
-          this.validateSMTPConfig(platform)
         }
 
         // 验证平台特定的配置
@@ -132,190 +136,172 @@ class WebhookConfigService {
         }
         break
       case 'telegram':
-        // Telegram 配置已单独验证
-        break
-      case 'bark':
-        // Bark配置已在 validateBarkConfig 中验证
-        break
-      case 'iyuu':
-        // IYUU配置已在 validateIYUUConfig 中验证
-        break
-      case 'smtp':
-        // SMTP 配置已在 validateSMTPConfig 中验证
+        if (!platform.botToken) {
+          throw new Error('Telegram 平台必须提供机器人 Token')
+        }
+        if (!platform.chatId) {
+          throw new Error('Telegram 平台必须提供 Chat ID')
+        }
+
+        if (!platform.botToken.includes(':')) {
+          logger.warn('⚠️ Telegram 机器人 Token 格式可能不正确')
+        }
+
+        if (!/^[-\d]+$/.test(String(platform.chatId))) {
+          logger.warn('⚠️ Telegram Chat ID 应该是数字，如为频道请确认已获取正确ID')
+        }
+
+        if (platform.apiBaseUrl) {
+          if (!this.isValidUrl(platform.apiBaseUrl)) {
+            throw new Error('Telegram API 基础地址格式无效')
+          }
+          const { protocol } = new URL(platform.apiBaseUrl)
+          if (!['http:', 'https:'].includes(protocol)) {
+            throw new Error('Telegram API 基础地址仅支持 http 或 https 协议')
+          }
+        }
+
+        if (platform.proxyUrl) {
+          if (!this.isValidUrl(platform.proxyUrl)) {
+            throw new Error('Telegram 代理地址格式无效')
+          }
+          const proxyProtocol = new URL(platform.proxyUrl).protocol
+          const supportedProtocols = ['http:', 'https:', 'socks4:', 'socks4a:', 'socks5:']
+          if (!supportedProtocols.includes(proxyProtocol)) {
+            throw new Error('Telegram 代理仅支持 http/https/socks 协议')
+          }
+        }
         break
       case 'custom':
         // 自定义webhook，用户自行负责格式
         break
-    }
-  }
+      case 'bark':
+        // 验证设备密钥
+        if (!platform.deviceKey) {
+          throw new Error('Bark平台必须提供设备密钥')
+        }
 
-  /**
-   * 验证Bark配置
-   */
-  validateBarkConfig(platform) {
-    // Bark有两种配置模式：
-    // 1. 传统模式：提供完整的API URL (如 https://api.day.app) 和设备密钥
-    // 2. POST模式：提供完整的推送URL和设备密钥
+        // 验证设备密钥格式（通常是22-24位字符）
+        if (platform.deviceKey.length < 20 || platform.deviceKey.length > 30) {
+          logger.warn('⚠️ Bark设备密钥长度可能不正确，请检查是否完整复制')
+        }
 
-    if (platform.usePost) {
-      // POST模式验证
-      if (!platform.url || !this.isValidUrl(platform.url)) {
-        throw new Error('Bark POST模式需要有效的推送URL')
+        // 验证服务器URL（如果提供）
+        if (platform.serverUrl) {
+          if (!this.isValidUrl(platform.serverUrl)) {
+            throw new Error('Bark服务器URL格式无效')
+          }
+          if (!platform.serverUrl.includes('/push')) {
+            logger.warn('⚠️ Bark服务器URL应该以/push结尾')
+          }
+        }
+
+        // 验证声音参数（如果提供）
+        if (platform.sound) {
+          const validSounds = [
+            'default',
+            'alarm',
+            'anticipate',
+            'bell',
+            'birdsong',
+            'bloom',
+            'calypso',
+            'chime',
+            'choo',
+            'descent',
+            'electronic',
+            'fanfare',
+            'glass',
+            'gotosleep',
+            'healthnotification',
+            'horn',
+            'ladder',
+            'mailsent',
+            'minuet',
+            'multiwayinvitation',
+            'newmail',
+            'newsflash',
+            'noir',
+            'paymentsuccess',
+            'shake',
+            'sherwoodforest',
+            'silence',
+            'spell',
+            'suspense',
+            'telegraph',
+            'tiptoes',
+            'typewriters',
+            'update',
+            'alert'
+          ]
+          if (!validSounds.includes(platform.sound)) {
+            logger.warn(`⚠️ 未知的Bark声音: ${platform.sound}`)
+          }
+        }
+
+        // 验证级别参数
+        if (platform.level) {
+          const validLevels = ['active', 'timeSensitive', 'passive', 'critical']
+          if (!validLevels.includes(platform.level)) {
+            throw new Error(`无效的Bark通知级别: ${platform.level}`)
+          }
+        }
+
+        // 验证图标URL（如果提供）
+        if (platform.icon && !this.isValidUrl(platform.icon)) {
+          logger.warn('⚠️ Bark图标URL格式可能不正确')
+        }
+
+        // 验证点击跳转URL（如果提供）
+        if (platform.clickUrl && !this.isValidUrl(platform.clickUrl)) {
+          logger.warn('⚠️ Bark点击跳转URL格式可能不正确')
+        }
+        break
+      case 'smtp': {
+        // 验证SMTP必需配置
+        if (!platform.host) {
+          throw new Error('SMTP平台必须提供主机地址')
+        }
+        if (!platform.user) {
+          throw new Error('SMTP平台必须提供用户名')
+        }
+        if (!platform.pass) {
+          throw new Error('SMTP平台必须提供密码')
+        }
+        if (!platform.to) {
+          throw new Error('SMTP平台必须提供接收邮箱')
+        }
+
+        // 验证端口
+        if (platform.port && (platform.port < 1 || platform.port > 65535)) {
+          throw new Error('SMTP端口必须在1-65535之间')
+        }
+
+        // 验证邮箱格式
+        // 支持两种格式：1. 纯邮箱 user@domain.com  2. 带名称 Name <user@domain.com>
+        const simpleEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+        // 验证接收邮箱
+        const toEmails = Array.isArray(platform.to) ? platform.to : [platform.to]
+        for (const email of toEmails) {
+          // 提取实际邮箱地址（如果是 Name <email> 格式）
+          const actualEmail = email.includes('<') ? email.match(/<([^>]+)>/)?.[1] : email
+          if (!actualEmail || !simpleEmailRegex.test(actualEmail)) {
+            throw new Error(`无效的接收邮箱格式: ${email}`)
+          }
+        }
+
+        // 验证发送邮箱（支持 Name <email> 格式）
+        if (platform.from) {
+          const actualFromEmail = platform.from.includes('<')
+            ? platform.from.match(/<([^>]+)>/)?.[1]
+            : platform.from
+          if (!actualFromEmail || !simpleEmailRegex.test(actualFromEmail)) {
+            throw new Error(`无效的发送邮箱格式: ${platform.from}`)
+          }
+        }
+        break
       }
-      if (!platform.deviceKey) {
-        throw new Error('Bark POST模式需要设备密钥 (deviceKey)')
-      }
-    } else {
-      // GET模式验证 (传统Bark API)
-      if (!platform.url || !this.isValidUrl(platform.url)) {
-        throw new Error('Bark需要有效的API URL (如 https://api.day.app)')
-      }
-      if (!platform.deviceKey) {
-        throw new Error('Bark需要设备密钥 (deviceKey)')
-      }
-
-      // 检查URL格式
-      const url = new URL(platform.url)
-      if (!url.hostname.includes('day.app') && !url.hostname.includes('bark')) {
-        logger.warn('⚠️ Bark服务器URL格式可能不正确，请确认是否为有效的Bark服务器')
-      }
-    }
-
-    // 验证可选参数
-    if (platform.sound) {
-      const validSounds = [
-        'alarm',
-        'alert',
-        'anticipate',
-        'bell',
-        'birdsong',
-        'bloom',
-        'calypso',
-        'chime',
-        'choo',
-        'descent',
-        'electronic',
-        'fanfare',
-        'glass',
-        'gotosleep',
-        'healthnotification',
-        'horn',
-        'ladder',
-        'mailsent',
-        'minuet',
-        'multiwayinvitation',
-        'newmail',
-        'newsflash',
-        'noir',
-        'paymentsuccess',
-        'shake',
-        'sherwoodforest',
-        'silence',
-        'spell',
-        'suspense',
-        'telegraph',
-        'tiptoes',
-        'typewriters',
-        'update'
-      ]
-
-      if (!validSounds.includes(platform.sound)) {
-        logger.warn(`⚠️ Bark声音 "${platform.sound}" 可能不被支持`)
-      }
-    }
-
-    if (platform.level) {
-      const validLevels = ['passive', 'active', 'critical', 'timeSensitive']
-      if (!validLevels.includes(platform.level)) {
-        throw new Error(`Bark中断级别必须是: ${validLevels.join(', ')}`)
-      }
-    }
-  }
-
-  /**
-   * 验证IYUU配置
-   */
-  validateIYUUConfig(platform) {
-    // IYUU必须提供token
-    if (!platform.token || typeof platform.token !== 'string') {
-      throw new Error('IYUU推送需要有效的Token')
-    }
-
-    // 验证token格式
-    const tokenRegex = /^[a-zA-Z0-9]{8,64}$/
-    if (!tokenRegex.test(platform.token)) {
-      throw new Error('IYUU Token格式无效，应为8-64位字母数字组合')
-    }
-
-    // 验证超时设置
-    if (platform.timeout && (platform.timeout < 1000 || platform.timeout > 30000)) {
-      throw new Error('IYUU请求超时时间应在1000-30000毫秒之间')
-    }
-
-    // 验证强制POST模式设置
-    if (platform.forcePost && typeof platform.forcePost !== 'boolean') {
-      throw new Error('IYUU强制POST模式设置必须为布尔值')
-    }
-
-    logger.debug('✅ IYUU配置验证通过', {
-      token: `${platform.token.substring(0, 8)}***`,
-      timeout: platform.timeout || 10000,
-      forcePost: platform.forcePost || false
-    })
-  }
-
-  validateTelegramConfig(platform) {
-    if (!platform.botToken || typeof platform.botToken !== 'string') {
-      throw new Error('Telegram 平台必须提供机器人 Token')
-    }
-
-    if (!platform.chatId) {
-      throw new Error('Telegram 平台必须提供 Chat ID')
-    }
-
-    if (platform.apiBaseUrl && !this.isValidUrl(platform.apiBaseUrl)) {
-      throw new Error('Telegram API 基础地址格式无效')
-    }
-
-    if (platform.proxyUrl && !this.isValidUrl(platform.proxyUrl)) {
-      throw new Error('Telegram 代理地址格式无效')
-    }
-  }
-
-  validateSMTPConfig(platform) {
-    if (!platform.host) {
-      throw new Error('SMTP 平台必须提供 host')
-    }
-
-    if (!platform.port) {
-      throw new Error('SMTP 平台必须提供 port')
-    }
-
-    if (!platform.username) {
-      throw new Error('SMTP 平台必须提供用户名 (username)')
-    }
-
-    if (!platform.password) {
-      throw new Error('SMTP 平台必须提供密码 (password)')
-    }
-
-    if (!platform.to) {
-      throw new Error('SMTP 平台必须提供接收邮箱 (to)')
-    }
-
-    if (platform.port < 1 || platform.port > 65535) {
-      throw new Error('SMTP 端口必须在 1-65535 之间')
-    }
-
-    const emails = Array.isArray(platform.to) ? platform.to : [platform.to]
-    for (const email of emails) {
-      if (!this.isValidEmailAddress(email)) {
-        throw new Error(`无效的接收邮箱格式: ${email}`)
-      }
-    }
-
-    if (platform.from && !this.isValidEmailAddress(platform.from)) {
-      throw new Error(`无效的发送邮箱格式: ${platform.from}`)
     }
   }
 
@@ -331,24 +317,6 @@ class WebhookConfigService {
     }
   }
 
-  isValidEmailAddress(value) {
-    if (!value) {
-      return false
-    }
-
-    const extractEmail = (input) => {
-      if (typeof input !== 'string') {
-        return ''
-      }
-      const match = input.match(/<([^>]+)>/)
-      return match ? match[1] : input
-    }
-
-    const email = extractEmail(value).trim()
-    const simpleEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    return simpleEmailRegex.test(email)
-  }
-
   /**
    * 获取默认配置
    */
@@ -361,8 +329,8 @@ class WebhookConfigService {
         quotaWarning: true, // 配额警告
         systemError: true, // 系统错误
         securityAlert: true, // 安全警报
-        test: true, // 测试通知
-        rateLimitRecovery: true
+        rateLimitRecovery: true, // 限流恢复
+        test: true // 测试通知
       },
       retrySettings: {
         maxRetries: 3,
@@ -387,7 +355,7 @@ class WebhookConfigService {
       platform.createdAt = new Date().toISOString()
 
       // 验证平台配置
-      this.validateConfig({ platforms: [platform] })
+      this.validatePlatformConfig(platform)
 
       // 添加到配置
       config.platforms = config.platforms || []
@@ -422,7 +390,7 @@ class WebhookConfigService {
       }
 
       // 验证更新后的配置
-      this.validateConfig({ platforms: [config.platforms[index]] })
+      this.validatePlatformConfig(config.platforms[index])
 
       await this.saveConfig(config)
 

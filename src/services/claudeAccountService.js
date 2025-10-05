@@ -2,9 +2,9 @@ const { v4: uuidv4 } = require('uuid')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
 const axios = require('axios')
-const database = require('../models/database')
-const logger = require('../utils/logger')
+const redis = require('../models/redis')
 const config = require('../../config/config')
+const logger = require('../utils/logger')
 const { maskToken } = require('../utils/tokenMask')
 const {
   logRefreshStart,
@@ -15,14 +15,23 @@ const {
 } = require('../utils/tokenRefreshLogger')
 const tokenRefreshService = require('./tokenRefreshService')
 const LRUCache = require('../utils/lruCache')
-const CostCalculator = require('../utils/costCalculator')
-const groupService = require('./groupService')
-const IntelligentLoadBalancer = require('./intelligentLoadBalancer')
+const { formatDateWithTimezone, getISOStringWithTimezone } = require('../utils/dateHelper')
 
 class ClaudeAccountService {
   constructor() {
     this.claudeApiUrl = 'https://console.anthropic.com/v1/oauth/token'
     this.claudeOauthClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+    let maxWarnings = parseInt(process.env.CLAUDE_5H_WARNING_MAX_NOTIFICATIONS || '', 10)
+
+    if (Number.isNaN(maxWarnings) && config.claude?.fiveHourWarning) {
+      maxWarnings = parseInt(config.claude.fiveHourWarning.maxNotificationsPerWindow, 10)
+    }
+
+    if (Number.isNaN(maxWarnings) || maxWarnings < 1) {
+      maxWarnings = 1
+    }
+
+    this.maxFiveHourWarningsPerWindow = Math.min(maxWarnings, 10)
 
     // 加密相关常量
     this.ENCRYPTION_ALGORITHM = 'aes-256-cbc'
@@ -43,28 +52,6 @@ class ClaudeAccountService {
       },
       10 * 60 * 1000
     )
-
-    // 🎯 Group scheduling configuration
-    this.SCHEDULING_STRATEGIES = [
-      'random',
-      'round_robin',
-      'weighted',
-      'priority',
-      'least_recent',
-      'intelligent'
-    ]
-
-    // 🗂️ Group session caches for round_robin and state tracking
-    this._groupRoundRobinCache = new LRUCache(100) // Group round robin state
-    this._groupSelectionCache = new LRUCache(1000) // Recent selections for least_recent strategy
-
-    // 🧠 智能负载均衡器实例
-    this.intelligentLoadBalancer = new IntelligentLoadBalancer({
-      performanceWindow: 300000, // 5分钟性能窗口
-      healthCheckThreshold: 0.7, // 健康检查阈值
-      costOptimizationEnabled: true, // 启用成本优化
-      maxCostThreshold: 0.05 // 最大可接受成本阈值
-    })
   }
 
   // 🏢 创建Claude账户
@@ -83,12 +70,10 @@ class ClaudeAccountService {
       priority = 50, // 调度优先级 (1-100，数字越小优先级越高)
       schedulable = true, // 是否可被调度
       subscriptionInfo = null, // 手动设置的订阅信息
-      // 新增调度策略字段
-      schedulingStrategy = 'least_recent', // 调度策略
-      schedulingWeight = 1, // 调度权重 (1-10)
-      sequentialOrder = 1, // 顺序调度的顺序号
-      // 新增警告控制字段
-      autoStopOnWarning = false // 是否在警告时自动停止调度
+      autoStopOnWarning = false, // 5小时使用量接近限制时自动停止调度
+      useUnifiedUserAgent = false, // 是否使用统一Claude Code版本的User-Agent
+      useUnifiedClientId = false, // 是否使用统一的客户端标识
+      unifiedClientId = '' // 统一的客户端标识
     } = options
 
     const accountId = uuidv4()
@@ -119,21 +104,16 @@ class ClaudeAccountService {
         status: 'active', // 有OAuth数据的账户直接设为active
         errorMessage: '',
         schedulable: schedulable.toString(), // 是否可被调度
+        autoStopOnWarning: autoStopOnWarning.toString(), // 5小时使用量接近限制时自动停止调度
+        useUnifiedUserAgent: useUnifiedUserAgent.toString(), // 是否使用统一Claude Code版本的User-Agent
+        useUnifiedClientId: useUnifiedClientId.toString(), // 是否使用统一的客户端标识
+        unifiedClientId: unifiedClientId || '', // 统一的客户端标识
         // 优先使用手动设置的订阅信息，否则使用OAuth数据中的，否则默认为空
         subscriptionInfo: subscriptionInfo
           ? JSON.stringify(subscriptionInfo)
           : claudeAiOauth.subscriptionInfo
             ? JSON.stringify(claudeAiOauth.subscriptionInfo)
-            : '',
-        // 新增调度策略字段
-        schedulingStrategy,
-        schedulingWeight: schedulingWeight.toString(),
-        sequentialOrder: sequentialOrder.toString(),
-        roundRobinIndex: '0', // 轮询索引，初始为0
-        usageCount: '0', // 使用计数，初始为0
-        lastScheduledAt: '', // 最后调度时间，初始为空
-        // 新增警告控制字段
-        autoStopOnWarning: autoStopOnWarning.toString() // 是否在警告时自动停止调度
+            : ''
       }
     } else {
       // 兼容旧格式
@@ -158,21 +138,14 @@ class ClaudeAccountService {
         status: 'created', // created, active, expired, error
         errorMessage: '',
         schedulable: schedulable.toString(), // 是否可被调度
+        autoStopOnWarning: autoStopOnWarning.toString(), // 5小时使用量接近限制时自动停止调度
+        useUnifiedUserAgent: useUnifiedUserAgent.toString(), // 是否使用统一Claude Code版本的User-Agent
         // 手动设置的订阅信息
-        subscriptionInfo: subscriptionInfo ? JSON.stringify(subscriptionInfo) : '',
-        // 新增调度策略字段
-        schedulingStrategy,
-        schedulingWeight: schedulingWeight.toString(),
-        sequentialOrder: sequentialOrder.toString(),
-        roundRobinIndex: '0', // 轮询索引，初始为0
-        usageCount: '0', // 使用计数，初始为0
-        lastScheduledAt: '', // 最后调度时间，初始为空
-        // 新增警告控制字段
-        autoStopOnWarning: autoStopOnWarning.toString() // 是否在警告时自动停止调度
+        subscriptionInfo: subscriptionInfo ? JSON.stringify(subscriptionInfo) : ''
       }
     }
 
-    await database.setClaudeAccount(accountId, accountData)
+    await redis.setClaudeAccount(accountId, accountData)
 
     logger.success(`🏢 Created Claude account: ${name} (${accountId})`)
 
@@ -208,15 +181,10 @@ class ClaudeAccountService {
       createdAt: accountData.createdAt,
       expiresAt: accountData.expiresAt,
       scopes: claudeAiOauth ? claudeAiOauth.scopes : [],
-      // 返回调度策略字段
-      schedulingStrategy,
-      schedulingWeight,
-      sequentialOrder,
-      roundRobinIndex: 0,
-      usageCount: 0,
-      lastScheduledAt: '',
-      // 返回警告控制字段
-      autoStopOnWarning
+      autoStopOnWarning,
+      useUnifiedUserAgent,
+      useUnifiedClientId,
+      unifiedClientId
     }
   }
 
@@ -225,7 +193,7 @@ class ClaudeAccountService {
     let lockAcquired = false
 
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
@@ -251,7 +219,7 @@ class ClaudeAccountService {
         await new Promise((resolve) => setTimeout(resolve, 2000))
 
         // 重新获取账户数据（可能已被其他进程刷新）
-        const updatedData = await database.getClaudeAccount(accountId)
+        const updatedData = await redis.getClaudeAccount(accountId)
         if (updatedData && updatedData.accessToken) {
           const accessToken = this._decryptSensitiveData(updatedData.accessToken)
           return {
@@ -334,7 +302,7 @@ class ClaudeAccountService {
         accountData.status = 'active'
         accountData.errorMessage = ''
 
-        await database.setClaudeAccount(accountId, accountData)
+        await redis.setClaudeAccount(accountId, accountData)
 
         // 刷新成功后，如果有 user:profile 权限，尝试获取账号 profile 信息
         // 检查账户的 scopes 是否包含 user:profile（标准 OAuth 有，Setup Token 没有）
@@ -374,12 +342,12 @@ class ClaudeAccountService {
       }
     } catch (error) {
       // 记录刷新失败
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (accountData) {
         logRefreshError(accountId, accountData.name, 'claude', error)
         accountData.status = 'error'
         accountData.errorMessage = error.message
-        await database.setClaudeAccount(accountId, accountData)
+        await redis.setClaudeAccount(accountId, accountData)
 
         // 发送Webhook通知
         try {
@@ -411,7 +379,7 @@ class ClaudeAccountService {
   // 🔍 获取账户信息
   async getAccount(accountId) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         return null
@@ -427,7 +395,7 @@ class ClaudeAccountService {
   // 🎯 获取有效的访问token
   async getValidAccessToken(accountId) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
@@ -471,7 +439,7 @@ class ClaudeAccountService {
       // 更新最后使用时间和会话窗口
       accountData.lastUsedAt = new Date().toISOString()
       await this.updateSessionWindow(accountId, accountData)
-      await database.setClaudeAccount(accountId, accountData)
+      await redis.setClaudeAccount(accountId, accountData)
 
       return accessToken
     } catch (error) {
@@ -483,7 +451,7 @@ class ClaudeAccountService {
   // 📋 获取所有Claude账户
   async getAllAccounts() {
     try {
-      const accounts = await database.getAllClaudeAccounts()
+      const accounts = await redis.getAllClaudeAccounts()
 
       // 处理返回数据，移除敏感信息并添加限流状态和会话窗口信息
       const processedAccounts = await Promise.all(
@@ -493,6 +461,14 @@ class ClaudeAccountService {
 
           // 获取会话窗口信息
           const sessionWindowInfo = await this.getSessionWindowInfo(account.id)
+
+          // 构建 Claude Usage 快照（从 Redis 读取）
+          const claudeUsage = this.buildClaudeUsageSnapshot(account)
+
+          // 判断授权类型：检查 scopes 是否包含 OAuth 相关权限
+          const scopes = account.scopes && account.scopes.trim() ? account.scopes.split(' ') : []
+          const isOAuth = scopes.includes('user:profile') && scopes.includes('user:inference')
+          const authType = isOAuth ? 'oauth' : 'setup-token'
 
           return {
             id: account.id,
@@ -506,6 +482,7 @@ class ClaudeAccountService {
             accountType: account.accountType || 'shared', // 兼容旧数据，默认为共享
             priority: parseInt(account.priority) || 50, // 兼容旧数据，默认优先级50
             platform: account.platform || 'claude', // 添加平台标识，用于前端区分
+            authType, // OAuth 或 Setup Token
             createdAt: account.createdAt,
             lastUsedAt: account.lastUsedAt,
             lastRefreshAt: account.lastRefreshAt,
@@ -536,8 +513,22 @@ class ClaudeAccountService {
               remainingTime: null,
               lastRequestTime: null
             },
+            // 添加 Claude Usage 信息（三窗口）
+            claudeUsage: claudeUsage || null,
             // 添加调度状态
-            schedulable: account.schedulable !== 'false' // 默认为true，兼容历史数据
+            schedulable: account.schedulable !== 'false', // 默认为true，兼容历史数据
+            // 添加自动停止调度设置
+            autoStopOnWarning: account.autoStopOnWarning === 'true', // 默认为false
+            // 添加5小时自动停止状态
+            fiveHourAutoStopped: account.fiveHourAutoStopped === 'true',
+            fiveHourStoppedAt: account.fiveHourStoppedAt || null,
+            // 添加统一User-Agent设置
+            useUnifiedUserAgent: account.useUnifiedUserAgent === 'true', // 默认为false
+            // 添加统一客户端标识设置
+            useUnifiedClientId: account.useUnifiedClientId === 'true', // 默认为false
+            unifiedClientId: account.unifiedClientId || '', // 统一的客户端标识
+            // 添加停止原因
+            stoppedReason: account.stoppedReason || null
           }
         })
       )
@@ -549,10 +540,63 @@ class ClaudeAccountService {
     }
   }
 
+  // 📋 获取单个账号的概要信息（用于前端展示会话窗口等状态）
+  async getAccountOverview(accountId) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+
+      if (!accountData || Object.keys(accountData).length === 0) {
+        return null
+      }
+
+      const [sessionWindowInfo, rateLimitInfo] = await Promise.all([
+        this.getSessionWindowInfo(accountId),
+        this.getAccountRateLimitInfo(accountId)
+      ])
+
+      const sessionWindow = sessionWindowInfo || {
+        hasActiveWindow: false,
+        windowStart: null,
+        windowEnd: null,
+        progress: 0,
+        remainingTime: null,
+        lastRequestTime: accountData.lastRequestTime || null,
+        sessionWindowStatus: accountData.sessionWindowStatus || null
+      }
+
+      const rateLimitStatus = rateLimitInfo
+        ? {
+            isRateLimited: !!rateLimitInfo.isRateLimited,
+            rateLimitedAt: rateLimitInfo.rateLimitedAt || null,
+            minutesRemaining: rateLimitInfo.minutesRemaining || 0,
+            rateLimitEndAt: rateLimitInfo.rateLimitEndAt || null
+          }
+        : {
+            isRateLimited: false,
+            rateLimitedAt: null,
+            minutesRemaining: 0,
+            rateLimitEndAt: null
+          }
+
+      return {
+        id: accountData.id,
+        accountType: accountData.accountType || 'shared',
+        platform: accountData.platform || 'claude',
+        isActive: accountData.isActive === 'true',
+        schedulable: accountData.schedulable !== 'false',
+        sessionWindow,
+        rateLimitStatus
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to build Claude account overview for ${accountId}:`, error)
+      return null
+    }
+  }
+
   // 📝 更新Claude账户
   async updateAccount(accountId, updates) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
 
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
@@ -571,14 +615,13 @@ class ClaudeAccountService {
         'priority',
         'schedulable',
         'subscriptionInfo',
-        // 新增调度策略字段
-        'schedulingStrategy',
-        'schedulingWeight',
-        'sequentialOrder',
-        // 新增警告控制字段
-        'autoStopOnWarning'
+        'autoStopOnWarning',
+        'useUnifiedUserAgent',
+        'useUnifiedClientId',
+        'unifiedClientId'
       ]
       const updatedData = { ...accountData }
+      let shouldClearAutoStopFields = false
 
       // 检查是否新增了 refresh token
       const oldRefreshToken = this._decryptSensitiveData(accountData.refreshToken)
@@ -606,12 +649,6 @@ class ClaudeAccountService {
               updatedData.errorMessage = ''
               updatedData.lastRefreshAt = new Date().toISOString()
             }
-          } else if (['schedulingWeight', 'sequentialOrder'].includes(field)) {
-            // 数字类型的调度策略字段转为字符串存储
-            updatedData[field] = value.toString()
-          } else if (field === 'autoStopOnWarning') {
-            // 布尔类型的警告控制字段转为字符串存储
-            updatedData[field] = value.toString()
           } else {
             updatedData[field] = value.toString()
           }
@@ -645,6 +682,28 @@ class ClaudeAccountService {
 
       updatedData.updatedAt = new Date().toISOString()
 
+      // 如果是手动修改调度状态，清除所有自动停止相关的字段
+      if (Object.prototype.hasOwnProperty.call(updates, 'schedulable')) {
+        // 清除所有自动停止的标记，防止自动恢复
+        delete updatedData.rateLimitAutoStopped
+        delete updatedData.fiveHourAutoStopped
+        delete updatedData.fiveHourStoppedAt
+        delete updatedData.tempErrorAutoStopped
+        // 兼容旧的标记（逐步迁移）
+        delete updatedData.autoStoppedAt
+        delete updatedData.stoppedReason
+        shouldClearAutoStopFields = true
+
+        await this._clearFiveHourWarningMetadata(accountId, updatedData)
+
+        // 如果是手动启用调度，记录日志
+        if (updates.schedulable === true || updates.schedulable === 'true') {
+          logger.info(`✅ Manually enabled scheduling for account ${accountId}`)
+        } else {
+          logger.info(`⛔ Manually disabled scheduling for account ${accountId}`)
+        }
+      }
+
       // 检查是否手动禁用了账号，如果是则发送webhook通知
       if (updates.isActive === 'false' && accountData.isActive === 'true') {
         try {
@@ -665,7 +724,19 @@ class ClaudeAccountService {
         }
       }
 
-      await database.setClaudeAccount(accountId, updatedData)
+      await redis.setClaudeAccount(accountId, updatedData)
+
+      if (shouldClearAutoStopFields) {
+        const fieldsToRemove = [
+          'rateLimitAutoStopped',
+          'fiveHourAutoStopped',
+          'fiveHourStoppedAt',
+          'tempErrorAutoStopped',
+          'autoStoppedAt',
+          'stoppedReason'
+        ]
+        await this._removeAccountFields(accountId, fieldsToRemove, 'manual_schedule_update')
+      }
 
       logger.success(`📝 Updated Claude account: ${accountId}`)
 
@@ -679,7 +750,11 @@ class ClaudeAccountService {
   // 🗑️ 删除Claude账户
   async deleteAccount(accountId) {
     try {
-      const result = await database.deleteClaudeAccount(accountId)
+      // 首先从所有分组中移除此账户
+      const accountGroupService = require('./accountGroupService')
+      await accountGroupService.removeAccountFromAllGroups(accountId)
+
+      const result = await redis.deleteClaudeAccount(accountId)
 
       if (result === 0) {
         throw new Error('Account not found')
@@ -694,269 +769,16 @@ class ClaudeAccountService {
     }
   }
 
-  // 🔄 更新账户调度相关字段（用于调度算法）
-  async updateAccountSchedulingFields(accountId, updates) {
-    try {
-      await database.updateClaudeAccountSchedulingFields(accountId, updates)
-      logger.debug(`🔄 Updated scheduling fields for account ${accountId}:`, updates)
-      return { success: true }
-    } catch (error) {
-      logger.error(`❌ Failed to update scheduling fields for account ${accountId}:`, error)
-      throw error
-    }
-  }
-
-  // 🔢 增加账户使用计数并更新最后调度时间
-  async recordAccountUsage(accountId) {
-    try {
-      const usageCount = await database.incrementClaudeAccountUsageCount(accountId)
-      await database.updateClaudeAccountSchedulingFields(accountId, {
-        lastScheduledAt: new Date().toISOString()
-      })
-      logger.debug(`🔢 Recorded usage for account ${accountId}, new count: ${usageCount}`)
-      return { success: true, usageCount }
-    } catch (error) {
-      logger.error(`❌ Failed to record usage for account ${accountId}:`, error)
-      throw error
-    }
-  }
-
-  // 💰 记录账户费用
-  /**
-   * 记录账户费用
-   * @param {string} accountId - Claude账户ID
-   * @param {Object} usage - 使用量数据
-   * @param {number} usage.input_tokens - 输入token数量
-   * @param {number} usage.output_tokens - 输出token数量
-   * @param {number} usage.cache_creation_input_tokens - 缓存创建token数量
-   * @param {number} usage.cache_read_input_tokens - 缓存读取token数量
-   * @param {string} model - 模型名称
-   * @returns {Promise<Object>} 记录结果
-   */
-  async recordAccountCost(accountId, usage, model) {
-    try {
-      // 参数验证
-      if (!accountId) {
-        throw new Error('Account ID is required')
-      }
-      if (!usage || typeof usage !== 'object') {
-        throw new Error('Usage data is required')
-      }
-      if (!model) {
-        throw new Error('Model name is required')
-      }
-
-      // 使用CostCalculator计算费用
-      const costResult = CostCalculator.calculateCost(usage, model)
-      // 处理不同返回结构的兼容性
-      const totalCost = costResult.costs ? costResult.costs.total : costResult.totalCost || 0
-
-      if (totalCost <= 0) {
-        logger.debug(
-          `💰 Skipping cost recording for account ${accountId}: zero cost (${totalCost})`
-        )
-        return { success: true, cost: 0, skipped: true }
-      }
-
-      // 记录费用到数据库
-      await database.incrementAccountCost(accountId, totalCost, model)
-
-      logger.debug(
-        `💰 Recorded cost for account ${accountId}: $${totalCost.toFixed(6)} (${model}, ${costResult.usage?.totalTokens || 0} tokens)`
-      )
-
-      return {
-        success: true,
-        cost: totalCost,
-        costDetails: costResult,
-        skipped: false
-      }
-    } catch (error) {
-      logger.error(`❌ Failed to record cost for account ${accountId}:`, error)
-
-      // 优雅降级：记录错误但不影响主要请求流程
-      try {
-        // 记录费用记录失败的统计
-        const errorKey = `cost_recording_errors:${accountId}:${new Date().toISOString().split('T')[0]}`
-        await database.client.incr(errorKey)
-        await database.client.expire(errorKey, 86400) // 1天过期
-      } catch (statsError) {
-        // 忽略统计记录错误
-        logger.debug('Failed to record cost error stats:', statsError)
-      }
-
-      return { success: false, error: error.message, cost: 0 }
-    }
-  }
-
-  // 📊 获取账户费用统计
-  /**
-   * 获取账户费用统计
-   * @param {string} accountId - Claude账户ID
-   * @param {Object} options - 选项
-   * @param {string} options.period - 时间范围 ('today', 'week', 'month', 'all')
-   * @returns {Promise<Object>} 费用统计数据
-   */
-  async getAccountCostStats(accountId, options = {}) {
-    try {
-      if (!accountId) {
-        throw new Error('Account ID is required')
-      }
-
-      // 获取账户基本信息
-      const accountData = await this.getAccount(accountId)
-      if (!accountData) {
-        throw new Error('Account not found')
-      }
-
-      // 从数据库获取费用统计
-      const costStats = await database.getAccountCostStats(accountId, options.period)
-
-      // 格式化结果
-      const result = {
-        accountId,
-        accountName: accountData.name,
-        period: options.period || 'all',
-        ...costStats,
-        // 添加格式化的费用显示
-        formatted: {
-          totalCost: CostCalculator.formatCost(costStats.totalCost || 0),
-          dailyCosts: costStats.dailyCosts
-            ? costStats.dailyCosts.map((item) => ({
-                ...item,
-                formattedCost: CostCalculator.formatCost(item.cost)
-              }))
-            : [],
-          modelCosts: costStats.modelCosts
-            ? Object.fromEntries(
-                Object.entries(costStats.modelCosts).map(([model, cost]) => [
-                  model,
-                  CostCalculator.formatCost(cost)
-                ])
-              )
-            : {}
-        },
-        retrievedAt: new Date().toISOString()
-      }
-
-      logger.debug(
-        `📊 Retrieved cost stats for account ${accountId}: $${(costStats.totalCost || 0).toFixed(6)} (${options.period || 'all'})`
-      )
-
-      return result
-    } catch (error) {
-      logger.error(`❌ Failed to get cost stats for account ${accountId}:`, error)
-      throw error
-    }
-  }
-
-  // 🎯 Group-based account selection with multiple scheduling strategies
-  async selectAccountByGroup(userId, options = {}) {
-    const { sessionHash = null, modelName = null, strategy = null } = options
-
-    try {
-      if (!userId) {
-        logger.debug('❌ No userId provided, falling back to global account selection')
-        return await this.selectAvailableAccount(sessionHash, modelName)
-      }
-
-      // Get user's groups
-      const userGroups = await groupService.getUserGroups(userId)
-      if (!userGroups || userGroups.length === 0) {
-        logger.debug(`📭 User ${userId} has no groups assigned, falling back to global selection`)
-        return await this.selectAvailableAccount(sessionHash, modelName)
-      }
-
-      logger.info(`👥 Found ${userGroups.length} groups for user ${userId}`)
-
-      // Collect all group accounts and their scheduling configurations
-      const groupAccounts = []
-      const groupConfigs = []
-
-      for (const group of userGroups) {
-        try {
-          const accounts = await groupService.getGroupAccounts(group.id)
-          const schedulingConfig = await groupService.getSchedulingConfig(group.id)
-
-          if (accounts.claudeAccounts && accounts.claudeAccounts.length > 0) {
-            groupAccounts.push(...accounts.claudeAccounts)
-            groupConfigs.push({
-              groupId: group.id,
-              config: schedulingConfig,
-              accounts: accounts.claudeAccounts
-            })
-            logger.info(
-              `🔗 Group ${group.name} has ${accounts.claudeAccounts.length} Claude accounts`
-            )
-          }
-        } catch (error) {
-          logger.warn(`⚠️ Failed to get accounts for group ${group.id}: ${error.message}`)
-        }
-      }
-
-      // Remove duplicate accounts
-      const uniqueGroupAccounts = [...new Set(groupAccounts)]
-
-      if (uniqueGroupAccounts.length === 0) {
-        logger.info(
-          '📭 No Claude accounts assigned to user groups, falling back to global selection'
-        )
-        return await this.selectAvailableAccount(sessionHash, modelName)
-      }
-
-      logger.info(`🎯 Found ${uniqueGroupAccounts.length} unique accounts across user groups`)
-
-      // Filter healthy and active accounts
-      const healthyAccounts = await this.filterHealthyAccounts(uniqueGroupAccounts, modelName)
-
-      if (healthyAccounts.length === 0) {
-        logger.warn('⚠️ No healthy group accounts available, falling back to global selection')
-        return await this.selectAvailableAccount(sessionHash, modelName)
-      }
-
-      logger.info(`✅ ${healthyAccounts.length} healthy group accounts available`)
-
-      // Apply scheduling strategy - determine which strategy to use
-      const effectiveStrategy = strategy || this.determineEffectiveStrategy(groupConfigs)
-      const selectedAccountId = await this.applySchedulingStrategy(
-        healthyAccounts,
-        effectiveStrategy,
-        { userId, groupConfigs, sessionHash }
-      )
-
-      if (!selectedAccountId) {
-        logger.warn(
-          '⚠️ No account selected by scheduling strategy, falling back to global selection'
-        )
-        return await this.selectAvailableAccount(sessionHash, modelName)
-      }
-
-      // Create sticky session if needed
-      if (sessionHash) {
-        await database.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1 hour
-        const selectedAccount = healthyAccounts.find((acc) => acc.id === selectedAccountId)
-        logger.info(
-          `🎯 Created group-based sticky session: ${selectedAccount?.name} (${selectedAccountId}) for session ${sessionHash}`
-        )
-      }
-
-      logger.success(
-        `🎯 Selected group account: ${selectedAccountId} using strategy: ${effectiveStrategy}`
-      )
-      return selectedAccountId
-    } catch (error) {
-      logger.error('❌ Failed to select account by group, falling back to global selection:', error)
-      return await this.selectAvailableAccount(sessionHash, modelName)
-    }
-  }
-
   // 🎯 智能选择可用账户（支持sticky会话和模型过滤）
   async selectAvailableAccount(sessionHash = null, modelName = null) {
     try {
-      const accounts = await database.getAllClaudeAccounts()
+      const accounts = await redis.getAllClaudeAccounts()
 
       let activeAccounts = accounts.filter(
-        (account) => account.isActive === 'true' && account.status !== 'error'
+        (account) =>
+          account.isActive === 'true' &&
+          account.status !== 'error' &&
+          account.schedulable !== 'false'
       )
 
       // 如果请求的是 Opus 模型，过滤掉 Pro 和 Free 账号
@@ -993,11 +815,13 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，检查是否有已映射的账户
       if (sessionHash) {
-        const mappedAccountId = await database.getSessionAccountMapping(sessionHash)
+        const mappedAccountId = await redis.getSessionAccountMapping(sessionHash)
         if (mappedAccountId) {
           // 验证映射的账户是否仍然可用
           const mappedAccount = activeAccounts.find((acc) => acc.id === mappedAccountId)
           if (mappedAccount) {
+            // 🚀 智能会话续期：剩余时间少于14天时自动续期到15天
+            await redis.extendSessionAccountMappingTTL(sessionHash)
             logger.info(
               `🎯 Using sticky session account: ${mappedAccount.name} (${mappedAccountId}) for session ${sessionHash}`
             )
@@ -1007,7 +831,7 @@ class ClaudeAccountService {
               `⚠️ Mapped account ${mappedAccountId} is no longer available, selecting new account`
             )
             // 清理无效的映射
-            await database.deleteSessionAccountMapping(sessionHash)
+            await redis.deleteSessionAccountMapping(sessionHash)
           }
         }
       }
@@ -1024,7 +848,9 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，建立新的映射
       if (sessionHash) {
-        await database.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1小时过期
+        // 从配置获取TTL（小时），转换为秒
+        const ttlSeconds = (config.session?.stickyTtlHours || 1) * 60 * 60
+        await redis.setSessionAccountMapping(sessionHash, selectedAccountId, ttlSeconds)
         logger.info(
           `🎯 Created new sticky session mapping: ${sortedAccounts[0].name} (${selectedAccountId}) for session ${sessionHash}`
         )
@@ -1042,8 +868,13 @@ class ClaudeAccountService {
     try {
       // 如果API Key绑定了专属账户，优先使用
       if (apiKeyData.claudeAccountId) {
-        const boundAccount = await database.getClaudeAccount(apiKeyData.claudeAccountId)
-        if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
+        const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId)
+        if (
+          boundAccount &&
+          boundAccount.isActive === 'true' &&
+          boundAccount.status !== 'error' &&
+          boundAccount.schedulable !== 'false'
+        ) {
           logger.info(
             `🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`
           )
@@ -1056,12 +887,13 @@ class ClaudeAccountService {
       }
 
       // 如果没有绑定账户或绑定账户不可用，从共享池选择
-      const accounts = await database.getAllClaudeAccounts()
+      const accounts = await redis.getAllClaudeAccounts()
 
       let sharedAccounts = accounts.filter(
         (account) =>
           account.isActive === 'true' &&
           account.status !== 'error' &&
+          account.schedulable !== 'false' &&
           (account.accountType === 'shared' || !account.accountType) // 兼容旧数据
       )
 
@@ -1099,7 +931,7 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，检查是否有已映射的账户
       if (sessionHash) {
-        const mappedAccountId = await database.getSessionAccountMapping(sessionHash)
+        const mappedAccountId = await redis.getSessionAccountMapping(sessionHash)
         if (mappedAccountId) {
           // 验证映射的账户是否仍然在共享池中且可用
           const mappedAccount = sharedAccounts.find((acc) => acc.id === mappedAccountId)
@@ -1110,8 +942,10 @@ class ClaudeAccountService {
               logger.warn(
                 `⚠️ Mapped account ${mappedAccountId} is rate limited, selecting new account`
               )
-              await database.deleteSessionAccountMapping(sessionHash)
+              await redis.deleteSessionAccountMapping(sessionHash)
             } else {
+              // 🚀 智能会话续期：剩余时间少于14天时自动续期到15天
+              await redis.extendSessionAccountMappingTTL(sessionHash)
               logger.info(
                 `🎯 Using sticky session shared account: ${mappedAccount.name} (${mappedAccountId}) for session ${sessionHash}`
               )
@@ -1122,7 +956,7 @@ class ClaudeAccountService {
               `⚠️ Mapped shared account ${mappedAccountId} is no longer available, selecting new account`
             )
             // 清理无效的映射
-            await database.deleteSessionAccountMapping(sessionHash)
+            await redis.deleteSessionAccountMapping(sessionHash)
           }
         }
       }
@@ -1170,7 +1004,9 @@ class ClaudeAccountService {
 
       // 如果有会话哈希，建立新的映射
       if (sessionHash) {
-        await database.setSessionAccountMapping(sessionHash, selectedAccountId, 3600) // 1小时过期
+        // 从配置获取TTL（小时），转换为秒
+        const ttlSeconds = (config.session?.stickyTtlHours || 1) * 60 * 60
+        await redis.setSessionAccountMapping(sessionHash, selectedAccountId, ttlSeconds)
         logger.info(
           `🎯 Created new sticky session mapping for shared account: ${candidateAccounts[0].name} (${selectedAccountId}) for session ${sessionHash}`
         )
@@ -1319,10 +1155,20 @@ class ClaudeAccountService {
     return `${maskedUsername}@${domain}`
   }
 
+  // 🔢 安全转换为数字或null
+  _toNumberOrNull(value) {
+    if (value === undefined || value === null || value === '') {
+      return null
+    }
+
+    const num = Number(value)
+    return Number.isFinite(num) ? num : null
+  }
+
   // 🧹 清理错误账户
   async cleanupErrorAccounts() {
     try {
-      const accounts = await database.getAllClaudeAccounts()
+      const accounts = await redis.getAllClaudeAccounts()
       let cleanedCount = 0
 
       for (const account of accounts) {
@@ -1335,7 +1181,7 @@ class ClaudeAccountService {
           if (hoursSinceLastRefresh > 24) {
             account.status = 'created'
             account.errorMessage = ''
-            await database.setClaudeAccount(account.id, account)
+            await redis.setClaudeAccount(account.id, account)
             cleanedCount++
           }
         }
@@ -1355,7 +1201,7 @@ class ClaudeAccountService {
   // 🚫 标记账号为限流状态
   async markAccountRateLimited(accountId, sessionHash = null, rateLimitResetTimestamp = null) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1364,6 +1210,10 @@ class ClaudeAccountService {
       const updatedAccountData = { ...accountData }
       updatedAccountData.rateLimitedAt = new Date().toISOString()
       updatedAccountData.rateLimitStatus = 'limited'
+      // 限流时停止调度，与 OpenAI 账号保持一致
+      updatedAccountData.schedulable = 'false'
+      // 使用独立的限流自动停止标记，避免与其他自动停止冲突
+      updatedAccountData.rateLimitAutoStopped = 'true'
 
       // 如果提供了准确的限流重置时间戳（来自API响应头）
       if (rateLimitResetTimestamp) {
@@ -1405,11 +1255,11 @@ class ClaudeAccountService {
         }
       }
 
-      await database.setClaudeAccount(accountId, updatedAccountData)
+      await redis.setClaudeAccount(accountId, updatedAccountData)
 
       // 如果有会话哈希，删除粘性会话映射
       if (sessionHash) {
-        await database.deleteSessionAccountMapping(sessionHash)
+        await redis.deleteSessionAccountMapping(sessionHash)
         logger.info(`🗑️ Deleted sticky session mapping for rate limited account: ${accountId}`)
       }
 
@@ -1422,8 +1272,8 @@ class ClaudeAccountService {
           platform: 'claude-oauth',
           status: 'error',
           errorCode: 'CLAUDE_OAUTH_RATE_LIMITED',
-          reason: `Account rate limited (429 error). ${rateLimitResetTimestamp ? `Reset at: ${new Date(rateLimitResetTimestamp * 1000).toISOString()}` : 'Estimated reset in 1-5 hours'}`,
-          timestamp: new Date().toISOString()
+          reason: `Account rate limited (429 error). ${rateLimitResetTimestamp ? `Reset at: ${formatDateWithTimezone(rateLimitResetTimestamp)}` : 'Estimated reset in 1-5 hours'}`,
+          timestamp: getISOStringWithTimezone(new Date())
         })
       } catch (webhookError) {
         logger.error('Failed to send rate limit webhook notification:', webhookError)
@@ -1436,10 +1286,125 @@ class ClaudeAccountService {
     }
   }
 
+  // 🚫 标记账号的 Opus 限流状态（不影响其他模型调度）
+  async markAccountOpusRateLimited(accountId, rateLimitResetTimestamp = null) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData || Object.keys(accountData).length === 0) {
+        throw new Error('Account not found')
+      }
+
+      const updatedAccountData = { ...accountData }
+      const now = new Date()
+      updatedAccountData.opusRateLimitedAt = now.toISOString()
+
+      if (rateLimitResetTimestamp) {
+        const resetTime = new Date(rateLimitResetTimestamp * 1000)
+        updatedAccountData.opusRateLimitEndAt = resetTime.toISOString()
+        logger.warn(
+          `🚫 Account ${accountData.name} (${accountId}) reached Opus weekly cap, resets at ${resetTime.toISOString()}`
+        )
+      } else {
+        // 如果缺少准确时间戳，保留现有值但记录警告，便于后续人工干预
+        logger.warn(
+          `⚠️ Account ${accountData.name} (${accountId}) reported Opus limit without reset timestamp`
+        )
+      }
+
+      await redis.setClaudeAccount(accountId, updatedAccountData)
+      return { success: true }
+    } catch (error) {
+      logger.error(`❌ Failed to mark Opus rate limit for account: ${accountId}`, error)
+      throw error
+    }
+  }
+
+  // ✅ 清除账号的 Opus 限流状态
+  async clearAccountOpusRateLimit(accountId) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData || Object.keys(accountData).length === 0) {
+        return { success: true }
+      }
+
+      const updatedAccountData = { ...accountData }
+      delete updatedAccountData.opusRateLimitedAt
+      delete updatedAccountData.opusRateLimitEndAt
+
+      await redis.setClaudeAccount(accountId, updatedAccountData)
+
+      const redisKey = `claude:account:${accountId}`
+      if (redis.client && typeof redis.client.hdel === 'function') {
+        await redis.client.hdel(redisKey, 'opusRateLimitedAt', 'opusRateLimitEndAt')
+      }
+
+      logger.info(`✅ Cleared Opus rate limit state for account ${accountId}`)
+      return { success: true }
+    } catch (error) {
+      logger.error(`❌ Failed to clear Opus rate limit for account: ${accountId}`, error)
+      throw error
+    }
+  }
+
+  // 🔍 检查账号是否处于 Opus 限流状态（自动清理过期标记）
+  async isAccountOpusRateLimited(accountId) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData || Object.keys(accountData).length === 0) {
+        return false
+      }
+
+      if (!accountData.opusRateLimitEndAt) {
+        return false
+      }
+
+      const resetTime = new Date(accountData.opusRateLimitEndAt)
+      if (Number.isNaN(resetTime.getTime())) {
+        await this.clearAccountOpusRateLimit(accountId)
+        return false
+      }
+
+      const now = new Date()
+      if (now >= resetTime) {
+        await this.clearAccountOpusRateLimit(accountId)
+        return false
+      }
+
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to check Opus rate limit status for account: ${accountId}`, error)
+      return false
+    }
+  }
+
+  // ♻️ 检查并清理已过期的 Opus 限流标记
+  async clearExpiredOpusRateLimit(accountId) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData || Object.keys(accountData).length === 0) {
+        return { success: true }
+      }
+
+      if (!accountData.opusRateLimitEndAt) {
+        return { success: true }
+      }
+
+      const resetTime = new Date(accountData.opusRateLimitEndAt)
+      if (Number.isNaN(resetTime.getTime()) || new Date() >= resetTime) {
+        await this.clearAccountOpusRateLimit(accountId)
+      }
+
+      return { success: true }
+    } catch (error) {
+      logger.error(`❌ Failed to clear expired Opus rate limit for account: ${accountId}`, error)
+      throw error
+    }
+  }
+
   // ✅ 移除账号的限流状态
   async removeAccountRateLimit(accountId) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1447,14 +1412,35 @@ class ClaudeAccountService {
       const accountKey = `claude:account:${accountId}`
 
       // 清除限流状态
+      const redisKey = `claude:account:${accountId}`
+      await redis.client.hdel(redisKey, 'rateLimitedAt', 'rateLimitStatus', 'rateLimitEndAt')
       delete accountData.rateLimitedAt
       delete accountData.rateLimitStatus
       delete accountData.rateLimitEndAt // 清除限流结束时间
-      await database.setClaudeAccount(accountId, accountData)
+
+      const hadAutoStop = accountData.rateLimitAutoStopped === 'true'
+
+      // 只恢复因限流而自动停止的账户
+      if (hadAutoStop && accountData.schedulable === 'false') {
+        accountData.schedulable = 'true'
+        logger.info(`✅ Auto-resuming scheduling for account ${accountId} after rate limit cleared`)
+        logger.info(
+          `📊 Account ${accountId} state after recovery: schedulable=${accountData.schedulable}`
+        )
+      } else {
+        logger.info(
+          `ℹ️ Account ${accountId} did not need auto-resume: autoStopped=${accountData.rateLimitAutoStopped}, schedulable=${accountData.schedulable}`
+        )
+      }
+
+      if (hadAutoStop) {
+        await redis.client.hdel(redisKey, 'rateLimitAutoStopped')
+        delete accountData.rateLimitAutoStopped
+      }
+      await redis.setClaudeAccount(accountId, accountData)
 
       // 显式删除Redis中的限流字段，避免旧标记阻止账号恢复调度
-      const client = database.getClientSafe()
-      await client.hdel(
+      await redis.client.hdel(
         accountKey,
         'rateLimitedAt',
         'rateLimitStatus',
@@ -1463,6 +1449,7 @@ class ClaudeAccountService {
       )
 
       logger.success(`✅ Rate limit removed for account: ${accountData.name} (${accountId})`)
+
       return { success: true }
     } catch (error) {
       logger.error(`❌ Failed to remove rate limit for account: ${accountId}`, error)
@@ -1473,15 +1460,18 @@ class ClaudeAccountService {
   // 🔍 检查账号是否处于限流状态
   async isAccountRateLimited(accountId) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         return false
       }
 
-      // 检查是否有限流状态
-      if (accountData.rateLimitStatus === 'limited' && accountData.rateLimitedAt) {
-        const now = new Date()
+      const now = new Date()
 
+      // 检查是否有限流状态（包括字段缺失但有自动停止标记的情况）
+      if (
+        (accountData.rateLimitStatus === 'limited' && accountData.rateLimitedAt) ||
+        (accountData.rateLimitAutoStopped === 'true' && accountData.rateLimitEndAt)
+      ) {
         // 优先使用 rateLimitEndAt（基于会话窗口）
         if (accountData.rateLimitEndAt) {
           const rateLimitEndAt = new Date(accountData.rateLimitEndAt)
@@ -1493,7 +1483,7 @@ class ClaudeAccountService {
           }
 
           return true
-        } else {
+        } else if (accountData.rateLimitedAt) {
           // 兼容旧数据：使用1小时限流
           const rateLimitedAt = new Date(accountData.rateLimitedAt)
           const hoursSinceRateLimit = (now - rateLimitedAt) / (1000 * 60 * 60)
@@ -1518,7 +1508,7 @@ class ClaudeAccountService {
   // 📊 获取账号的限流信息
   async getAccountRateLimitInfo(accountId) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         return null
       }
@@ -1571,7 +1561,7 @@ class ClaudeAccountService {
     try {
       // 如果没有传入accountData，从Redis获取
       if (!accountData) {
-        accountData = await database.getClaudeAccount(accountId)
+        accountData = await redis.getClaudeAccount(accountId)
         if (!accountData || Object.keys(accountData).length === 0) {
           throw new Error('Account not found')
         }
@@ -1579,6 +1569,9 @@ class ClaudeAccountService {
 
       const now = new Date()
       const currentTime = now.getTime()
+
+      let shouldClearSessionStatus = false
+      let shouldClearFiveHourFlags = false
 
       // 检查当前是否有活跃的会话窗口
       if (accountData.sessionWindowStart && accountData.sessionWindowEnd) {
@@ -1605,6 +1598,53 @@ class ClaudeAccountService {
       accountData.sessionWindowStart = windowStart.toISOString()
       accountData.sessionWindowEnd = windowEnd.toISOString()
       accountData.lastRequestTime = now.toISOString()
+
+      // 清除会话窗口状态，因为进入了新窗口
+      if (accountData.sessionWindowStatus) {
+        delete accountData.sessionWindowStatus
+        delete accountData.sessionWindowStatusUpdatedAt
+        await this._clearFiveHourWarningMetadata(accountId, accountData)
+        shouldClearSessionStatus = true
+      }
+
+      // 如果账户因为5小时限制被自动停止，现在恢复调度
+      if (accountData.fiveHourAutoStopped === 'true' && accountData.schedulable === 'false') {
+        logger.info(
+          `✅ Auto-resuming scheduling for account ${accountData.name} (${accountId}) - new session window started`
+        )
+        accountData.schedulable = 'true'
+        delete accountData.fiveHourAutoStopped
+        delete accountData.fiveHourStoppedAt
+        await this._clearFiveHourWarningMetadata(accountId, accountData)
+        shouldClearFiveHourFlags = true
+
+        // 发送Webhook通知
+        try {
+          const webhookNotifier = require('../utils/webhookNotifier')
+          await webhookNotifier.sendAccountAnomalyNotification({
+            accountId,
+            accountName: accountData.name || 'Claude Account',
+            platform: 'claude',
+            status: 'resumed',
+            errorCode: 'CLAUDE_5H_LIMIT_RESUMED',
+            reason: '进入新的5小时窗口，已自动恢复调度',
+            timestamp: getISOStringWithTimezone(new Date())
+          })
+        } catch (webhookError) {
+          logger.error('Failed to send webhook notification:', webhookError)
+        }
+      }
+
+      if (shouldClearSessionStatus || shouldClearFiveHourFlags) {
+        const fieldsToRemove = []
+        if (shouldClearFiveHourFlags) {
+          fieldsToRemove.push('fiveHourAutoStopped', 'fiveHourStoppedAt')
+        }
+        if (shouldClearSessionStatus) {
+          fieldsToRemove.push('sessionWindowStatus', 'sessionWindowStatusUpdatedAt')
+        }
+        await this._removeAccountFields(accountId, fieldsToRemove, 'session_window_refresh')
+      }
 
       logger.info(
         `🕐 Created new session window for account ${accountData.name} (${accountId}): ${windowStart.toISOString()} - ${windowEnd.toISOString()} (from current time)`
@@ -1635,10 +1675,33 @@ class ClaudeAccountService {
     return endTime
   }
 
+  async _clearFiveHourWarningMetadata(accountId, accountData = null) {
+    if (accountData) {
+      delete accountData.fiveHourWarningWindow
+      delete accountData.fiveHourWarningCount
+      delete accountData.fiveHourWarningLastSentAt
+    }
+
+    try {
+      if (redis.client && typeof redis.client.hdel === 'function') {
+        await redis.client.hdel(
+          `claude:account:${accountId}`,
+          'fiveHourWarningWindow',
+          'fiveHourWarningCount',
+          'fiveHourWarningLastSentAt'
+        )
+      }
+    } catch (error) {
+      logger.warn(
+        `⚠️ Failed to clear five-hour warning metadata for account ${accountId}: ${error.message}`
+      )
+    }
+  }
+
   // 📊 获取会话窗口信息
   async getSessionWindowInfo(accountId) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         return null
       }
@@ -1651,7 +1714,8 @@ class ClaudeAccountService {
           windowEnd: null,
           progress: 0,
           remainingTime: null,
-          lastRequestTime: accountData.lastRequestTime || null
+          lastRequestTime: accountData.lastRequestTime || null,
+          sessionWindowStatus: accountData.sessionWindowStatus || null
         }
       }
 
@@ -1668,7 +1732,8 @@ class ClaudeAccountService {
           windowEnd: accountData.sessionWindowEnd,
           progress: 100,
           remainingTime: 0,
-          lastRequestTime: accountData.lastRequestTime || null
+          lastRequestTime: accountData.lastRequestTime || null,
+          sessionWindowStatus: accountData.sessionWindowStatus || null
         }
       }
 
@@ -1686,7 +1751,8 @@ class ClaudeAccountService {
         windowEnd: accountData.sessionWindowEnd,
         progress,
         remainingTime,
-        lastRequestTime: accountData.lastRequestTime || null
+        lastRequestTime: accountData.lastRequestTime || null,
+        sessionWindowStatus: accountData.sessionWindowStatus || null
       }
     } catch (error) {
       logger.error(`❌ Failed to get session window info for account ${accountId}:`, error)
@@ -1694,10 +1760,177 @@ class ClaudeAccountService {
     }
   }
 
+  // 📊 获取 OAuth Usage 数据
+  async fetchOAuthUsage(accountId, accessToken = null, agent = null) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData || Object.keys(accountData).length === 0) {
+        throw new Error('Account not found')
+      }
+
+      // 如果没有提供 accessToken，使用 getValidAccessToken 自动检查过期并刷新
+      if (!accessToken) {
+        accessToken = await this.getValidAccessToken(accountId)
+      }
+
+      // 如果没有提供 agent，创建代理
+      if (!agent) {
+        agent = this._createProxyAgent(accountData.proxy)
+      }
+
+      logger.debug(`📊 Fetching OAuth usage for account: ${accountData.name} (${accountId})`)
+
+      // 请求 OAuth usage 接口
+      const response = await axios.get('https://api.anthropic.com/api/oauth/usage', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'anthropic-beta': 'oauth-2025-04-20',
+          'User-Agent': 'claude-cli/1.0.56 (external, cli)',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        httpsAgent: agent,
+        timeout: 15000
+      })
+
+      if (response.status === 200 && response.data) {
+        logger.debug('✅ Successfully fetched OAuth usage data:', {
+          accountId,
+          fiveHour: response.data.five_hour?.utilization,
+          sevenDay: response.data.seven_day?.utilization,
+          sevenDayOpus: response.data.seven_day_opus?.utilization
+        })
+
+        return response.data
+      }
+
+      logger.warn(`⚠️ Failed to fetch OAuth usage for account ${accountId}: ${response.status}`)
+      return null
+    } catch (error) {
+      // 403 错误通常表示使用的是 Setup Token 而非 OAuth
+      if (error.response?.status === 403) {
+        logger.debug(
+          `⚠️ OAuth usage API returned 403 for account ${accountId}. This account likely uses Setup Token instead of OAuth.`
+        )
+        return null
+      }
+
+      // 其他错误正常记录
+      logger.error(
+        `❌ Failed to fetch OAuth usage for account ${accountId}:`,
+        error.response?.data || error.message
+      )
+      return null
+    }
+  }
+
+  // 📊 构建 Claude Usage 快照（从 Redis 数据）
+  buildClaudeUsageSnapshot(accountData) {
+    const updatedAt = accountData.claudeUsageUpdatedAt
+
+    const fiveHourUtilization = this._toNumberOrNull(accountData.claudeFiveHourUtilization)
+    const fiveHourResetsAt = accountData.claudeFiveHourResetsAt
+    const sevenDayUtilization = this._toNumberOrNull(accountData.claudeSevenDayUtilization)
+    const sevenDayResetsAt = accountData.claudeSevenDayResetsAt
+    const sevenDayOpusUtilization = this._toNumberOrNull(accountData.claudeSevenDayOpusUtilization)
+    const sevenDayOpusResetsAt = accountData.claudeSevenDayOpusResetsAt
+
+    const hasFiveHourData = fiveHourUtilization !== null || fiveHourResetsAt
+    const hasSevenDayData = sevenDayUtilization !== null || sevenDayResetsAt
+    const hasSevenDayOpusData = sevenDayOpusUtilization !== null || sevenDayOpusResetsAt
+
+    if (!updatedAt && !hasFiveHourData && !hasSevenDayData && !hasSevenDayOpusData) {
+      return null
+    }
+
+    const now = Date.now()
+
+    return {
+      updatedAt,
+      fiveHour: {
+        utilization: fiveHourUtilization,
+        resetsAt: fiveHourResetsAt,
+        remainingSeconds: fiveHourResetsAt
+          ? Math.max(0, Math.floor((new Date(fiveHourResetsAt).getTime() - now) / 1000))
+          : null
+      },
+      sevenDay: {
+        utilization: sevenDayUtilization,
+        resetsAt: sevenDayResetsAt,
+        remainingSeconds: sevenDayResetsAt
+          ? Math.max(0, Math.floor((new Date(sevenDayResetsAt).getTime() - now) / 1000))
+          : null
+      },
+      sevenDayOpus: {
+        utilization: sevenDayOpusUtilization,
+        resetsAt: sevenDayOpusResetsAt,
+        remainingSeconds: sevenDayOpusResetsAt
+          ? Math.max(0, Math.floor((new Date(sevenDayOpusResetsAt).getTime() - now) / 1000))
+          : null
+      }
+    }
+  }
+
+  // 📊 更新 Claude Usage 快照到 Redis
+  async updateClaudeUsageSnapshot(accountId, usageData) {
+    if (!usageData || typeof usageData !== 'object') {
+      return
+    }
+
+    const updates = {}
+
+    // 5小时窗口
+    if (usageData.five_hour) {
+      if (usageData.five_hour.utilization !== undefined) {
+        updates.claudeFiveHourUtilization = String(usageData.five_hour.utilization)
+      }
+      if (usageData.five_hour.resets_at) {
+        updates.claudeFiveHourResetsAt = usageData.five_hour.resets_at
+      }
+    }
+
+    // 7天窗口
+    if (usageData.seven_day) {
+      if (usageData.seven_day.utilization !== undefined) {
+        updates.claudeSevenDayUtilization = String(usageData.seven_day.utilization)
+      }
+      if (usageData.seven_day.resets_at) {
+        updates.claudeSevenDayResetsAt = usageData.seven_day.resets_at
+      }
+    }
+
+    // 7天Opus窗口
+    if (usageData.seven_day_opus) {
+      if (usageData.seven_day_opus.utilization !== undefined) {
+        updates.claudeSevenDayOpusUtilization = String(usageData.seven_day_opus.utilization)
+      }
+      if (usageData.seven_day_opus.resets_at) {
+        updates.claudeSevenDayOpusResetsAt = usageData.seven_day_opus.resets_at
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return
+    }
+
+    updates.claudeUsageUpdatedAt = new Date().toISOString()
+
+    const accountData = await redis.getClaudeAccount(accountId)
+    if (accountData && Object.keys(accountData).length > 0) {
+      Object.assign(accountData, updates)
+      await redis.setClaudeAccount(accountId, accountData)
+      logger.debug(
+        `📊 Updated Claude usage snapshot for account ${accountId}:`,
+        Object.keys(updates)
+      )
+    }
+  }
+
   // 📊 获取账号 Profile 信息并更新账号类型
   async fetchAndUpdateAccountProfile(accountId, accessToken = null, agent = null) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -1787,7 +2020,7 @@ class ClaudeAccountService {
           accountData.email = this._encryptSensitiveData(profileData.account.email)
         }
 
-        await database.setClaudeAccount(accountId, accountData)
+        await redis.setClaudeAccount(accountId, accountData)
 
         logger.success(
           `✅ Updated account profile for ${accountData.name} (${accountId}) - Type: ${subscriptionInfo.accountType}`
@@ -1816,7 +2049,7 @@ class ClaudeAccountService {
     try {
       logger.info('🔄 Starting batch profile update for all accounts...')
 
-      const accounts = await database.getAllClaudeAccounts()
+      const accounts = await redis.getAllClaudeAccounts()
       let successCount = 0
       let failureCount = 0
       const results = []
@@ -1892,7 +2125,7 @@ class ClaudeAccountService {
     try {
       logger.info('🔄 Initializing session windows for all Claude accounts...')
 
-      const accounts = await database.getAllClaudeAccounts()
+      const accounts = await redis.getAllClaudeAccounts()
       let validWindowCount = 0
       let expiredWindowCount = 0
       let noWindowCount = 0
@@ -1905,7 +2138,7 @@ class ClaudeAccountService {
           delete account.sessionWindowStart
           delete account.sessionWindowEnd
           delete account.lastRequestTime
-          await database.setClaudeAccount(account.id, account)
+          await redis.setClaudeAccount(account.id, account)
         }
 
         // 检查现有会话窗口
@@ -1931,7 +2164,7 @@ class ClaudeAccountService {
             delete account.sessionWindowStart
             delete account.sessionWindowEnd
             delete account.lastRequestTime
-            await database.setClaudeAccount(account.id, account)
+            await redis.setClaudeAccount(account.id, account)
           }
         } else {
           noWindowCount++
@@ -1965,32 +2198,54 @@ class ClaudeAccountService {
     }
   }
 
-  // 🚫 标记账户为未授权状态（401错误）
-  async markAccountUnauthorized(accountId, sessionHash = null) {
+  // 🚫 通用的账户错误标记方法
+  async markAccountError(accountId, errorType, sessionHash = null) {
+    const ERROR_CONFIG = {
+      unauthorized: {
+        status: 'unauthorized',
+        errorMessage: 'Account unauthorized (401 errors detected)',
+        timestampField: 'unauthorizedAt',
+        errorCode: 'CLAUDE_OAUTH_UNAUTHORIZED',
+        logMessage: 'unauthorized'
+      },
+      blocked: {
+        status: 'blocked',
+        errorMessage: 'Account blocked (403 error detected - account may be suspended by Claude)',
+        timestampField: 'blockedAt',
+        errorCode: 'CLAUDE_OAUTH_BLOCKED',
+        logMessage: 'blocked'
+      }
+    }
+
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const errorConfig = ERROR_CONFIG[errorType]
+      if (!errorConfig) {
+        throw new Error(`Unsupported error type: ${errorType}`)
+      }
+
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
 
       // 更新账户状态
       const updatedAccountData = { ...accountData }
-      updatedAccountData.status = 'unauthorized'
+      updatedAccountData.status = errorConfig.status
       updatedAccountData.schedulable = 'false' // 设置为不可调度
-      updatedAccountData.errorMessage = 'Account unauthorized (401 errors detected)'
-      updatedAccountData.unauthorizedAt = new Date().toISOString()
+      updatedAccountData.errorMessage = errorConfig.errorMessage
+      updatedAccountData[errorConfig.timestampField] = new Date().toISOString()
 
       // 保存更新后的账户数据
-      await database.setClaudeAccount(accountId, updatedAccountData)
+      await redis.setClaudeAccount(accountId, updatedAccountData)
 
       // 如果有sessionHash，删除粘性会话映射
       if (sessionHash) {
-        await database.client.del(`sticky_session:${sessionHash}`)
+        await redis.client.del(`sticky_session:${sessionHash}`)
         logger.info(`🗑️ Deleted sticky session mapping for hash: ${sessionHash}`)
       }
 
       logger.warn(
-        `⚠️ Account ${accountData.name} (${accountId}) marked as unauthorized and disabled for scheduling`
+        `⚠️ Account ${accountData.name} (${accountId}) marked as ${errorConfig.logMessage} and disabled for scheduling`
       )
 
       // 发送Webhook通知
@@ -2000,9 +2255,10 @@ class ClaudeAccountService {
           accountId,
           accountName: accountData.name,
           platform: 'claude-oauth',
-          status: 'unauthorized',
-          errorCode: 'CLAUDE_OAUTH_UNAUTHORIZED',
-          reason: 'Account unauthorized (401 errors detected)'
+          status: errorConfig.status,
+          errorCode: errorConfig.errorCode,
+          reason: errorConfig.errorMessage,
+          timestamp: getISOStringWithTimezone(new Date())
         })
       } catch (webhookError) {
         logger.error('Failed to send webhook notification:', webhookError)
@@ -2010,569 +2266,25 @@ class ClaudeAccountService {
 
       return { success: true }
     } catch (error) {
-      logger.error(`❌ Failed to mark account ${accountId} as unauthorized:`, error)
+      logger.error(`❌ Failed to mark account ${accountId} as ${errorType}:`, error)
       throw error
     }
   }
 
-  // ==================== Group Scheduling Helper Methods ====================
-
-  // 🔍 Filter healthy accounts from a given list
-  async filterHealthyAccounts(accountIds, modelName = null) {
-    try {
-      const accounts = []
-
-      for (const accountId of accountIds) {
-        try {
-          const accountData = await database.getClaudeAccount(accountId)
-          if (!accountData) {
-            logger.debug(`⚠️ Account ${accountId} not found, skipping`)
-            continue
-          }
-
-          // Check if account is active and not in error state
-          if (accountData.isActive !== 'true' || accountData.status === 'error') {
-            logger.debug(
-              `⚠️ Account ${accountData.name} (${accountId}) is inactive or in error state`
-            )
-            continue
-          }
-
-          // Check if account is schedulable
-          if (accountData.schedulable === 'false') {
-            logger.debug(`⚠️ Account ${accountData.name} (${accountId}) is not schedulable`)
-            continue
-          }
-
-          // Check rate limit status
-          const isRateLimited = await this.isAccountRateLimited(accountId)
-          if (isRateLimited) {
-            logger.debug(`⚠️ Account ${accountData.name} (${accountId}) is rate limited`)
-            continue
-          }
-
-          // Check model compatibility (Opus filtering)
-          if (modelName && modelName.toLowerCase().includes('opus')) {
-            if (accountData.subscriptionInfo) {
-              try {
-                const info = JSON.parse(accountData.subscriptionInfo)
-                if (info.hasClaudePro === true && info.hasClaudeMax !== true) {
-                  logger.debug(
-                    `⚠️ Account ${accountData.name} (${accountId}) is Claude Pro, cannot use Opus`
-                  )
-                  continue
-                }
-                if (info.accountType === 'claude_pro' || info.accountType === 'claude_free') {
-                  logger.debug(
-                    `⚠️ Account ${accountData.name} (${accountId}) is ${info.accountType}, cannot use Opus`
-                  )
-                  continue
-                }
-              } catch (e) {
-                // Parsing failed, assume compatible (old data)
-              }
-            }
-          }
-
-          accounts.push(accountData)
-        } catch (error) {
-          logger.warn(`⚠️ Error checking account ${accountId}: ${error.message}`)
-        }
-      }
-
-      logger.info(
-        `🔍 Filtered ${accounts.length} healthy accounts from ${accountIds.length} candidates`
-      )
-      return accounts
-    } catch (error) {
-      logger.error('❌ Failed to filter healthy accounts:', error)
-      return []
-    }
+  // 🚫 标记账户为未授权状态（401错误）
+  async markAccountUnauthorized(accountId, sessionHash = null) {
+    return this.markAccountError(accountId, 'unauthorized', sessionHash)
   }
 
-  // 🎯 Determine effective scheduling strategy from group configurations
-  determineEffectiveStrategy(groupConfigs) {
-    if (!groupConfigs || groupConfigs.length === 0) {
-      return 'least_recent' // Default strategy
-    }
-
-    // Priority order for strategy selection
-    const strategyPriority = {
-      priority: 1,
-      weighted: 2,
-      round_robin: 3,
-      least_recent: 4,
-      random: 5
-    }
-
-    // Find the highest priority strategy
-    let effectiveStrategy = 'least_recent'
-    let highestPriority = 5
-
-    for (const { config: groupConfig } of groupConfigs) {
-      const strategy = groupConfig?.strategy || 'round_robin'
-      const priority = strategyPriority[strategy] || 5
-
-      if (priority < highestPriority) {
-        effectiveStrategy = strategy
-        highestPriority = priority
-      }
-    }
-
-    logger.info(`🎯 Determined effective scheduling strategy: ${effectiveStrategy}`)
-    return effectiveStrategy
-  }
-
-  // 🎯 Apply scheduling strategy to select an account
-  async applySchedulingStrategy(healthyAccounts, strategy, context) {
-    const { userId, groupConfigs } = context
-
-    if (!healthyAccounts || healthyAccounts.length === 0) {
-      return null
-    }
-
-    if (healthyAccounts.length === 1) {
-      logger.info(`🎯 Only one healthy account available: ${healthyAccounts[0].name}`)
-      await this.recordAccountUsage(healthyAccounts[0].id)
-      return healthyAccounts[0].id
-    }
-
-    logger.info(`🎯 Applying ${strategy} scheduling strategy to ${healthyAccounts.length} accounts`)
-
-    try {
-      let selectedAccount = null
-
-      switch (strategy) {
-        case 'random':
-          selectedAccount = await this._applyRandomStrategy(healthyAccounts)
-          break
-        case 'round_robin':
-          selectedAccount = await this._applyRoundRobinStrategy(
-            healthyAccounts,
-            userId,
-            groupConfigs
-          )
-          break
-        case 'weighted':
-          selectedAccount = await this._applyWeightedStrategy(healthyAccounts, groupConfigs)
-          break
-        case 'priority':
-          selectedAccount = await this._applyPriorityStrategy(healthyAccounts)
-          break
-        case 'least_recent':
-          selectedAccount = await this._applyLeastRecentStrategy(healthyAccounts)
-          break
-        case 'intelligent':
-          selectedAccount = await this._applyIntelligentStrategy(healthyAccounts, context)
-          break
-        default:
-          logger.warn(`⚠️ Unknown strategy ${strategy}, using least_recent`)
-          selectedAccount = await this._applyLeastRecentStrategy(healthyAccounts)
-          break
-      }
-
-      if (selectedAccount) {
-        // Record account usage
-        await this.recordAccountUsage(selectedAccount.id)
-        logger.info(`🎯 Selected account: ${selectedAccount.name} (${selectedAccount.id})`)
-        return selectedAccount.id
-      }
-
-      return null
-    } catch (error) {
-      logger.error(`❌ Failed to apply ${strategy} strategy:`, error)
-      // Fallback to random selection
-      const fallbackAccount = await this._applyRandomStrategy(healthyAccounts)
-      if (fallbackAccount) {
-        await this.recordAccountUsage(fallbackAccount.id)
-        return fallbackAccount.id
-      }
-      return null
-    }
-  }
-
-  // 🎲 Random strategy implementation
-  async _applyRandomStrategy(accounts) {
-    const randomIndex = Math.floor(Math.random() * accounts.length)
-    const selected = accounts[randomIndex]
-    logger.info(`🎲 Random strategy selected: ${selected.name} (${selected.id})`)
-    return selected
-  }
-
-  // 🔄 Round robin strategy implementation
-  async _applyRoundRobinStrategy(accounts, userId, groupConfigs) {
-    try {
-      // Create a cache key based on user and groups
-      const groupIds = groupConfigs.map((groupConfigItem) => groupConfigItem.groupId).sort()
-      const cacheKey = `${userId}:${groupIds.join(',')}`
-
-      // Get current round robin state
-      let currentIndex = this._groupRoundRobinCache.get(cacheKey) || 0
-
-      // Ensure index is within bounds
-      if (currentIndex >= accounts.length) {
-        currentIndex = 0
-      }
-
-      const selected = accounts[currentIndex]
-
-      // Update round robin state
-      const nextIndex = (currentIndex + 1) % accounts.length
-      this._groupRoundRobinCache.set(cacheKey, nextIndex, 60 * 60 * 1000) // 1 hour TTL
-
-      logger.info(
-        `🔄 Round robin strategy selected: ${selected.name} (${selected.id}), next index: ${nextIndex}`
-      )
-      return selected
-    } catch (error) {
-      logger.error('❌ Round robin strategy failed:', error)
-      return await this._applyRandomStrategy(accounts)
-    }
-  }
-
-  // ⚖️ Weighted strategy implementation
-  async _applyWeightedStrategy(accounts, groupConfigs) {
-    try {
-      // Collect weights from all group configurations
-      const weights = {}
-      for (const { config: groupConfig } of groupConfigs) {
-        if (groupConfig.weights) {
-          Object.assign(weights, groupConfig.weights)
-        }
-      }
-
-      // If no weights defined, fall back to random
-      if (Object.keys(weights).length === 0) {
-        logger.info('⚖️ No weights defined, falling back to random selection')
-        return await this._applyRandomStrategy(accounts)
-      }
-
-      // Build weighted selection pool
-      const weightedAccounts = []
-      for (const account of accounts) {
-        const weight = weights[account.id] || 0.1 // Default low weight
-        const normalizedWeight = Math.max(0.1, Math.min(1.0, weight)) // Clamp between 0.1-1.0
-        const copies = Math.ceil(normalizedWeight * 10) // Convert to discrete copies
-
-        for (let i = 0; i < copies; i++) {
-          weightedAccounts.push(account)
-        }
-      }
-
-      // Random selection from weighted pool
-      const randomIndex = Math.floor(Math.random() * weightedAccounts.length)
-      const selected = weightedAccounts[randomIndex]
-
-      logger.info(
-        `⚖️ Weighted strategy selected: ${selected.name} (${selected.id}) with weight: ${weights[selected.id] || 0.1}`
-      )
-      return selected
-    } catch (error) {
-      logger.error('❌ Weighted strategy failed:', error)
-      return await this._applyRandomStrategy(accounts)
-    }
-  }
-
-  // 🏆 Priority strategy implementation
-  async _applyPriorityStrategy(accounts) {
-    try {
-      // Sort by priority (lower number = higher priority) and last used time
-      const sortedAccounts = accounts.sort((a, b) => {
-        const priorityA = parseInt(a.priority) || 50
-        const priorityB = parseInt(b.priority) || 50
-
-        if (priorityA !== priorityB) {
-          return priorityA - priorityB // Lower number wins
-        }
-
-        // Same priority, use least recently used
-        const lastUsedA = new Date(a.lastUsedAt || 0).getTime()
-        const lastUsedB = new Date(b.lastUsedAt || 0).getTime()
-        return lastUsedA - lastUsedB
-      })
-
-      const selected = sortedAccounts[0]
-      logger.info(
-        `🏆 Priority strategy selected: ${selected.name} (${selected.id}) with priority: ${selected.priority || 50}`
-      )
-      return selected
-    } catch (error) {
-      logger.error('❌ Priority strategy failed:', error)
-      return await this._applyRandomStrategy(accounts)
-    }
-  }
-
-  // ⏰ Least recent strategy implementation
-  async _applyLeastRecentStrategy(accounts) {
-    try {
-      // Sort by last used time and last scheduled time
-      const sortedAccounts = accounts.sort((a, b) => {
-        const lastUsedA = new Date(a.lastUsedAt || 0).getTime()
-        const lastUsedB = new Date(b.lastUsedAt || 0).getTime()
-
-        if (lastUsedA !== lastUsedB) {
-          return lastUsedA - lastUsedB // Earlier time wins
-        }
-
-        // If same last used time, check last scheduled time
-        const lastScheduledA = new Date(a.lastScheduledAt || 0).getTime()
-        const lastScheduledB = new Date(b.lastScheduledAt || 0).getTime()
-        return lastScheduledA - lastScheduledB
-      })
-
-      const selected = sortedAccounts[0]
-      const lastUsed = selected.lastUsedAt ? new Date(selected.lastUsedAt).toISOString() : 'never'
-
-      logger.info(
-        `⏰ Least recent strategy selected: ${selected.name} (${selected.id}), last used: ${lastUsed}`
-      )
-      return selected
-    } catch (error) {
-      logger.error('❌ Least recent strategy failed:', error)
-      return await this._applyRandomStrategy(accounts)
-    }
-  }
-
-  // 🧠 Intelligent strategy implementation (cost-efficiency based)
-  async _applyIntelligentStrategy(accounts, context = {}) {
-    try {
-      logger.info(`🧠 Applying intelligent load balancing to ${accounts.length} accounts`)
-
-      // 从上下文中提取模型信息
-      const { modelName = 'claude-3-5-sonnet-20241022' } = context
-
-      // 预估token数量（基于历史平均值或默认值）
-      const estimatedTokens = await this.estimateTokenUsage(accounts, modelName)
-
-      // 构建请求上下文
-      const requestContext = {
-        model: modelName,
-        estimatedTokens,
-        strategy: 'intelligent',
-        timestamp: Date.now()
-      }
-
-      // 使用智能负载均衡器选择最优账户
-      const selectionResult = await this.intelligentLoadBalancer.selectOptimalAccount(
-        accounts,
-        requestContext
-      )
-
-      if (!selectionResult || !selectionResult.account) {
-        logger.warn('⚠️ Intelligent load balancer returned no result, falling back to random')
-        return await this._applyRandomStrategy(accounts)
-      }
-
-      logger.info(
-        `🎯 Intelligent strategy selected: ${selectionResult.account.name} (score: ${(selectionResult.score || 0).toFixed(3)}, reason: ${selectionResult.reason})`
-      )
-
-      // 记录选择的详细信息用于调试
-      if (selectionResult.breakdown) {
-        logger.debug('🔍 Selection score breakdown:', selectionResult.breakdown)
-      }
-
-      return selectionResult.account
-    } catch (error) {
-      logger.error('❌ Intelligent strategy failed:', error)
-      // 智能策略失败时回退到最近最少使用策略
-      return await this._applyLeastRecentStrategy(accounts)
-    }
-  }
-
-  // 📊 Estimate token usage based on historical data or defaults
-  async estimateTokenUsage(accounts, modelName) {
-    try {
-      // 获取账户的历史使用情况来估算token使用量
-      let totalTokens = 0
-      let sampleCount = 0
-
-      for (const account of accounts.slice(0, 3)) {
-        // 只检查前3个账户以避免性能问题
-        try {
-          const metrics = await this.intelligentLoadBalancer.getAccountMetrics(account.id)
-          if (metrics.totalRequests > 0) {
-            // 从历史数据估算，假设平均每请求2000 tokens
-            totalTokens += 2000 // 基础估算值
-            sampleCount++
-          }
-        } catch (error) {
-          // 忽略单个账户的错误
-          logger.debug(`⚠️ Failed to get metrics for account ${account.id}:`, error)
-        }
-      }
-
-      // 如果有历史数据，使用平均值；否则使用默认值
-      const estimatedTokens = sampleCount > 0 ? Math.round(totalTokens / sampleCount) : 2000
-
-      // 根据模型调整估算值
-      const modelMultiplier = this.getModelComplexityMultiplier(modelName)
-      const adjustedTokens = Math.round(estimatedTokens * modelMultiplier)
-
-      logger.debug(
-        `📊 Estimated ${adjustedTokens} tokens for model ${modelName} (samples: ${sampleCount})`
-      )
-
-      return Math.max(500, Math.min(50000, adjustedTokens)) // 限制在合理范围内
-    } catch (error) {
-      logger.warn('⚠️ Failed to estimate token usage, using default:', error)
-      return 2000 // 默认值
-    }
-  }
-
-  // 🎛️ Get model complexity multiplier for token estimation
-  getModelComplexityMultiplier(modelName) {
-    const complexityMap = {
-      'claude-3-5-sonnet-20241022': 1.0,
-      'claude-sonnet-4-20250514': 1.0,
-      'claude-3-5-haiku-20241022': 0.7,
-      'claude-3-opus-20240229': 1.5,
-      'claude-opus-4-1-20250805': 1.5,
-      'claude-3-sonnet-20240229': 1.0,
-      'claude-3-haiku-20240307': 0.7
-    }
-
-    return complexityMap[modelName] || 1.0
-  }
-
-  // ==================== Integration and Convenience Methods ====================
-
-  // 🎯 Enhanced account selection with group support (main integration point)
-  async selectAccountForApiKeyWithGroups(apiKeyData, sessionHash = null, modelName = null) {
-    try {
-      // Check if the API key has an associated user ID for group-based selection
-      if (apiKeyData.userId) {
-        logger.info(`🎯 Attempting group-based selection for user ${apiKeyData.userId}`)
-
-        try {
-          const groupAccountId = await this.selectAccountByGroup(apiKeyData.userId, {
-            sessionHash,
-            modelName
-          })
-
-          if (groupAccountId) {
-            logger.success(`🎯 Selected group-based account: ${groupAccountId}`)
-            return groupAccountId
-          }
-        } catch (groupError) {
-          logger.warn(`⚠️ Group-based selection failed: ${groupError.message}`)
-        }
-      }
-
-      // Fallback to existing logic
-      logger.info('🎯 Using fallback account selection (existing logic)')
-      return await this.selectAccountForApiKey(apiKeyData, sessionHash, modelName)
-    } catch (error) {
-      logger.error('❌ Enhanced account selection failed:', error)
-      throw error
-    }
-  }
-
-  // 📊 Get group scheduling statistics
-  async getGroupSchedulingStats() {
-    try {
-      const stats = {
-        groupRoundRobinCache: {
-          size: this._groupRoundRobinCache.size,
-          hits: this._groupRoundRobinCache.hits || 0,
-          misses: this._groupRoundRobinCache.misses || 0,
-          hitRate:
-            this._groupRoundRobinCache.hits + this._groupRoundRobinCache.misses > 0
-              ? (
-                  (this._groupRoundRobinCache.hits || 0) /
-                  ((this._groupRoundRobinCache.hits || 0) +
-                    (this._groupRoundRobinCache.misses || 0))
-                ).toFixed(2)
-              : '0.00'
-        },
-        groupSelectionCache: {
-          size: this._groupSelectionCache.size,
-          hits: this._groupSelectionCache.hits || 0,
-          misses: this._groupSelectionCache.misses || 0,
-          hitRate:
-            this._groupSelectionCache.hits + this._groupSelectionCache.misses > 0
-              ? (
-                  (this._groupSelectionCache.hits || 0) /
-                  ((this._groupSelectionCache.hits || 0) + (this._groupSelectionCache.misses || 0))
-                ).toFixed(2)
-              : '0.00'
-        },
-        supportedStrategies: [...this.SCHEDULING_STRATEGIES],
-        intelligentLoadBalancer: this.intelligentLoadBalancer.getLoadBalancerStats(),
-        timestamp: new Date().toISOString()
-      }
-
-      logger.debug('📊 Group scheduling statistics:', stats)
-      return stats
-    } catch (error) {
-      logger.error('❌ Failed to get group scheduling stats:', error)
-      return null
-    }
-  }
-
-  // 🧹 Clear group scheduling caches
-  clearGroupSchedulingCaches() {
-    try {
-      this._groupRoundRobinCache.clear()
-      this._groupSelectionCache.clear()
-      logger.info('🧹 Cleared group scheduling caches')
-      return { success: true }
-    } catch (error) {
-      logger.error('❌ Failed to clear group scheduling caches:', error)
-      return { success: false, error: error.message }
-    }
-  }
-
-  // 🔧 Validate group scheduling configuration
-  validateGroupSchedulingConfig(configObj) {
-    try {
-      if (!configObj || typeof configObj !== 'object') {
-        throw new Error('Config must be an object')
-      }
-
-      if (configObj.strategy && !this.SCHEDULING_STRATEGIES.includes(configObj.strategy)) {
-        throw new Error(
-          `Invalid strategy: ${configObj.strategy}. Must be one of: ${this.SCHEDULING_STRATEGIES.join(', ')}`
-        )
-      }
-
-      if (configObj.weights && typeof configObj.weights !== 'object') {
-        throw new Error('Weights must be an object')
-      }
-
-      if (configObj.weights) {
-        for (const [accountId, weight] of Object.entries(configObj.weights)) {
-          if (typeof weight !== 'number' || weight < 0 || weight > 1) {
-            throw new Error(`Invalid weight for ${accountId}: must be number between 0 and 1`)
-          }
-        }
-      }
-
-      if (
-        configObj.fallbackToGlobal !== undefined &&
-        typeof configObj.fallbackToGlobal !== 'boolean'
-      ) {
-        throw new Error('fallbackToGlobal must be boolean')
-      }
-
-      if (
-        configObj.healthCheckEnabled !== undefined &&
-        typeof configObj.healthCheckEnabled !== 'boolean'
-      ) {
-        throw new Error('healthCheckEnabled must be boolean')
-      }
-
-      return { valid: true }
-    } catch (error) {
-      logger.error('❌ Invalid group scheduling config:', error)
-      return { valid: false, error: error.message }
-    }
+  // 🚫 标记账户为被封锁状态（403错误）
+  async markAccountBlocked(accountId, sessionHash = null) {
+    return this.markAccountError(accountId, 'blocked', sessionHash)
   }
 
   // 🔄 重置账户所有异常状态
   async resetAccountStatus(accountId) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
@@ -2587,26 +2299,70 @@ class ClaudeAccountService {
         updatedAccountData.status = 'created'
       }
 
-      // 恢复可调度状态
+      // 恢复可调度状态（管理员手动重置时恢复调度是合理的）
       updatedAccountData.schedulable = 'true'
+      // 清除所有自动停止相关的标记
+      delete updatedAccountData.rateLimitAutoStopped
+      delete updatedAccountData.fiveHourAutoStopped
+      delete updatedAccountData.fiveHourStoppedAt
+      delete updatedAccountData.tempErrorAutoStopped
+      delete updatedAccountData.fiveHourWarningWindow
+      delete updatedAccountData.fiveHourWarningCount
+      delete updatedAccountData.fiveHourWarningLastSentAt
+      // 兼容旧的标记
+      delete updatedAccountData.autoStoppedAt
+      delete updatedAccountData.stoppedReason
 
       // 清除错误相关字段
       delete updatedAccountData.errorMessage
       delete updatedAccountData.unauthorizedAt
+      delete updatedAccountData.blockedAt
       delete updatedAccountData.rateLimitedAt
       delete updatedAccountData.rateLimitStatus
       delete updatedAccountData.rateLimitEndAt
+      delete updatedAccountData.tempErrorAt
+      delete updatedAccountData.sessionWindowStart
+      delete updatedAccountData.sessionWindowEnd
 
       // 保存更新后的账户数据
-      await database.setClaudeAccount(accountId, updatedAccountData)
+      await redis.setClaudeAccount(accountId, updatedAccountData)
+
+      // 显式从 Redis 中删除这些字段（因为 HSET 不会删除现有字段）
+      const fieldsToDelete = [
+        'errorMessage',
+        'unauthorizedAt',
+        'blockedAt',
+        'rateLimitedAt',
+        'rateLimitStatus',
+        'rateLimitEndAt',
+        'tempErrorAt',
+        'sessionWindowStart',
+        'sessionWindowEnd',
+        // 新的独立标记
+        'rateLimitAutoStopped',
+        'fiveHourAutoStopped',
+        'fiveHourStoppedAt',
+        'fiveHourWarningWindow',
+        'fiveHourWarningCount',
+        'fiveHourWarningLastSentAt',
+        'tempErrorAutoStopped',
+        // 兼容旧的标记
+        'autoStoppedAt',
+        'stoppedReason'
+      ]
+      await redis.client.hdel(`claude:account:${accountId}`, ...fieldsToDelete)
 
       // 清除401错误计数
       const errorKey = `claude_account:${accountId}:401_errors`
-      await database.client.del(errorKey)
+      await redis.client.del(errorKey)
 
       // 清除限流状态（如果存在）
       const rateLimitKey = `ratelimit:${accountId}`
-      await database.client.del(rateLimitKey)
+      await redis.client.del(rateLimitKey)
+
+      // 清除5xx错误计数
+      const serverErrorKey = `claude_account:${accountId}:5xx_errors`
+      await redis.client.del(serverErrorKey)
 
       logger.info(
         `✅ Successfully reset all error states for account ${accountData.name} (${accountId})`
@@ -2627,252 +2383,621 @@ class ClaudeAccountService {
     }
   }
 
-  // ==================== 智能负载均衡器集成方法 ====================
-
-  // 🧠 更新智能负载均衡器权重配置
-  updateIntelligentLoadBalancerWeights(newWeights) {
+  // 🧹 清理临时错误账户
+  async cleanupTempErrorAccounts() {
     try {
-      this.intelligentLoadBalancer.updateWeights(newWeights)
-      logger.info('🔧 Updated intelligent load balancer weights:', newWeights)
-      return true
-    } catch (error) {
-      logger.error('❌ Failed to update intelligent load balancer weights:', error)
-      throw error
-    }
-  }
+      const accounts = await redis.getAllClaudeAccounts()
+      let cleanedCount = 0
+      const TEMP_ERROR_RECOVERY_MINUTES = 5 // 临时错误状态恢复时间（分钟）
 
-  // 📈 记录账户性能数据（用于智能负载均衡）
-  async recordAccountPerformance(accountId, performanceData) {
-    try {
-      const { responseTime, cost, status = 'success', model, tokens } = performanceData
+      for (const account of accounts) {
+        if (account.status === 'temp_error' && account.tempErrorAt) {
+          const tempErrorAt = new Date(account.tempErrorAt)
+          const now = new Date()
+          const minutesSinceTempError = (now - tempErrorAt) / (1000 * 60)
 
-      // 更新智能负载均衡器的使用统计
-      await this.intelligentLoadBalancer.updateAccountUsage(accountId, {
-        responseTime,
-        cost,
-        status,
-        model,
-        tokens,
-        timestamp: Date.now()
-      })
+          // 如果临时错误状态超过指定时间，尝试重新激活
+          if (minutesSinceTempError > TEMP_ERROR_RECOVERY_MINUTES) {
+            account.status = 'active' // 恢复为 active 状态
+            // 只恢复因临时错误而自动停止的账户
+            if (account.tempErrorAutoStopped === 'true') {
+              account.schedulable = 'true' // 恢复为可调度
+              delete account.tempErrorAutoStopped
+            }
+            delete account.errorMessage
+            delete account.tempErrorAt
+            await redis.setClaudeAccount(account.id, account)
 
-      logger.debug(`📈 Recorded performance for account ${accountId}`, {
-        responseTime,
-        cost,
-        status
-      })
+            // 显式从 Redis 中删除这些字段（因为 HSET 不会删除现有字段）
+            await redis.client.hdel(
+              `claude:account:${account.id}`,
+              'errorMessage',
+              'tempErrorAt',
+              'tempErrorAutoStopped'
+            )
 
-      return true
-    } catch (error) {
-      logger.error(`❌ Failed to record account performance for ${accountId}:`, error)
-      // 不抛出错误，避免影响主要流程
-      return false
-    }
-  }
-
-  // 🏥 执行账户健康检查（智能负载均衡支持）
-  async performIntelligentHealthCheck(accounts) {
-    try {
-      logger.info(`🏥 Performing intelligent health check on ${accounts.length} accounts`)
-
-      const healthyAccounts = await this.intelligentLoadBalancer.performHealthCheck(accounts)
-
-      logger.info(
-        `✅ Health check completed: ${healthyAccounts.length}/${accounts.length} accounts passed`
-      )
-
-      return healthyAccounts
-    } catch (error) {
-      logger.error('❌ Intelligent health check failed:', error)
-      // 返回原账户列表作为后备
-      return accounts
-    }
-  }
-
-  // 📊 获取智能负载均衡器详细统计
-  getIntelligentLoadBalancerStats() {
-    try {
-      return this.intelligentLoadBalancer.getLoadBalancerStats()
-    } catch (error) {
-      logger.error('❌ Failed to get intelligent load balancer stats:', error)
-      return {
-        error: error.message,
-        totalAccountsTracked: 0,
-        healthChecks: 0
+            // 同时清除500错误计数
+            await this.clearInternalErrors(account.id)
+            cleanedCount++
+            logger.success(`🧹 Reset temp_error status for account ${account.name} (${account.id})`)
+          }
+        }
       }
-    }
-  }
 
-  // 🧹 清理智能负载均衡器缓存
-  cleanupIntelligentLoadBalancerCache() {
-    try {
-      this.intelligentLoadBalancer.cleanup()
-      logger.info('🧹 Cleaned up intelligent load balancer cache')
-      return { success: true }
+      if (cleanedCount > 0) {
+        logger.success(`🧹 Reset ${cleanedCount} temp_error accounts`)
+      }
+
+      return cleanedCount
     } catch (error) {
-      logger.error('❌ Failed to cleanup intelligent load balancer cache:', error)
-      return { success: false, error: error.message }
+      logger.error('❌ Failed to cleanup temp_error accounts:', error)
+      return 0
     }
   }
 
-  // 📊 获取 OAuth 账户的使用量数据
-  async fetchOAuthUsage(accountId, accessToken = null, agent = null) {
+  // 记录5xx服务器错误
+  async recordServerError(accountId, statusCode) {
     try {
-      const accountData = await database.getClaudeAccount(accountId)
+      const key = `claude_account:${accountId}:5xx_errors`
+
+      // 增加错误计数，设置5分钟过期时间
+      await redis.client.incr(key)
+      await redis.client.expire(key, 300) // 5分钟
+
+      logger.info(`📝 Recorded ${statusCode} error for account ${accountId}`)
+    } catch (error) {
+      logger.error(`❌ Failed to record ${statusCode} error for account ${accountId}:`, error)
+    }
+  }
+
+  // 记录500内部错误(保留以便向后兼容)
+  async recordInternalError(accountId) {
+    return this.recordServerError(accountId, 500)
+  }
+
+  // 获取5xx错误计数
+  async getServerErrorCount(accountId) {
+    try {
+      const key = `claude_account:${accountId}:5xx_errors`
+
+      const count = await redis.client.get(key)
+      return parseInt(count) || 0
+    } catch (error) {
+      logger.error(`❌ Failed to get 5xx error count for account ${accountId}:`, error)
+      return 0
+    }
+  }
+
+  // 获取500错误计数(保留以便向后兼容)
+  async getInternalErrorCount(accountId) {
+    return this.getServerErrorCount(accountId)
+  }
+
+  // 清除500错误计数
+  async clearInternalErrors(accountId) {
+    try {
+      const key = `claude_account:${accountId}:5xx_errors`
+
+      await redis.client.del(key)
+      logger.info(`✅ Cleared 5xx error count for account ${accountId}`)
+    } catch (error) {
+      logger.error(`❌ Failed to clear 5xx errors for account ${accountId}:`, error)
+    }
+  }
+
+  // 标记账号为临时错误状态
+  async markAccountTempError(accountId, sessionHash = null) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
       if (!accountData || Object.keys(accountData).length === 0) {
         throw new Error('Account not found')
       }
 
-      // 如果没有提供 accessToken，使用 getValidAccessToken 自动检查并刷新
-      if (!accessToken) {
-        accessToken = await this.getValidAccessToken(accountId)
-      }
+      // 更新账户状态
+      const updatedAccountData = { ...accountData }
+      updatedAccountData.status = 'temp_error' // 新增的临时错误状态
+      updatedAccountData.schedulable = 'false' // 设置为不可调度
+      updatedAccountData.errorMessage = 'Account temporarily disabled due to consecutive 500 errors'
+      updatedAccountData.tempErrorAt = new Date().toISOString()
+      // 使用独立的临时错误自动停止标记
+      updatedAccountData.tempErrorAutoStopped = 'true'
 
-      // 如果没有提供 agent，创建代理
-      if (!agent) {
-        agent = this._createProxyAgent(accountData.proxy)
-      }
+      // 保存更新后的账户数据
+      await redis.setClaudeAccount(accountId, updatedAccountData)
 
-      logger.debug(`📊 Fetching OAuth usage for account: ${accountData.name} (${accountId})`)
+      // 设置 5 分钟后自动恢复（一次性定时器）
+      setTimeout(
+        async () => {
+          try {
+            const account = await redis.getClaudeAccount(accountId)
+            if (account && account.status === 'temp_error' && account.tempErrorAt) {
+              // 验证是否确实过了 5 分钟（防止重复定时器）
+              const tempErrorAt = new Date(account.tempErrorAt)
+              const now = new Date()
+              const minutesSince = (now - tempErrorAt) / (1000 * 60)
 
-      // 请求 OAuth usage 接口
-      const response = await axios.get('https://api.anthropic.com/api/oauth/usage', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          'anthropic-beta': 'oauth-2025-04-20',
-          'User-Agent': 'claude-cli/1.0.56 (external, cli)',
-          'Accept-Language': 'en-US,en;q=0.9'
+              if (minutesSince >= 5) {
+                // 恢复账户
+                account.status = 'active'
+                // 只恢复因临时错误而自动停止的账户
+                if (account.tempErrorAutoStopped === 'true') {
+                  account.schedulable = 'true'
+                  delete account.tempErrorAutoStopped
+                }
+                delete account.errorMessage
+                delete account.tempErrorAt
+
+                await redis.setClaudeAccount(accountId, account)
+
+                // 显式删除 Redis 字段
+                await redis.client.hdel(
+                  `claude:account:${accountId}`,
+                  'errorMessage',
+                  'tempErrorAt',
+                  'tempErrorAutoStopped'
+                )
+
+                // 清除 500 错误计数
+                await this.clearInternalErrors(accountId)
+
+                logger.success(
+                  `✅ Auto-recovered temp_error after 5 minutes: ${account.name} (${accountId})`
+                )
+              } else {
+                logger.debug(
+                  `⏰ Temp error timer triggered but only ${minutesSince.toFixed(1)} minutes passed for ${account.name} (${accountId})`
+                )
+              }
+            }
+          } catch (error) {
+            logger.error(`❌ Failed to auto-recover temp_error account ${accountId}:`, error)
+          }
         },
-        httpsAgent: agent,
-        timeout: 15000
-      })
+        6 * 60 * 1000
+      ) // 6 分钟后执行，确保已过 5 分钟
 
-      if (response.status === 200 && response.data) {
-        logger.debug('✅ Successfully fetched OAuth usage data:', {
+      // 如果有sessionHash，删除粘性会话映射
+      if (sessionHash) {
+        await redis.client.del(`sticky_session:${sessionHash}`)
+        logger.info(`🗑️ Deleted sticky session mapping for hash: ${sessionHash}`)
+      }
+
+      logger.warn(
+        `⚠️ Account ${accountData.name} (${accountId}) marked as temp_error and disabled for scheduling`
+      )
+
+      // 发送Webhook通知
+      try {
+        const webhookNotifier = require('../utils/webhookNotifier')
+        await webhookNotifier.sendAccountAnomalyNotification({
           accountId,
-          fiveHour: response.data.five_hour?.utilization,
-          sevenDay: response.data.seven_day?.utilization,
-          sevenDayOpus: response.data.seven_day_opus?.utilization
+          accountName: accountData.name,
+          platform: 'claude-oauth',
+          status: 'temp_error',
+          errorCode: 'CLAUDE_OAUTH_TEMP_ERROR',
+          reason: 'Account temporarily disabled due to consecutive 500 errors'
         })
-
-        return response.data
+      } catch (webhookError) {
+        logger.error('Failed to send webhook notification:', webhookError)
       }
 
-      logger.warn(`⚠️ Failed to fetch OAuth usage for account ${accountId}: ${response.status}`)
-      return null
+      return { success: true }
     } catch (error) {
-      logger.error(`❌ Failed to fetch OAuth usage for account ${accountId}:`, error.message)
-      return null
+      logger.error(`❌ Failed to mark account ${accountId} as temp_error:`, error)
+      throw error
     }
   }
 
-  // 🔧 辅助方法：安全的数字转换
-  _toNumberOrNull(value) {
-    if (value === null || value === undefined || value === '') {
-      return null
-    }
-    const num = parseFloat(value)
-    return isNaN(num) ? null : num
-  }
-
-  // 📸 构建 Claude 使用量快照
-  buildClaudeUsageSnapshot(accountData) {
-    const updatedAt = accountData.claudeUsageUpdatedAt
-
-    const fiveHourUtilization = this._toNumberOrNull(accountData.claudeFiveHourUtilization)
-    const fiveHourResetsAt = accountData.claudeFiveHourResetsAt
-    const sevenDayUtilization = this._toNumberOrNull(accountData.claudeSevenDayUtilization)
-    const sevenDayResetsAt = accountData.claudeSevenDayResetsAt
-    const sevenDayOpusUtilization = this._toNumberOrNull(accountData.claudeSevenDayOpusUtilization)
-    const sevenDayOpusResetsAt = accountData.claudeSevenDayOpusResetsAt
-
-    const hasFiveHourData = fiveHourUtilization !== null || fiveHourResetsAt
-    const hasSevenDayData = sevenDayUtilization !== null || sevenDayResetsAt
-    const hasSevenDayOpusData = sevenDayOpusUtilization !== null || sevenDayOpusResetsAt
-
-    if (!updatedAt && !hasFiveHourData && !hasSevenDayData && !hasSevenDayOpusData) {
-      return null
-    }
-
-    const now = Date.now()
-
-    return {
-      updatedAt,
-      fiveHour: {
-        utilization: fiveHourUtilization,
-        resetsAt: fiveHourResetsAt,
-        remainingSeconds: fiveHourResetsAt
-          ? Math.max(0, Math.floor((new Date(fiveHourResetsAt).getTime() - now) / 1000))
-          : null
-      },
-      sevenDay: {
-        utilization: sevenDayUtilization,
-        resetsAt: sevenDayResetsAt,
-        remainingSeconds: sevenDayResetsAt
-          ? Math.max(0, Math.floor((new Date(sevenDayResetsAt).getTime() - now) / 1000))
-          : null
-      },
-      sevenDayOpus: {
-        utilization: sevenDayOpusUtilization,
-        resetsAt: sevenDayOpusResetsAt,
-        remainingSeconds: sevenDayOpusResetsAt
-          ? Math.max(0, Math.floor((new Date(sevenDayOpusResetsAt).getTime() - now) / 1000))
-          : null
+  // 更新会话窗口状态（allowed, allowed_warning, rejected）
+  async updateSessionWindowStatus(accountId, status) {
+    try {
+      // 参数验证
+      if (!accountId || !status) {
+        logger.warn(
+          `Invalid parameters for updateSessionWindowStatus: accountId=${accountId}, status=${status}`
+        )
+        return
       }
+
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData || Object.keys(accountData).length === 0) {
+        logger.warn(`Account not found: ${accountId}`)
+        return
+      }
+
+      // 验证状态值是否有效
+      const validStatuses = ['allowed', 'allowed_warning', 'rejected']
+      if (!validStatuses.includes(status)) {
+        logger.warn(`Invalid session window status: ${status} for account ${accountId}`)
+        return
+      }
+
+      const now = new Date()
+      const nowIso = now.toISOString()
+
+      // 更新会话窗口状态
+      accountData.sessionWindowStatus = status
+      accountData.sessionWindowStatusUpdatedAt = nowIso
+
+      // 如果状态是 allowed_warning 且账户设置了自动停止调度
+      if (status === 'allowed_warning' && accountData.autoStopOnWarning === 'true') {
+        const alreadyAutoStopped =
+          accountData.schedulable === 'false' && accountData.fiveHourAutoStopped === 'true'
+
+        if (!alreadyAutoStopped) {
+          const windowIdentifier =
+            accountData.sessionWindowEnd || accountData.sessionWindowStart || 'unknown'
+
+          let warningCount = 0
+          if (accountData.fiveHourWarningWindow === windowIdentifier) {
+            const parsedCount = parseInt(accountData.fiveHourWarningCount || '0', 10)
+            warningCount = Number.isNaN(parsedCount) ? 0 : parsedCount
+          }
+
+          const maxWarningsPerWindow = this.maxFiveHourWarningsPerWindow
+
+          logger.warn(
+            `⚠️ Account ${accountData.name} (${accountId}) approaching 5h limit, auto-stopping scheduling`
+          )
+          accountData.schedulable = 'false'
+          // 使用独立的5小时限制自动停止标记
+          accountData.fiveHourAutoStopped = 'true'
+          accountData.fiveHourStoppedAt = nowIso
+          // 设置停止原因，供前端显示
+          accountData.stoppedReason = '5小时使用量接近限制，已自动停止调度'
+
+          const canSendWarning = warningCount < maxWarningsPerWindow
+          let updatedWarningCount = warningCount
+
+          accountData.fiveHourWarningWindow = windowIdentifier
+          if (canSendWarning) {
+            updatedWarningCount += 1
+            accountData.fiveHourWarningLastSentAt = nowIso
+          }
+          accountData.fiveHourWarningCount = updatedWarningCount.toString()
+
+          if (canSendWarning) {
+            // 发送Webhook通知
+            try {
+              const webhookNotifier = require('../utils/webhookNotifier')
+              await webhookNotifier.sendAccountAnomalyNotification({
+                accountId,
+                accountName: accountData.name || 'Claude Account',
+                platform: 'claude',
+                status: 'warning',
+                errorCode: 'CLAUDE_5H_LIMIT_WARNING',
+                reason: '5小时使用量接近限制，已自动停止调度',
+                timestamp: getISOStringWithTimezone(now)
+              })
+            } catch (webhookError) {
+              logger.error('Failed to send webhook notification:', webhookError)
+            }
+          } else {
+            logger.debug(
+              `⚠️ Account ${accountData.name} (${accountId}) reached max ${maxWarningsPerWindow} warning notifications for current 5h window, skipping webhook`
+            )
+          }
+        } else {
+          logger.debug(
+            `⚠️ Account ${accountData.name} (${accountId}) already auto-stopped for 5h limit, skipping duplicate warning`
+          )
+        }
+      }
+
+      await redis.setClaudeAccount(accountId, accountData)
+
+      logger.info(
+        `📊 Updated session window status for account ${accountData.name} (${accountId}): ${status}`
+      )
+    } catch (error) {
+      logger.error(`❌ Failed to update session window status for account ${accountId}:`, error)
     }
   }
 
-  // 💾 更新 Claude 使用量快照
-  async updateClaudeUsageSnapshot(accountId, usageData) {
-    if (!usageData || typeof usageData !== 'object') {
+  // 🚫 标记账号为过载状态（529错误）
+  async markAccountOverloaded(accountId) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData) {
+        throw new Error('Account not found')
+      }
+
+      // 获取配置的过载处理时间（分钟）
+      const overloadMinutes = config.overloadHandling?.enabled || 0
+
+      if (overloadMinutes === 0) {
+        logger.info('⏭️ 529 error handling is disabled')
+        return { success: false, error: '529 error handling is disabled' }
+      }
+
+      const overloadKey = `account:overload:${accountId}`
+      const ttl = overloadMinutes * 60 // 转换为秒
+
+      await redis.setex(
+        overloadKey,
+        ttl,
+        JSON.stringify({
+          accountId,
+          accountName: accountData.name,
+          markedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + ttl * 1000).toISOString()
+        })
+      )
+
+      logger.warn(
+        `🚫 Account ${accountData.name} (${accountId}) marked as overloaded for ${overloadMinutes} minutes`
+      )
+
+      // 在账号上记录最后一次529错误
+      const updates = {
+        lastOverloadAt: new Date().toISOString(),
+        errorMessage: `529错误 - 过载${overloadMinutes}分钟`
+      }
+
+      const updatedAccountData = { ...accountData, ...updates }
+      await redis.setClaudeAccount(accountId, updatedAccountData)
+
+      return { success: true, accountName: accountData.name, duration: overloadMinutes }
+    } catch (error) {
+      logger.error(`❌ Failed to mark account as overloaded: ${accountId}`, error)
+      // 不抛出错误，避免影响主请求流程
+      return { success: false, error: error.message }
+    }
+  }
+
+  // ✅ 检查账号是否过载
+  async isAccountOverloaded(accountId) {
+    try {
+      // 如果529处理未启用，直接返回false
+      const overloadMinutes = config.overloadHandling?.enabled || 0
+      if (overloadMinutes === 0) {
+        return false
+      }
+
+      const overloadKey = `account:overload:${accountId}`
+      const overloadData = await redis.get(overloadKey)
+
+      if (overloadData) {
+        // 账号处于过载状态
+        return true
+      }
+
+      // 账号未过载
+      return false
+    } catch (error) {
+      logger.error(`❌ Failed to check if account is overloaded: ${accountId}`, error)
+      return false
+    }
+  }
+
+  // 🔄 移除账号的过载状态
+  async removeAccountOverload(accountId) {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId)
+      if (!accountData) {
+        throw new Error('Account not found')
+      }
+
+      const overloadKey = `account:overload:${accountId}`
+      await redis.del(overloadKey)
+
+      logger.info(`✅ Account ${accountData.name} (${accountId}) overload status removed`)
+
+      // 清理账号上的错误信息
+      if (accountData.errorMessage && accountData.errorMessage.includes('529错误')) {
+        const updatedAccountData = { ...accountData }
+        delete updatedAccountData.errorMessage
+        delete updatedAccountData.lastOverloadAt
+        await redis.setClaudeAccount(accountId, updatedAccountData)
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to remove overload status for account: ${accountId}`, error)
+      // 不抛出错误，移除过载状态失败不应该影响主流程
+    }
+  }
+
+  /**
+   * 检查并恢复因5小时限制被自动停止的账号
+   * 用于定时任务自动恢复
+   * @returns {Promise<{checked: number, recovered: number, accounts: Array}>}
+   */
+  async checkAndRecoverFiveHourStoppedAccounts() {
+    const result = {
+      checked: 0,
+      recovered: 0,
+      accounts: []
+    }
+
+    try {
+      const accounts = await this.getAllAccounts()
+      const now = new Date()
+
+      for (const account of accounts) {
+        // 只检查因5小时限制被自动停止的账号
+        // 重要：不恢复手动停止的账号（没有fiveHourAutoStopped标记的）
+        if (account.fiveHourAutoStopped === true && account.schedulable === false) {
+          result.checked++
+
+          // 使用分布式锁防止并发修改
+          const lockKey = `lock:account:${account.id}:recovery`
+          const lockValue = `${Date.now()}_${Math.random()}`
+          const lockTTL = 5000 // 5秒锁超时
+
+          try {
+            // 尝试获取锁
+            const lockAcquired = await redis.setAccountLock(lockKey, lockValue, lockTTL)
+            if (!lockAcquired) {
+              logger.debug(
+                `⏭️ Account ${account.name} (${account.id}) is being processed by another instance`
+              )
+              continue
+            }
+
+            // 重新获取账号数据，确保是最新的
+            const latestAccount = await redis.getClaudeAccount(account.id)
+            if (
+              !latestAccount ||
+              latestAccount.fiveHourAutoStopped !== 'true' ||
+              latestAccount.schedulable !== 'false'
+            ) {
+              // 账号状态已变化，跳过
+              await redis.releaseAccountLock(lockKey, lockValue)
+              continue
+            }
+
+            // 检查当前时间是否已经进入新的5小时窗口
+            let shouldRecover = false
+            let newWindowStart = null
+            let newWindowEnd = null
+
+            if (latestAccount.sessionWindowEnd) {
+              const windowEnd = new Date(latestAccount.sessionWindowEnd)
+
+              // 使用严格的时间比较，添加1分钟缓冲避免边界问题
+              if (now.getTime() > windowEnd.getTime() + 60000) {
+                shouldRecover = true
+
+                // 计算新的窗口时间（基于窗口结束时间，而不是当前时间）
+                // 这样可以保证窗口时间的连续性
+                newWindowStart = new Date(windowEnd)
+                newWindowStart.setMilliseconds(newWindowStart.getMilliseconds() + 1)
+                newWindowEnd = new Date(newWindowStart)
+                newWindowEnd.setHours(newWindowEnd.getHours() + 5)
+
+                logger.info(
+                  `🔄 Account ${latestAccount.name} (${latestAccount.id}) has entered new session window. ` +
+                    `Old window: ${latestAccount.sessionWindowStart} - ${latestAccount.sessionWindowEnd}, ` +
+                    `New window: ${newWindowStart.toISOString()} - ${newWindowEnd.toISOString()}`
+                )
+              }
+            } else {
+              // 如果没有窗口结束时间，但有停止时间，检查是否已经过了5小时
+              if (latestAccount.fiveHourStoppedAt) {
+                const stoppedAt = new Date(latestAccount.fiveHourStoppedAt)
+                const hoursSinceStopped = (now.getTime() - stoppedAt.getTime()) / (1000 * 60 * 60)
+
+                // 使用严格的5小时判断，加上1分钟缓冲
+                if (hoursSinceStopped > 5.017) {
+                  // 5小时1分钟
+                  shouldRecover = true
+                  newWindowStart = this._calculateSessionWindowStart(now)
+                  newWindowEnd = this._calculateSessionWindowEnd(newWindowStart)
+
+                  logger.info(
+                    `🔄 Account ${latestAccount.name} (${latestAccount.id}) stopped ${hoursSinceStopped.toFixed(2)} hours ago, recovering`
+                  )
+                }
+              }
+            }
+
+            if (shouldRecover) {
+              // 恢复账号调度
+              const updatedAccountData = { ...latestAccount }
+
+              // 恢复调度状态
+              updatedAccountData.schedulable = 'true'
+              delete updatedAccountData.fiveHourAutoStopped
+              delete updatedAccountData.fiveHourStoppedAt
+              await this._clearFiveHourWarningMetadata(account.id, updatedAccountData)
+              delete updatedAccountData.stoppedReason
+
+              // 更新会话窗口（如果有新窗口）
+              if (newWindowStart && newWindowEnd) {
+                updatedAccountData.sessionWindowStart = newWindowStart.toISOString()
+                updatedAccountData.sessionWindowEnd = newWindowEnd.toISOString()
+
+                // 清除会话窗口状态
+                delete updatedAccountData.sessionWindowStatus
+                delete updatedAccountData.sessionWindowStatusUpdatedAt
+              }
+
+              // 保存更新
+              await redis.setClaudeAccount(account.id, updatedAccountData)
+
+              const fieldsToRemove = ['fiveHourAutoStopped', 'fiveHourStoppedAt']
+              if (newWindowStart && newWindowEnd) {
+                fieldsToRemove.push('sessionWindowStatus', 'sessionWindowStatusUpdatedAt')
+              }
+              await this._removeAccountFields(account.id, fieldsToRemove, 'five_hour_recovery_task')
+
+              result.recovered++
+              result.accounts.push({
+                id: latestAccount.id,
+                name: latestAccount.name,
+                oldWindow: latestAccount.sessionWindowEnd
+                  ? {
+                      start: latestAccount.sessionWindowStart,
+                      end: latestAccount.sessionWindowEnd
+                    }
+                  : null,
+                newWindow:
+                  newWindowStart && newWindowEnd
+                    ? {
+                        start: newWindowStart.toISOString(),
+                        end: newWindowEnd.toISOString()
+                      }
+                    : null
+              })
+
+              logger.info(
+                `✅ Auto-resumed scheduling for account ${latestAccount.name} (${latestAccount.id}) - 5-hour limit expired`
+              )
+            }
+
+            // 释放锁
+            await redis.releaseAccountLock(lockKey, lockValue)
+          } catch (error) {
+            // 确保释放锁
+            if (lockKey && lockValue) {
+              try {
+                await redis.releaseAccountLock(lockKey, lockValue)
+              } catch (unlockError) {
+                logger.error(`Failed to release lock for account ${account.id}:`, unlockError)
+              }
+            }
+            logger.error(
+              `❌ Failed to check/recover 5-hour stopped account ${account.name} (${account.id}):`,
+              error
+            )
+          }
+        }
+      }
+
+      if (result.recovered > 0) {
+        logger.info(
+          `🔄 5-hour limit recovery completed: ${result.recovered}/${result.checked} accounts recovered`
+        )
+      }
+
+      return result
+    } catch (error) {
+      logger.error('❌ Failed to check and recover 5-hour stopped accounts:', error)
+      throw error
+    }
+  }
+
+  async _removeAccountFields(accountId, fields = [], context = 'general_cleanup') {
+    if (!Array.isArray(fields) || fields.length === 0) {
       return
     }
 
-    const updates = {}
-
-    // 5-hour window
-    if (usageData.five_hour) {
-      if (usageData.five_hour.utilization !== undefined) {
-        updates.claudeFiveHourUtilization = String(usageData.five_hour.utilization)
-      }
-      if (usageData.five_hour.resets_at) {
-        updates.claudeFiveHourResetsAt = usageData.five_hour.resets_at
-      }
-    }
-
-    // 7-day window
-    if (usageData.seven_day) {
-      if (usageData.seven_day.utilization !== undefined) {
-        updates.claudeSevenDayUtilization = String(usageData.seven_day.utilization)
-      }
-      if (usageData.seven_day.resets_at) {
-        updates.claudeSevenDayResetsAt = usageData.seven_day.resets_at
-      }
-    }
-
-    // 7-day Opus window
-    if (usageData.seven_day_opus) {
-      if (usageData.seven_day_opus.utilization !== undefined) {
-        updates.claudeSevenDayOpusUtilization = String(usageData.seven_day_opus.utilization)
-      }
-      if (usageData.seven_day_opus.resets_at) {
-        updates.claudeSevenDayOpusResetsAt = usageData.seven_day_opus.resets_at
-      }
-    }
-
-    if (Object.keys(updates).length === 0) {
+    const filteredFields = fields.filter((field) => typeof field === 'string' && field.trim())
+    if (filteredFields.length === 0) {
       return
     }
 
-    updates.claudeUsageUpdatedAt = new Date().toISOString()
+    const accountKey = `claude:account:${accountId}`
 
-    const accountData = await database.getClaudeAccount(accountId)
-    if (accountData && Object.keys(accountData).length > 0) {
-      Object.assign(accountData, updates)
-      await database.setClaudeAccount(accountId, accountData)
-      logger.debug(`💾 Updated Claude usage snapshot for account ${accountId}`)
+    try {
+      await redis.client.hdel(accountKey, ...filteredFields)
+      logger.debug(
+        `🧹 已在 ${context} 阶段为账号 ${accountId} 删除字段 [${filteredFields.join(', ')}]`
+      )
+    } catch (error) {
+      logger.error(
+        `❌ 无法在 ${context} 阶段为账号 ${accountId} 删除字段 [${filteredFields.join(', ')}]:`,
+        error
+      )
     }
   }
 }

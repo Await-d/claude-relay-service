@@ -19,10 +19,11 @@ class ClaudeConsoleRelayService {
     options = {}
   ) {
     let abortController = null
+    let account = null
 
     try {
       // 获取账户信息
-      const account = await claudeConsoleAccountService.getAccount(accountId)
+      account = await claudeConsoleAccountService.getAccount(accountId)
       if (!account) {
         throw new Error('Claude Console Claude account not found')
       }
@@ -94,8 +95,15 @@ class ClaudeConsoleRelayService {
         // 默认使用 messages 端点
         apiEndpoint = cleanUrl.endsWith('/v1/messages') ? cleanUrl : `${cleanUrl}/v1/messages`
       }
+
+      logger.debug(`🎯 Final API endpoint: ${apiEndpoint}`)
+      logger.debug(`[DEBUG] Options passed to relayRequest: ${JSON.stringify(options)}`)
+      logger.debug(`[DEBUG] Client headers received: ${JSON.stringify(clientHeaders)}`)
+
       // 过滤客户端请求头
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
+      logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
+
       // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
       const userAgent =
         account.userAgent ||
@@ -115,7 +123,7 @@ class ClaudeConsoleRelayService {
           ...filteredHeaders
         },
         httpsAgent: proxyAgent,
-        timeout: config.proxy.timeout || 60000,
+        timeout: config.requestTimeout || 600000,
         signal: abortController.signal,
         validateStatus: () => true // 接受所有状态码
       }
@@ -124,15 +132,32 @@ class ClaudeConsoleRelayService {
       if (account.apiKey && account.apiKey.startsWith('sk-ant-')) {
         // Anthropic 官方 API Key 使用 x-api-key
         requestConfig.headers['x-api-key'] = account.apiKey
+        logger.debug('[DEBUG] Using x-api-key authentication for sk-ant-* API key')
       } else {
         // 其他 API Key 使用 Authorization Bearer
         requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
+        logger.debug('[DEBUG] Using Authorization Bearer authentication')
       }
+
+      logger.debug(
+        `[DEBUG] Initial headers before beta: ${JSON.stringify(requestConfig.headers, null, 2)}`
+      )
+
       // 添加beta header如果需要
       if (options.betaHeader) {
+        logger.debug(`[DEBUG] Adding beta header: ${options.betaHeader}`)
         requestConfig.headers['anthropic-beta'] = options.betaHeader
+      } else {
+        logger.debug('[DEBUG] No beta header to add')
       }
+
+      // 发送请求
+      logger.debug(
+        '📤 Sending request to Claude Console API with headers:',
+        JSON.stringify(requestConfig.headers, null, 2)
+      )
       const response = await axios(requestConfig)
+
       // 移除监听器（请求成功完成）
       if (clientRequest) {
         clientRequest.removeListener('close', handleClientDisconnect)
@@ -140,21 +165,51 @@ class ClaudeConsoleRelayService {
       if (clientResponse) {
         clientResponse.removeListener('close', handleClientDisconnect)
       }
-      // 检查是否为限流错误
-      if (response.status === 429) {
+
+      logger.debug(`🔗 Claude Console API response: ${response.status}`)
+      logger.debug(`[DEBUG] Response headers: ${JSON.stringify(response.headers)}`)
+      logger.debug(`[DEBUG] Response data type: ${typeof response.data}`)
+      logger.debug(
+        `[DEBUG] Response data length: ${response.data ? (typeof response.data === 'string' ? response.data.length : JSON.stringify(response.data).length) : 0}`
+      )
+      logger.debug(
+        `[DEBUG] Response data preview: ${typeof response.data === 'string' ? response.data.substring(0, 200) : JSON.stringify(response.data).substring(0, 200)}`
+      )
+
+      // 检查错误状态并相应处理
+      if (response.status === 401) {
+        logger.warn(`🚫 Unauthorized error detected for Claude Console account ${accountId}`)
+        await claudeConsoleAccountService.markAccountUnauthorized(accountId)
+      } else if (response.status === 429) {
         logger.warn(`🚫 Rate limit detected for Claude Console account ${accountId}`)
+        // 收到429先检查是否因为超过了手动配置的每日额度
+        await claudeConsoleAccountService.checkQuotaUsage(accountId).catch((err) => {
+          logger.error('❌ Failed to check quota after 429 error:', err)
+        })
+
         await claudeConsoleAccountService.markAccountRateLimited(accountId)
+      } else if (response.status === 529) {
+        logger.warn(`🚫 Overload error detected for Claude Console account ${accountId}`)
+        await claudeConsoleAccountService.markAccountOverloaded(accountId)
       } else if (response.status === 200 || response.status === 201) {
-        // 如果请求成功，检查并移除限流状态
+        // 如果请求成功，检查并移除错误状态
         const isRateLimited = await claudeConsoleAccountService.isAccountRateLimited(accountId)
         if (isRateLimited) {
           await claudeConsoleAccountService.removeAccountRateLimit(accountId)
         }
+        const isOverloaded = await claudeConsoleAccountService.isAccountOverloaded(accountId)
+        if (isOverloaded) {
+          await claudeConsoleAccountService.removeAccountOverload(accountId)
+        }
       }
+
       // 更新最后使用时间
       await this._updateLastUsedTime(accountId)
+
       const responseBody =
         typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+      logger.debug(`[DEBUG] Final response body to return: ${responseBody}`)
+
       return {
         statusCode: response.status,
         headers: response.headers,
@@ -168,7 +223,10 @@ class ClaudeConsoleRelayService {
         throw new Error('Client disconnected')
       }
 
-      logger.error('❌ Claude Console Claude relay request failed:', error.message)
+      logger.error(
+        `❌ Claude Console relay request failed (Account: ${account?.name || accountId}):`,
+        error.message
+      )
 
       // 不再因为模型不支持而block账号
 
@@ -187,9 +245,10 @@ class ClaudeConsoleRelayService {
     streamTransformer = null,
     options = {}
   ) {
+    let account = null
     try {
       // 获取账户信息
-      const account = await claudeConsoleAccountService.getAccount(accountId)
+      account = await claudeConsoleAccountService.getAccount(accountId)
       if (!account) {
         throw new Error('Claude Console Claude account not found')
       }
@@ -243,7 +302,10 @@ class ClaudeConsoleRelayService {
       // 更新最后使用时间
       await this._updateLastUsedTime(accountId)
     } catch (error) {
-      logger.error('❌ Claude Console Claude stream relay failed:', error)
+      logger.error(
+        `❌ Claude Console stream relay failed (Account: ${account?.name || accountId}):`,
+        error
+      )
       throw error
     }
   }
@@ -266,9 +328,13 @@ class ClaudeConsoleRelayService {
       // 构建完整的API URL
       const cleanUrl = account.apiUrl.replace(/\/$/, '') // 移除末尾斜杠
       const apiEndpoint = cleanUrl.endsWith('/v1/messages') ? cleanUrl : `${cleanUrl}/v1/messages`
+
       logger.debug(`🎯 Final API endpoint for stream: ${apiEndpoint}`)
+
       // 过滤客户端请求头
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
+      logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
+
       // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
       const userAgent =
         account.userAgent ||
@@ -288,7 +354,7 @@ class ClaudeConsoleRelayService {
           ...filteredHeaders
         },
         httpsAgent: proxyAgent,
-        timeout: config.proxy.timeout || 60000,
+        timeout: config.requestTimeout || 600000,
         responseType: 'stream',
         validateStatus: () => true // 接受所有状态码
       }
@@ -297,9 +363,11 @@ class ClaudeConsoleRelayService {
       if (account.apiKey && account.apiKey.startsWith('sk-ant-')) {
         // Anthropic 官方 API Key 使用 x-api-key
         requestConfig.headers['x-api-key'] = account.apiKey
+        logger.debug('[DEBUG] Using x-api-key authentication for sk-ant-* API key')
       } else {
         // 其他 API Key 使用 Authorization Bearer
         requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
+        logger.debug('[DEBUG] Using Authorization Bearer authentication')
       }
 
       // 添加beta header如果需要
@@ -316,10 +384,20 @@ class ClaudeConsoleRelayService {
 
           // 错误响应处理
           if (response.status !== 200) {
-            logger.error(`❌ Claude Console API returned error status: ${response.status}`)
+            logger.error(
+              `❌ Claude Console API returned error status: ${response.status} | Account: ${account?.name || accountId}`
+            )
 
-            if (response.status === 429) {
+            if (response.status === 401) {
+              claudeConsoleAccountService.markAccountUnauthorized(accountId)
+            } else if (response.status === 429) {
               claudeConsoleAccountService.markAccountRateLimited(accountId)
+              // 检查是否因为超过每日额度
+              claudeConsoleAccountService.checkQuotaUsage(accountId).catch((err) => {
+                logger.error('❌ Failed to check quota after 429 error:', err)
+              })
+            } else if (response.status === 529) {
+              claudeConsoleAccountService.markAccountOverloaded(accountId)
             }
 
             // 设置错误响应的状态码和响应头
@@ -351,10 +429,15 @@ class ClaudeConsoleRelayService {
             return
           }
 
-          // 成功响应，检查并移除限流状态
+          // 成功响应，检查并移除错误状态
           claudeConsoleAccountService.isAccountRateLimited(accountId).then((isRateLimited) => {
             if (isRateLimited) {
               claudeConsoleAccountService.removeAccountRateLimit(accountId)
+            }
+          })
+          claudeConsoleAccountService.isAccountOverloaded(accountId).then((isOverloaded) => {
+            if (isOverloaded) {
+              claudeConsoleAccountService.removeAccountOverload(accountId)
             }
           })
 
@@ -455,7 +538,10 @@ class ClaudeConsoleRelayService {
                 }
               }
             } catch (error) {
-              logger.error('❌ Error processing Claude Console stream data:', error)
+              logger.error(
+                `❌ Error processing Claude Console stream data (Account: ${account?.name || accountId}):`,
+                error
+              )
               if (!responseStream.destroyed) {
                 responseStream.write('event: error\n')
                 responseStream.write(
@@ -497,7 +583,10 @@ class ClaudeConsoleRelayService {
           })
 
           response.data.on('error', (error) => {
-            logger.error('❌ Claude Console stream error:', error)
+            logger.error(
+              `❌ Claude Console stream error (Account: ${account?.name || accountId}):`,
+              error
+            )
             if (!responseStream.destroyed) {
               responseStream.write('event: error\n')
               responseStream.write(
@@ -517,11 +606,24 @@ class ClaudeConsoleRelayService {
             return
           }
 
-          logger.error('❌ Claude Console Claude stream request error:', error.message)
+          logger.error(
+            `❌ Claude Console stream request error (Account: ${account?.name || accountId}):`,
+            error.message
+          )
 
-          // 检查是否是429错误
-          if (error.response && error.response.status === 429) {
-            claudeConsoleAccountService.markAccountRateLimited(accountId)
+          // 检查错误状态
+          if (error.response) {
+            if (error.response.status === 401) {
+              claudeConsoleAccountService.markAccountUnauthorized(accountId)
+            } else if (error.response.status === 429) {
+              claudeConsoleAccountService.markAccountRateLimited(accountId)
+              // 检查是否因为超过每日额度
+              claudeConsoleAccountService.checkQuotaUsage(accountId).catch((err) => {
+                logger.error('❌ Failed to check quota after 429 error:', err)
+              })
+            } else if (error.response.status === 529) {
+              claudeConsoleAccountService.markAccountOverloaded(accountId)
+            }
           }
 
           // 发送错误响应
@@ -587,7 +689,7 @@ class ClaudeConsoleRelayService {
   // 🕐 更新最后使用时间
   async _updateLastUsedTime(accountId) {
     try {
-      const client = require('../models/database').getClientSafe()
+      const client = require('../models/redis').getClientSafe()
       await client.hset(
         `claude_console_account:${accountId}`,
         'lastUsedAt',

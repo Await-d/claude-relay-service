@@ -351,6 +351,32 @@
           </div>
         </div>
 
+        <!-- VSCode 插件配置 -->
+        <div class="mt-6 rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
+          <h6 class="mb-2 font-medium text-indigo-800 dark:text-indigo-300">
+            VSCode Claude 插件配置
+          </h6>
+          <p class="mb-3 text-sm text-indigo-700">
+            如果使用 VSCode 的 Claude 插件，需要在配置文件中进行设置：
+          </p>
+          <div class="mb-3 space-y-2">
+            <p class="text-sm text-indigo-700">
+              <strong>配置文件位置：</strong>
+              <code class="rounded bg-indigo-100 px-1"
+                >C:\Users\你的用户名\.claude\config.json</code
+              >
+            </p>
+            <p class="text-xs text-indigo-600">💡 如果该文件不存在，请手动创建。</p>
+          </div>
+          <div
+            class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+          >
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"primaryApiKey": "crs"</div>
+            <div class="whitespace-nowrap text-gray-300">}</div>
+          </div>
+        </div>
+
         <!-- 验证环境变量设置 -->
         <div class="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-3 sm:p-4">
           <h6 class="mb-2 font-medium text-blue-800 dark:text-blue-300">验证环境变量设置</h6>
@@ -493,58 +519,85 @@
           </p>
 
           <div class="space-y-4">
-            <div class="rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
-              <h6 class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-600 sm:text-base">
-                PowerShell 设置方法
-              </h6>
-              <p class="mb-3 text-sm text-gray-600">在 PowerShell 中运行以下命令：</p>
+            <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 sm:p-4">
+              <h6 class="mb-2 font-medium text-yellow-800">Codex 配置文件</h6>
+              <p class="mb-3 text-sm text-yellow-700">
+                在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
+                文件开头添加以下配置：
+              </p>
               <div
                 class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
               >
-                <div class="whitespace-nowrap text-gray-300">
-                  $env:OPENAI_BASE_URL = "{{ openaiBaseUrl }}"
-                </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  $env:OPENAI_API_KEY = "你的API密钥"
-                </div>
-              </div>
-              <p class="mt-2 text-xs text-yellow-700">
-                💡 使用与 Claude Code 相同的 API 密钥即可，格式如 cr_xxxxxxxxxx。
-              </p>
-            </div>
-
-            <div class="rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
-              <h6 class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-600 sm:text-base">
-                PowerShell 永久设置（用户级）
-              </h6>
-              <p class="mb-3 text-sm text-gray-600">在 PowerShell 中运行以下命令：</p>
-              <div
-                class="mb-3 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div class="mb-2"># 设置用户级环境变量（永久生效）</div>
-                <div class="whitespace-nowrap text-gray-300">
-                  [System.Environment]::SetEnvironmentVariable("OPENAI_BASE_URL", "{{
-                    openaiBaseUrl
-                  }}", [System.EnvironmentVariableTarget]::User)
-                </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "你的API密钥",
-                  [System.EnvironmentVariableTarget]::User)
+                <div
+                  v-for="line in codexConfigContent.configToml"
+                  :key="line"
+                  class="whitespace-nowrap text-gray-300"
+                  :class="{ 'mt-2': line === '' }"
+                >
+                  {{ line }}
                 </div>
               </div>
-              <p class="mt-2 text-xs text-blue-700">
-                💡 设置后需要重新打开 PowerShell 窗口才能生效。
+              <p class="mt-3 text-sm text-yellow-700">
+                在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/auth.json</code>
+                文件中配置API密钥：
               </p>
-            </div>
-
-            <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
-              <h6 class="mb-2 font-medium text-indigo-800">验证 Codex 环境变量</h6>
-              <p class="mb-3 text-sm text-indigo-700">在 PowerShell 中验证：</p>
               <div
-                class="space-y-1 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                class="mt-2 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
               >
-                <div class="whitespace-nowrap text-gray-300">echo $env:OPENAI_BASE_URL</div>
-                <div class="whitespace-nowrap text-gray-300">echo $env:OPENAI_API_KEY</div>
+                <div
+                  v-for="line in codexConfigContent.authJson"
+                  :key="line"
+                  class="whitespace-nowrap text-gray-300"
+                >
+                  {{ line }}
+                </div>
+              </div>
+              <div class="mt-3 space-y-3 text-xs text-yellow-700 dark:text-yellow-300">
+                <!-- 描述文字 -->
+                <p>{{ codexConfigContent.authInstructions.description }}</p>
+
+                <!-- 标题 -->
+                <h6 class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                  {{ codexConfigContent.authInstructions.title }}
+                </h6>
+
+                <!-- 当前平台对应的环境变量设置 -->
+                <div class="space-y-2">
+                  <p class="font-medium">
+                    {{ codexConfigContent.authInstructions.platform.title }}:
+                  </p>
+                  <div
+                    class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                  >
+                    <div class="whitespace-nowrap text-gray-300">
+                      {{ codexConfigContent.authInstructions.platform.command }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Shell 配置文件（仅对于 macOS/Linux 显示） -->
+                <div v-if="codexConfigContent.authInstructions.persistent" class="space-y-2">
+                  <p class="font-medium">
+                    {{ codexConfigContent.authInstructions.persistent.title }}:
+                  </p>
+                  <p class="text-xs">
+                    {{ codexConfigContent.authInstructions.persistent.description }}
+                  </p>
+                  <div
+                    class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                  >
+                    <div
+                      v-for="command in codexConfigContent.authInstructions.persistent.commands"
+                      :key="command"
+                      class="whitespace-nowrap text-gray-300"
+                      :class="{ 'mt-2': command === '' }"
+                    >
+                      {{ command }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -895,6 +948,30 @@
           </div>
         </div>
 
+        <!-- VSCode 插件配置 (macOS) -->
+        <div class="mt-6 rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
+          <h6 class="mb-2 font-medium text-indigo-800 dark:text-indigo-300">
+            VSCode Claude 插件配置
+          </h6>
+          <p class="mb-3 text-sm text-indigo-700">
+            如果使用 VSCode 的 Claude 插件，需要在配置文件中进行设置：
+          </p>
+          <div class="mb-3 space-y-2">
+            <p class="text-sm text-indigo-700">
+              <strong>配置文件位置：</strong>
+              <code class="rounded bg-indigo-100 px-1">~/.claude/config.json</code>
+            </p>
+            <p class="text-xs text-indigo-600">💡 如果该文件不存在，请手动创建。</p>
+          </div>
+          <div
+            class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+          >
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"primaryApiKey": "crs"</div>
+            <div class="whitespace-nowrap text-gray-300">}</div>
+          </div>
+        </div>
+
         <!-- Gemini CLI 环境变量设置 -->
         <div class="mt-8">
           <h5
@@ -997,65 +1074,85 @@
           </p>
 
           <div class="space-y-4">
-            <div class="rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
-              <h6 class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-600 sm:text-base">
-                Terminal 设置方法
-              </h6>
-              <p class="mb-3 text-sm text-gray-600">在 Terminal 中运行以下命令：</p>
-              <div
-                class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div class="whitespace-nowrap text-gray-300">
-                  export OPENAI_BASE_URL="{{ openaiBaseUrl }}"
-                </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  export OPENAI_API_KEY="你的API密钥"
-                </div>
-              </div>
-              <p class="mt-2 text-xs text-yellow-700">
-                💡 使用与 Claude Code 相同的 API 密钥即可，格式如 cr_xxxxxxxxxx。
+            <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 sm:p-4">
+              <h6 class="mb-2 font-medium text-yellow-800">Codex 配置文件</h6>
+              <p class="mb-3 text-sm text-yellow-700">
+                在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
+                文件开头添加以下配置：
               </p>
-            </div>
-
-            <div class="rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
-              <h6 class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-600 sm:text-base">
-                永久设置方法
-              </h6>
-              <p class="mb-3 text-sm text-gray-600">添加到你的 shell 配置文件：</p>
-              <div
-                class="mb-3 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div class="mb-2"># 对于 zsh (默认)</div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_BASE_URL="{{ openaiBaseUrl }}"' >> ~/.zshrc
-                </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_API_KEY="你的API密钥"' >> ~/.zshrc
-                </div>
-                <div class="whitespace-nowrap text-gray-300">source ~/.zshrc</div>
-              </div>
               <div
                 class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
               >
-                <div class="mb-2"># 对于 bash</div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_BASE_URL="{{ openaiBaseUrl }}"' >> ~/.bash_profile
+                <div
+                  v-for="line in codexConfigContent.configToml"
+                  :key="line"
+                  class="whitespace-nowrap text-gray-300"
+                  :class="{ 'mt-2': line === '' }"
+                >
+                  {{ line }}
                 </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_API_KEY="你的API密钥"' >> ~/.bash_profile
-                </div>
-                <div class="whitespace-nowrap text-gray-300">source ~/.bash_profile</div>
               </div>
-            </div>
-
-            <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
-              <h6 class="mb-2 font-medium text-indigo-800">验证 Codex 环境变量</h6>
-              <p class="mb-3 text-sm text-indigo-700">在 Terminal 中验证：</p>
+              <p class="mt-3 text-sm text-yellow-700">
+                在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/auth.json</code>
+                文件中配置API密钥：
+              </p>
               <div
-                class="space-y-1 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                class="mt-2 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
               >
-                <div class="whitespace-nowrap text-gray-300">echo $OPENAI_BASE_URL</div>
-                <div class="whitespace-nowrap text-gray-300">echo $OPENAI_API_KEY</div>
+                <div
+                  v-for="line in codexConfigContent.authJson"
+                  :key="line"
+                  class="whitespace-nowrap text-gray-300"
+                >
+                  {{ line }}
+                </div>
+              </div>
+              <div class="mt-3 space-y-3 text-xs text-yellow-700 dark:text-yellow-300">
+                <!-- 描述文字 -->
+                <p>{{ codexConfigContent.authInstructions.description }}</p>
+
+                <!-- 标题 -->
+                <h6 class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                  {{ codexConfigContent.authInstructions.title }}
+                </h6>
+
+                <!-- 当前平台对应的环境变量设置 -->
+                <div class="space-y-2">
+                  <p class="font-medium">
+                    {{ codexConfigContent.authInstructions.platform.title }}:
+                  </p>
+                  <div
+                    class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                  >
+                    <div class="whitespace-nowrap text-gray-300">
+                      {{ codexConfigContent.authInstructions.platform.command }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Shell 配置文件（仅对于 macOS/Linux 显示） -->
+                <div v-if="codexConfigContent.authInstructions.persistent" class="space-y-2">
+                  <p class="font-medium">
+                    {{ codexConfigContent.authInstructions.persistent.title }}:
+                  </p>
+                  <p class="text-xs">
+                    {{ codexConfigContent.authInstructions.persistent.description }}
+                  </p>
+                  <div
+                    class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                  >
+                    <div
+                      v-for="command in codexConfigContent.authInstructions.persistent.commands"
+                      :key="command"
+                      class="whitespace-nowrap text-gray-300"
+                      :class="{ 'mt-2': command === '' }"
+                    >
+                      {{ command }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1499,66 +1596,138 @@
           </p>
 
           <div class="space-y-4">
-            <div class="rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
-              <h6 class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-600 sm:text-base">
-                终端设置方法
-              </h6>
-              <p class="mb-3 text-sm text-gray-600">在终端中运行以下命令：</p>
-              <div
-                class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div class="whitespace-nowrap text-gray-300">
-                  export OPENAI_BASE_URL="{{ openaiBaseUrl }}"
-                </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  export OPENAI_API_KEY="你的API密钥"
-                </div>
-              </div>
-              <p class="mt-2 text-xs text-yellow-700">
-                💡 使用与 Claude Code 相同的 API 密钥即可，格式如 cr_xxxxxxxxxx。
+            <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 sm:p-4">
+              <h6 class="mb-2 font-medium text-yellow-800">Codex 配置文件</h6>
+              <p class="mb-3 text-sm text-yellow-700">
+                在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
+                文件开头添加以下配置：
               </p>
-            </div>
-
-            <div class="rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
-              <h6 class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-600 sm:text-base">
-                永久设置方法
-              </h6>
-              <p class="mb-3 text-sm text-gray-600">添加到你的 shell 配置文件：</p>
-              <div
-                class="mb-3 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div class="mb-2"># 对于 bash (默认)</div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_BASE_URL="{{ openaiBaseUrl }}"' >> ~/.bashrc
-                </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_API_KEY="你的API密钥"' >> ~/.bashrc
-                </div>
-                <div class="whitespace-nowrap text-gray-300">source ~/.bashrc</div>
-              </div>
               <div
                 class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
               >
-                <div class="mb-2"># 对于 zsh</div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_BASE_URL="{{ openaiBaseUrl }}"' >> ~/.zshrc
+                <div
+                  v-for="line in codexConfigContent.configToml"
+                  :key="line"
+                  class="whitespace-nowrap text-gray-300"
+                  :class="{ 'mt-2': line === '' }"
+                >
+                  {{ line }}
                 </div>
-                <div class="whitespace-nowrap text-gray-300">
-                  echo 'export OPENAI_API_KEY="你的API密钥"' >> ~/.zshrc
+              </div>
+              <p class="mt-3 text-sm text-yellow-700">
+                在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/auth.json</code>
+                文件中配置API密钥：
+              </p>
+              <div
+                class="mt-2 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+              >
+                <div
+                  v-for="line in codexConfigContent.authJson"
+                  :key="line"
+                  class="whitespace-nowrap text-gray-300"
+                >
+                  {{ line }}
                 </div>
-                <div class="whitespace-nowrap text-gray-300">source ~/.zshrc</div>
+              </div>
+              <div class="mt-3 space-y-3 text-xs text-yellow-700 dark:text-yellow-300">
+                <!-- 描述文字 -->
+                <p>{{ codexConfigContent.authInstructions.description }}</p>
+
+                <!-- 标题 -->
+                <h6 class="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                  {{ codexConfigContent.authInstructions.title }}
+                </h6>
+
+                <!-- 当前平台对应的环境变量设置 -->
+                <div class="space-y-2">
+                  <p class="font-medium">
+                    {{ codexConfigContent.authInstructions.platform.title }}:
+                  </p>
+                  <div
+                    class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                  >
+                    <div class="whitespace-nowrap text-gray-300">
+                      {{ codexConfigContent.authInstructions.platform.command }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Shell 配置文件（仅对于 macOS/Linux 显示） -->
+                <div v-if="codexConfigContent.authInstructions.persistent" class="space-y-2">
+                  <p class="font-medium">
+                    {{ codexConfigContent.authInstructions.persistent.title }}:
+                  </p>
+                  <p class="text-xs">
+                    {{ codexConfigContent.authInstructions.persistent.description }}
+                  </p>
+                  <div
+                    class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+                  >
+                    <div
+                      v-for="command in codexConfigContent.authInstructions.persistent.commands"
+                      :key="command"
+                      class="whitespace-nowrap text-gray-300"
+                      :class="{ 'mt-2': command === '' }"
+                    >
+                      {{ command }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
 
-            <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
-              <h6 class="mb-2 font-medium text-indigo-800">验证 Codex 环境变量</h6>
-              <p class="mb-3 text-sm text-indigo-700">在终端中验证：</p>
-              <div
-                class="space-y-1 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div class="whitespace-nowrap text-gray-300">echo $OPENAI_BASE_URL</div>
-                <div class="whitespace-nowrap text-gray-300">echo $OPENAI_API_KEY</div>
-              </div>
+        <!-- VSCode 插件配置 (Linux) -->
+        <div class="mt-6 rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
+          <h6 class="mb-2 font-medium text-indigo-800 dark:text-indigo-300">
+            VSCode Claude 插件配置
+          </h6>
+          <p class="mb-3 text-sm text-indigo-700">
+            如果使用 VSCode 的 Claude 插件，请在 VSCode 设置中为扩展添加以下环境变量：
+          </p>
+          <div class="mb-3 space-y-2">
+            <p class="text-sm text-indigo-700">
+              <strong>操作步骤：</strong>
+              打开 VSCode，依次选择「文件」→「首选项」→「设置」，搜索
+              <code class="rounded bg-indigo-100 px-1">Claude Code: Environment Variables</code>
+              并点击「在 settings.json 中编辑」。
+            </p>
+            <p class="text-xs text-indigo-600">
+              💡 也可以直接编辑
+              <code class="rounded bg-indigo-100 px-1">~/.config/Code/User/settings.json</code>。
+            </p>
+          </div>
+          <div
+            class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+          >
+            <div class="whitespace-nowrap text-gray-300">"claude-code.environmentVariables": [</div>
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"name": "ANTHROPIC_BASE_URL",</div>
+            <div class="whitespace-nowrap text-gray-300">"value": "{{ currentBaseUrl }}"</div>
+            <div class="whitespace-nowrap text-gray-300">},</div>
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"name": "ANTHROPIC_AUTH_TOKEN",</div>
+            <div class="whitespace-nowrap text-gray-300">"value": "你的API密钥"</div>
+            <div class="whitespace-nowrap text-gray-300">}</div>
+            <div class="whitespace-nowrap text-gray-300">]</div>
+          </div>
+          <p class="mt-3 text-xs text-indigo-600">
+            💡 保存后重启 VSCode。如果仍提示 “Invalid API key”，请确认所填密钥有效且未过期。
+          </p>
+          <div class="mt-4 rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
+            <p class="mb-3 text-sm text-indigo-700">
+              需要在配置文件中<code class="rounded bg-indigo-100 px-1">~/.claude/config.json</code
+              >进行设置：
+            </p>
+            <div
+              class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+            >
+              <div class="whitespace-nowrap text-gray-300">{</div>
+              <div class="whitespace-nowrap text-gray-300">"primaryApiKey": "crs"</div>
+              <div class="whitespace-nowrap text-gray-300">}</div>
             </div>
           </div>
         </div>
@@ -1712,7 +1881,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 
 // 当前系统选择
 const activeTutorialSystem = ref('windows')
@@ -1726,6 +1895,14 @@ const tutorialSystems = [
 
 // 获取基础URL前缀
 const getBaseUrlPrefix = () => {
+  // 优先使用环境变量配置的自定义前缀
+  const customPrefix = import.meta.env.VITE_API_BASE_PREFIX
+  if (customPrefix) {
+    // 去除末尾的斜杠
+    return customPrefix.replace(/\/$/, '')
+  }
+
+  // 否则使用当前浏览器访问地址
   // 更健壮的获取 origin 的方法，兼容旧版浏览器和特殊环境
   let origin = ''
 
@@ -1777,6 +1954,92 @@ const geminiBaseUrl = computed(() => {
 // OpenAI/Codex 基础URL
 const openaiBaseUrl = computed(() => {
   return getBaseUrlPrefix() + '/openai'
+})
+
+// Codex 配置内容
+const codexConfigContent = computed(() => {
+  // 根据当前激活的教程系统获取对应的环境变量设置说明
+  const getCurrentPlatformAuthInstructions = () => {
+    const baseInstructions = {
+      title: '环境变量设置方法',
+      description:
+        '💡 将 OPENAI_API_KEY 设置为 null，然后设置环境变量 CRS_OAI_KEY 为您的 API 密钥（格式如 cr_xxxxxxxxxx）。'
+    }
+
+    switch (activeTutorialSystem.value) {
+      case 'windows':
+        return {
+          ...baseInstructions,
+          platform: {
+            title: 'Windows',
+            command: 'set CRS_OAI_KEY=cr_xxxxxxxxxx'
+          }
+        }
+      case 'macos':
+        return {
+          ...baseInstructions,
+          platform: {
+            title: 'macOS',
+            command: 'export CRS_OAI_KEY=cr_xxxxxxxxxx'
+          },
+          persistent: {
+            title: 'Shell 配置文件（持久保存）',
+            description: '添加到您的 shell 配置文件中：',
+            commands: [
+              '# 对于 zsh (默认)',
+              'echo "export CRS_OAI_KEY=cr_xxxxxxxxxx" >> ~/.zshrc',
+              'source ~/.zshrc',
+              '',
+              '# 对于 bash',
+              'echo "export CRS_OAI_KEY=cr_xxxxxxxxxx" >> ~/.bash_profile',
+              'source ~/.bash_profile'
+            ]
+          }
+        }
+      case 'linux':
+        return {
+          ...baseInstructions,
+          platform: {
+            title: 'Linux',
+            command: 'export CRS_OAI_KEY=cr_xxxxxxxxxx'
+          },
+          persistent: {
+            title: 'Shell 配置文件（持久保存）',
+            description: '添加到您的 shell 配置文件中：',
+            commands: [
+              '# 对于 bash (默认)',
+              'echo "export CRS_OAI_KEY=cr_xxxxxxxxxx" >> ~/.bashrc',
+              'source ~/.bashrc',
+              '',
+              '# 对于 zsh',
+              'echo "export CRS_OAI_KEY=cr_xxxxxxxxxx" >> ~/.zshrc',
+              'source ~/.zshrc'
+            ]
+          }
+        }
+      default:
+        return baseInstructions
+    }
+  }
+
+  return {
+    configToml: [
+      'model_provider = "crs"',
+      'model = "gpt-5-codex"',
+      'model_reasoning_effort = "high"',
+      'disable_response_storage = true',
+      'preferred_auth_method = "apikey"',
+      '',
+      '[model_providers.crs]',
+      'name = "crs"',
+      `base_url = "${openaiBaseUrl.value}"`,
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
+      'env_key = "CRS_OAI_KEY"'
+    ],
+    authJson: ['{', '  "OPENAI_API_KEY": null', '}'],
+    authInstructions: getCurrentPlatformAuthInstructions()
+  }
 })
 </script>
 

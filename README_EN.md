@@ -9,7 +9,7 @@
 
 **🔐 Self-hosted Claude API relay service with multi-account management** 
 
-[English](#english) • [中文文档](#中文文档) • [📸 Interface Preview](docs/preview.md) • [📢 Telegram Channel](https://t.me/claude_relay_service)
+[中文文档](README.md) • [Preview](https://demo.pincc.ai/admin-next/login) • [Telegram Channel](https://t.me/claude_relay_service)
 
 </div>
 
@@ -18,6 +18,7 @@
 ## ⭐ If You Find It Useful, Please Give It a Star!
 
 > Open source is not easy, your Star is my motivation to continue updating 🚀  
+> Join [Telegram Channel](https://t.me/claude_relay_service) for the latest updates
 
 ---
 
@@ -28,21 +29,6 @@
 🚨 **Terms of Service Risk**: Using this project may violate Anthropic's terms of service. Please carefully read Anthropic's user agreement before use. All risks from using this project are borne by the user.
 
 📖 **Disclaimer**: This project is for technical learning and research purposes only. The author is not responsible for any account bans, service interruptions, or other losses caused by using this project.
-
-
-[//]: # (> 💡 **Thanks to [@vista8]&#40;https://x.com/vista8&#41; for the recommendation!**)
-
-[//]: # (> )
-
-[//]: # (> If you're interested in Vibe coding, follow:)
-
-[//]: # (> )
-
-[//]: # (> - 🐦 **X**: [@vista8]&#40;https://x.com/vista8&#41; - Sharing cutting-edge tech trends)
-
-[//]: # (> - 📱 **WeChat**: 向阳乔木推荐看  )
-
----
 
 ## 🤔 Is This Project Right for You?
 
@@ -159,7 +145,7 @@ sudo systemctl start redis
 
 ```bash
 # Download project
-git clone https://github.com/Await-d/claude-relay-service.git
+git clone https://github.com/Wei-Shaw/claude-relay-service.git
 cd claude-relay-service
 
 # Install dependencies

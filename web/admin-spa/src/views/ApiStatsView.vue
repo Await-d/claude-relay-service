@@ -17,11 +17,22 @@
 
           <!-- 分隔线 -->
           <div
+            v-if="oemSettings.ldapEnabled || oemSettings.showAdminButton !== false"
             class="h-8 w-px bg-gradient-to-b from-transparent via-gray-300 to-transparent opacity-50 dark:via-gray-600"
           />
 
+          <!-- 用户登录按钮 (仅在 LDAP 启用时显示) -->
+          <router-link
+            v-if="oemSettings.ldapEnabled"
+            class="user-login-button flex items-center gap-2 rounded-2xl px-4 py-2 text-white transition-all duration-300 md:px-5 md:py-2.5"
+            to="/user-login"
+          >
+            <i class="fas fa-user text-sm md:text-base" />
+            <span class="text-xs font-semibold tracking-wide md:text-sm">用户登录</span>
+          </router-link>
           <!-- 管理后台按钮 -->
           <router-link
+            v-if="oemSettings.showAdminButton !== false"
             class="admin-button-refined flex items-center gap-2 rounded-2xl px-4 py-2 transition-all duration-300 md:px-5 md:py-2.5"
             to="/dashboard"
           >
@@ -104,36 +115,24 @@
                   <i class="fas fa-calendar-alt text-xs md:text-sm" />
                   本月
                 </button>
-                <button
-                  class="flex flex-1 items-center justify-center gap-1 px-4 py-2 text-xs font-medium md:flex-none md:gap-2 md:px-6 md:text-sm"
-                  :class="['period-btn', { active: statsPeriod === 'hourly' }]"
-                  :disabled="loading || modelStatsLoading"
-                  @click="switchPeriod('hourly')"
-                >
-                  <i class="fas fa-clock text-xs md:text-sm" />
-                  小时
-                </button>
               </div>
             </div>
-          </div>
-
-          <!-- 小时统计控制面板 -->
-          <div v-if="statsPeriod === 'hourly'" class="mb-6 md:mb-8">
-            <HourlyStatsControls />
           </div>
 
           <!-- 基本信息和统计概览 -->
           <StatsOverview />
 
           <!-- Token 分布和限制配置 -->
-          <div class="mb-6 grid grid-cols-1 gap-4 md:mb-8 md:gap-6 lg:grid-cols-2">
-            <TokenDistribution />
-            <LimitConfig />
-          </div>
-
-          <!-- 小时统计图表 -->
-          <div v-if="statsPeriod === 'hourly'" class="mb-6 md:mb-8">
-            <HourlyChart />
+          <div
+            class="mb-6 mt-6 grid grid-cols-1 gap-4 md:mb-8 md:mt-8 md:gap-6 xl:grid-cols-2 xl:items-stretch"
+          >
+            <TokenDistribution class="h-full" />
+            <template v-if="multiKeyMode">
+              <AggregatedStatsCard class="h-full" />
+            </template>
+            <template v-else>
+              <LimitConfig class="h-full" />
+            </template>
           </div>
 
           <!-- 模型使用统计 -->
@@ -163,9 +162,8 @@ import ApiKeyInput from '@/components/apistats/ApiKeyInput.vue'
 import StatsOverview from '@/components/apistats/StatsOverview.vue'
 import TokenDistribution from '@/components/apistats/TokenDistribution.vue'
 import LimitConfig from '@/components/apistats/LimitConfig.vue'
+import AggregatedStatsCard from '@/components/apistats/AggregatedStatsCard.vue'
 import ModelUsageStats from '@/components/apistats/ModelUsageStats.vue'
-import HourlyStatsControls from '@/components/apistats/HourlyStatsControls.vue'
-import HourlyChart from '@/components/apistats/HourlyChart.vue'
 import TutorialView from './TutorialView.vue'
 
 const route = useRoute()
@@ -187,7 +185,8 @@ const {
   error,
   statsPeriod,
   statsData,
-  oemSettings
+  oemSettings,
+  multiKeyMode
 } = storeToRefs(apiStatsStore)
 
 const { queryStats, switchPeriod, loadStatsWithApiId, loadOemSettings, reset } = apiStatsStore
@@ -210,6 +209,8 @@ const handleKeyDown = (event) => {
 
 // 初始化
 onMounted(() => {
+  // API Stats Page loaded
+
   // 初始化主题（因为该页面不在 MainLayout 内）
   themeStore.initTheme()
 
@@ -252,7 +253,7 @@ watch(apiKey, (newValue) => {
 <style scoped>
 /* 渐变背景 */
 .gradient-bg {
-  background: linear-gradient(135deg, #7ab2d3 0%, #4a628a 50%, #b9e5e8 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
   background-attachment: fixed;
   min-height: 100vh;
   position: relative;
@@ -275,8 +276,8 @@ watch(apiKey, (newValue) => {
   bottom: 0;
   background:
     radial-gradient(circle at 20% 80%, rgba(240, 147, 251, 0.2) 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, rgba(122, 178, 211, 0.2) 0%, transparent 50%),
-    radial-gradient(circle at 40% 40%, rgba(74, 98, 138, 0.15) 0%, transparent 50%);
+    radial-gradient(circle at 80% 20%, rgba(102, 126, 234, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(118, 75, 162, 0.1) 0%, transparent 50%);
   pointer-events: none;
   z-index: 0;
 }
@@ -320,7 +321,7 @@ watch(apiKey, (newValue) => {
 
 /* 标题渐变 */
 .header-title {
-  background: linear-gradient(135deg, #7ab2d3 0%, #4a628a 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -328,15 +329,82 @@ watch(apiKey, (newValue) => {
   letter-spacing: -0.025em;
 }
 
+/* 用户登录按钮 */
+.user-login-button {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  text-decoration: none;
+  box-shadow:
+    0 4px 12px rgba(52, 211, 153, 0.25),
+    inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  position: relative;
+  overflow: hidden;
+  font-weight: 600;
+}
+
+/* 暗色模式下的用户登录按钮 */
+:global(.dark) .user-login-button {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: white;
+  box-shadow:
+    0 4px 12px rgba(52, 211, 153, 0.3),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1);
+}
+
+.user-login-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.user-login-button:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 8px 20px rgba(52, 211, 153, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.user-login-button:hover::before {
+  opacity: 1;
+}
+
+/* 暗色模式下的悬停效果 */
+:global(.dark) .user-login-button:hover {
+  box-shadow:
+    0 8px 20px rgba(52, 211, 153, 0.4),
+    inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  border-color: rgba(52, 211, 153, 0.5);
+}
+
+.user-login-button:active {
+  transform: translateY(-1px) scale(1);
+}
+
+/* 确保图标和文字在所有模式下都清晰可见 */
+.user-login-button i,
+.user-login-button span {
+  position: relative;
+  z-index: 1;
+}
+
 /* 管理后台按钮 - 精致版本 */
 .admin-button-refined {
-  background: linear-gradient(135deg, #7ab2d3 0%, #4a628a 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
   text-decoration: none;
   box-shadow:
-    0 4px 12px rgba(122, 178, 211, 0.25),
+    0 4px 12px rgba(102, 126, 234, 0.25),
     inset 0 1px 1px rgba(255, 255, 255, 0.2);
   position: relative;
   overflow: hidden;
@@ -360,16 +428,16 @@ watch(apiKey, (newValue) => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(135deg, #4a628a 0%, #7ab2d3 100%);
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
 
 .admin-button-refined:hover {
   transform: translateY(-2px) scale(1.02);
-  background: linear-gradient(135deg, #4a628a 0%, #7ab2d3 100%);
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
   box-shadow:
-    0 8px 20px rgba(74, 98, 138, 0.35),
+    0 8px 20px rgba(118, 75, 162, 0.35),
     inset 0 1px 1px rgba(255, 255, 255, 0.3);
   border-color: rgba(255, 255, 255, 0.4);
   color: white;
@@ -381,10 +449,10 @@ watch(apiKey, (newValue) => {
 
 /* 暗色模式下的悬停效果 */
 :global(.dark) .admin-button-refined:hover {
-  background: linear-gradient(135deg, #7ab2d3 0%, #4a628a 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-color: rgba(147, 51, 234, 0.4);
   box-shadow:
-    0 8px 20px rgba(122, 178, 211, 0.3),
+    0 8px 20px rgba(102, 126, 234, 0.3),
     inset 0 1px 1px rgba(255, 255, 255, 0.1);
   color: white;
 }
@@ -413,11 +481,11 @@ watch(apiKey, (newValue) => {
 }
 
 .period-btn.active {
-  background: linear-gradient(135deg, #7ab2d3 0%, #4a628a 100%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   box-shadow:
-    0 10px 15px -3px rgba(122, 178, 211, 0.3),
-    0 4px 6px -2px rgba(122, 178, 211, 0.05);
+    0 10px 15px -3px rgba(102, 126, 234, 0.3),
+    0 4px 6px -2px rgba(102, 126, 234, 0.05);
   transform: translateY(-1px);
 }
 
@@ -488,7 +556,7 @@ watch(apiKey, (newValue) => {
 
 .tab-pill-button.active {
   background: white;
-  color: #4a628a;
+  color: #764ba2;
   box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 2px 4px -1px rgba(0, 0, 0, 0.06);

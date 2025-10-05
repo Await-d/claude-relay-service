@@ -1,8 +1,10 @@
 const express = require('express')
-const database = require('../models/database')
+const redis = require('../models/redis')
 const logger = require('../utils/logger')
 const apiKeyService = require('../services/apiKeyService')
 const CostCalculator = require('../utils/costCalculator')
+const claudeAccountService = require('../services/claudeAccountService')
+const openaiAccountService = require('../services/openaiAccountService')
 
 const router = express.Router()
 
@@ -31,8 +33,8 @@ router.post('/api/get-key-id', async (req, res) => {
       })
     }
 
-    // 验证API Key
-    const validation = await apiKeyService.validateApiKey(apiKey)
+    // 验证API Key（使用不触发激活的验证方法）
+    const validation = await apiKeyService.validateApiKeyForStats(apiKey)
 
     if (!validation.valid) {
       const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
@@ -81,7 +83,7 @@ router.post('/api/user-stats', async (req, res) => {
       }
 
       // 直接通过 ID 获取 API Key 数据
-      keyData = await database.getApiKey(apiId)
+      keyData = await redis.getApiKey(apiId)
 
       if (!keyData || Object.keys(keyData).length === 0) {
         logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`)
@@ -110,10 +112,11 @@ router.post('/api/user-stats', async (req, res) => {
       keyId = apiId
 
       // 获取使用统计
-      const usage = await database.getUsageStats(keyId)
+      const usage = await redis.getUsageStats(keyId)
 
       // 获取当日费用统计
-      const dailyCost = await database.getDailyCost(keyId)
+      const dailyCost = await redis.getDailyCost(keyId)
+      const costStats = await redis.getCostStats(keyId)
 
       // 处理数据格式，与 validateApiKey 返回的格式保持一致
       // 解析限制模型数据
@@ -140,12 +143,19 @@ router.post('/api/user-stats', async (req, res) => {
         rateLimitWindow: parseInt(keyData.rateLimitWindow) || 0,
         rateLimitRequests: parseInt(keyData.rateLimitRequests) || 0,
         dailyCostLimit: parseFloat(keyData.dailyCostLimit) || 0,
+        totalCostLimit: parseFloat(keyData.totalCostLimit) || 0,
         dailyCost: dailyCost || 0,
+        totalCost: costStats.total || 0,
         enableModelRestriction: keyData.enableModelRestriction === 'true',
         restrictedModels,
         enableClientRestriction: keyData.enableClientRestriction === 'true',
         allowedClients,
         permissions: keyData.permissions || 'all',
+        // 添加激活相关字段
+        expirationMode: keyData.expirationMode || 'fixed',
+        isActivated: keyData.isActivated === 'true',
+        activationDays: parseInt(keyData.activationDays || 0),
+        activatedAt: keyData.activatedAt || null,
         usage // 使用完整的 usage 数据，而不是只有 total
       }
     } else if (apiKey) {
@@ -158,8 +168,8 @@ router.post('/api/user-stats', async (req, res) => {
         })
       }
 
-      // 验证API Key（重用现有的验证逻辑）
-      const validation = await apiKeyService.validateApiKey(apiKey)
+      // 验证API Key（使用不触发激活的验证方法）
+      const validation = await apiKeyService.validateApiKeyForStats(apiKey)
 
       if (!validation.valid) {
         const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
@@ -196,7 +206,7 @@ router.post('/api/user-stats', async (req, res) => {
     let formattedCost = '$0.000000'
 
     try {
-      const client = database.getClientSafe()
+      const client = redis.getClientSafe()
 
       // 获取所有月度模型统计（与model-stats接口相同的逻辑）
       const allModelKeys = await client.keys(`usage:${keyId}:model:monthly:*:*`)
@@ -278,78 +288,112 @@ router.post('/api/user-stats', async (req, res) => {
     // 获取当前使用量
     let currentWindowRequests = 0
     let currentWindowTokens = 0
+    let currentWindowCost = 0 // 新增：当前窗口费用
     let currentDailyCost = 0
     let windowStartTime = null
     let windowEndTime = null
     let windowRemainingSeconds = null
 
     try {
-      // 获取当前时间窗口的请求次数和Token使用量
+      // 获取当前时间窗口的请求次数、Token使用量和费用
       if (fullKeyData.rateLimitWindow > 0) {
-        const client = database.getClientSafe()
+        const client = redis.getClientSafe()
         const requestCountKey = `rate_limit:requests:${keyId}`
         const tokenCountKey = `rate_limit:tokens:${keyId}`
+        const costCountKey = `rate_limit:cost:${keyId}` // 新增：费用计数key
         const windowStartKey = `rate_limit:window_start:${keyId}`
 
-        // 获取窗口开始时间
-        const windowStart = await client.get(windowStartKey)
-        const now = Date.now()
-        const windowDuration = fullKeyData.rateLimitWindow * 60 * 1000 // 转换为毫秒
+        currentWindowRequests = parseInt((await client.get(requestCountKey)) || '0')
+        currentWindowTokens = parseInt((await client.get(tokenCountKey)) || '0')
+        currentWindowCost = parseFloat((await client.get(costCountKey)) || '0') // 新增：获取当前窗口费用
 
+        // 获取窗口开始时间和计算剩余时间
+        const windowStart = await client.get(windowStartKey)
         if (windowStart) {
+          const now = Date.now()
           windowStartTime = parseInt(windowStart)
+          const windowDuration = fullKeyData.rateLimitWindow * 60 * 1000 // 转换为毫秒
           windowEndTime = windowStartTime + windowDuration
 
-          // 检查窗口是否已过期
-          if (now >= windowEndTime) {
-            // 窗口已过期，清理过期数据
-            try {
-              await client.del(windowStartKey)
-              await client.del(requestCountKey)
-              await client.del(tokenCountKey)
-              logger.debug(`🧹 Cleaned expired rate limit window for API Key: ${keyId}`)
-            } catch (cleanupError) {
-              logger.error(`❌ Failed to cleanup expired window for ${keyId}:`, cleanupError)
-            }
-
-            // 设置为窗口未开始状态
+          // 如果窗口还有效
+          if (now < windowEndTime) {
+            windowRemainingSeconds = Math.max(0, Math.floor((windowEndTime - now) / 1000))
+          } else {
+            // 窗口已过期，下次请求会重置
             windowStartTime = null
             windowEndTime = null
-            windowRemainingSeconds = null
+            windowRemainingSeconds = 0
+            // 重置计数为0，因为窗口已过期
             currentWindowRequests = 0
             currentWindowTokens = 0
-          } else {
-            // 窗口仍然有效，获取实际计数
-            const [requestCount, tokenCount] = await Promise.all([
-              client.get(requestCountKey),
-              client.get(tokenCountKey)
-            ])
-
-            windowRemainingSeconds = Math.max(0, Math.floor((windowEndTime - now) / 1000))
-            currentWindowRequests = parseInt(requestCount || '0')
-            currentWindowTokens = parseInt(tokenCount || '0')
+            currentWindowCost = 0 // 新增：重置窗口费用
           }
-        } else {
-          // 窗口还未开始（没有任何请求）
-          currentWindowRequests = 0
-          currentWindowTokens = 0
         }
       }
 
       // 获取当日费用
-      currentDailyCost = (await database.getDailyCost(keyId)) || 0
+      currentDailyCost = (await redis.getDailyCost(keyId)) || 0
     } catch (error) {
       logger.warn(`Failed to get current usage for key ${keyId}:`, error)
+    }
+
+    const boundAccountDetails = {}
+
+    const accountDetailTasks = []
+
+    if (fullKeyData.claudeAccountId) {
+      accountDetailTasks.push(
+        (async () => {
+          try {
+            const overview = await claudeAccountService.getAccountOverview(
+              fullKeyData.claudeAccountId
+            )
+
+            if (overview && overview.accountType === 'dedicated') {
+              boundAccountDetails.claude = overview
+            }
+          } catch (error) {
+            logger.warn(`⚠️ Failed to load Claude account overview for key ${keyId}:`, error)
+          }
+        })()
+      )
+    }
+
+    if (fullKeyData.openaiAccountId) {
+      accountDetailTasks.push(
+        (async () => {
+          try {
+            const overview = await openaiAccountService.getAccountOverview(
+              fullKeyData.openaiAccountId
+            )
+
+            if (overview && overview.accountType === 'dedicated') {
+              boundAccountDetails.openai = overview
+            }
+          } catch (error) {
+            logger.warn(`⚠️ Failed to load OpenAI account overview for key ${keyId}:`, error)
+          }
+        })()
+      )
+    }
+
+    if (accountDetailTasks.length > 0) {
+      await Promise.allSettled(accountDetailTasks)
     }
 
     // 构建响应数据（只返回该API Key自己的信息，确保不泄露其他信息）
     const responseData = {
       id: keyId,
       name: fullKeyData.name,
-      description: keyData.description || '',
+      description: fullKeyData.description || keyData.description || '',
       isActive: true, // 如果能通过validateApiKey验证，说明一定是激活的
-      createdAt: keyData.createdAt,
-      expiresAt: keyData.expiresAt,
+      createdAt: fullKeyData.createdAt || keyData.createdAt,
+      expiresAt: fullKeyData.expiresAt || keyData.expiresAt,
+      // 添加激活相关字段
+      expirationMode: fullKeyData.expirationMode || 'fixed',
+      isActivated: fullKeyData.isActivated === true || fullKeyData.isActivated === 'true',
+      activationDays: parseInt(fullKeyData.activationDays || 0),
+      activatedAt: fullKeyData.activatedAt || null,
       permissions: fullKeyData.permissions,
 
       // 使用统计（使用验证结果中的完整数据）
@@ -375,11 +419,17 @@ router.post('/api/user-stats', async (req, res) => {
         concurrencyLimit: fullKeyData.concurrencyLimit || 0,
         rateLimitWindow: fullKeyData.rateLimitWindow || 0,
         rateLimitRequests: fullKeyData.rateLimitRequests || 0,
+        rateLimitCost: parseFloat(fullKeyData.rateLimitCost) || 0, // 新增：费用限制
         dailyCostLimit: fullKeyData.dailyCostLimit || 0,
+        totalCostLimit: fullKeyData.totalCostLimit || 0,
+        weeklyOpusCostLimit: parseFloat(fullKeyData.weeklyOpusCostLimit) || 0, // Opus 周费用限制
         // 当前使用量
         currentWindowRequests,
         currentWindowTokens,
+        currentWindowCost, // 新增：当前窗口费用
         currentDailyCost,
+        currentTotalCost: totalCost,
+        weeklyOpusCost: (await redis.getWeeklyOpusCost(keyId)) || 0, // 当前 Opus 周费用
         // 时间窗口信息
         windowStartTime,
         windowEndTime,
@@ -395,7 +445,12 @@ router.post('/api/user-stats', async (req, res) => {
         geminiAccountId:
           fullKeyData.geminiAccountId && fullKeyData.geminiAccountId !== ''
             ? fullKeyData.geminiAccountId
-            : null
+            : null,
+        openaiAccountId:
+          fullKeyData.openaiAccountId && fullKeyData.openaiAccountId !== ''
+            ? fullKeyData.openaiAccountId
+            : null,
+        details: Object.keys(boundAccountDetails).length > 0 ? boundAccountDetails : null
       },
 
       // 模型和客户端限制信息
@@ -420,42 +475,321 @@ router.post('/api/user-stats', async (req, res) => {
   }
 })
 
-// 📊 用户模型统计查询接口 - 安全的自查询接口
-router.post('/api/user-model-stats', async (req, res) => {
+// 📊 批量查询统计数据接口
+router.post('/api/batch-stats', async (req, res) => {
   try {
-    const { apiKey, apiId, period = 'monthly', date, hours = 24 } = req.body
+    const { apiIds } = req.body
 
-    // 参数验证
-    if (period && !['daily', 'monthly', 'hourly'].includes(period)) {
+    // 验证输入
+    if (!apiIds || !Array.isArray(apiIds) || apiIds.length === 0) {
       return res.status(400).json({
-        error: 'Invalid period parameter',
-        message: 'Period must be one of: daily, monthly, hourly'
+        error: 'Invalid input',
+        message: 'API IDs array is required'
       })
     }
 
-    // 小时统计的额外参数验证
-    if (period === 'hourly') {
-      if (!date) {
-        return res.status(400).json({
-          error: 'Missing date parameter',
-          message: 'Date parameter is required for hourly period (format: YYYY-MM-DD)'
-        })
-      }
+    // 限制最多查询 30 个
+    if (apiIds.length > 30) {
+      return res.status(400).json({
+        error: 'Too many keys',
+        message: 'Maximum 30 API keys can be queried at once'
+      })
+    }
 
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        return res.status(400).json({
-          error: 'Invalid date format',
-          message: 'Date must be in YYYY-MM-DD format'
-        })
-      }
+    // 验证所有 ID 格式
+    const uuidRegex = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
+    const invalidIds = apiIds.filter((id) => !uuidRegex.test(id))
+    if (invalidIds.length > 0) {
+      return res.status(400).json({
+        error: 'Invalid API ID format',
+        message: `Invalid API IDs: ${invalidIds.join(', ')}`
+      })
+    }
 
-      if (typeof hours !== 'number' || hours < 1 || hours > 168) {
-        return res.status(400).json({
-          error: 'Invalid hours parameter',
-          message: 'Hours parameter must be between 1 and 168'
-        })
+    const individualStats = []
+    const aggregated = {
+      totalKeys: apiIds.length,
+      activeKeys: 0,
+      usage: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreateTokens: 0,
+        cacheReadTokens: 0,
+        allTokens: 0,
+        cost: 0,
+        formattedCost: '$0.000000'
+      },
+      dailyUsage: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreateTokens: 0,
+        cacheReadTokens: 0,
+        allTokens: 0,
+        cost: 0,
+        formattedCost: '$0.000000'
+      },
+      monthlyUsage: {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreateTokens: 0,
+        cacheReadTokens: 0,
+        allTokens: 0,
+        cost: 0,
+        formattedCost: '$0.000000'
       }
     }
+
+    // 并行查询所有 API Key 数据（复用单key查询逻辑）
+    const results = await Promise.allSettled(
+      apiIds.map(async (apiId) => {
+        const keyData = await redis.getApiKey(apiId)
+
+        if (!keyData || Object.keys(keyData).length === 0) {
+          return { error: 'Not found', apiId }
+        }
+
+        // 检查是否激活
+        if (keyData.isActive !== 'true') {
+          return { error: 'Disabled', apiId }
+        }
+
+        // 检查是否过期
+        if (keyData.expiresAt && new Date() > new Date(keyData.expiresAt)) {
+          return { error: 'Expired', apiId }
+        }
+
+        // 复用单key查询的逻辑：获取使用统计
+        const usage = await redis.getUsageStats(apiId)
+
+        // 获取费用统计（与单key查询一致）
+        const costStats = await redis.getCostStats(apiId)
+
+        return {
+          apiId,
+          name: keyData.name,
+          description: keyData.description || '',
+          isActive: true,
+          createdAt: keyData.createdAt,
+          usage: usage.total || {},
+          dailyStats: {
+            ...usage.daily,
+            cost: costStats.daily
+          },
+          monthlyStats: {
+            ...usage.monthly,
+            cost: costStats.monthly
+          },
+          totalCost: costStats.total
+        }
+      })
+    )
+
+    // 处理结果并聚合
+    results.forEach((result) => {
+      if (result.status === 'fulfilled' && result.value && !result.value.error) {
+        const stats = result.value
+        aggregated.activeKeys++
+
+        // 聚合总使用量
+        if (stats.usage) {
+          aggregated.usage.requests += stats.usage.requests || 0
+          aggregated.usage.inputTokens += stats.usage.inputTokens || 0
+          aggregated.usage.outputTokens += stats.usage.outputTokens || 0
+          aggregated.usage.cacheCreateTokens += stats.usage.cacheCreateTokens || 0
+          aggregated.usage.cacheReadTokens += stats.usage.cacheReadTokens || 0
+          aggregated.usage.allTokens += stats.usage.allTokens || 0
+        }
+
+        // 聚合总费用
+        aggregated.usage.cost += stats.totalCost || 0
+
+        // 聚合今日使用量
+        aggregated.dailyUsage.requests += stats.dailyStats.requests || 0
+        aggregated.dailyUsage.inputTokens += stats.dailyStats.inputTokens || 0
+        aggregated.dailyUsage.outputTokens += stats.dailyStats.outputTokens || 0
+        aggregated.dailyUsage.cacheCreateTokens += stats.dailyStats.cacheCreateTokens || 0
+        aggregated.dailyUsage.cacheReadTokens += stats.dailyStats.cacheReadTokens || 0
+        aggregated.dailyUsage.allTokens += stats.dailyStats.allTokens || 0
+        aggregated.dailyUsage.cost += stats.dailyStats.cost || 0
+
+        // 聚合本月使用量
+        aggregated.monthlyUsage.requests += stats.monthlyStats.requests || 0
+        aggregated.monthlyUsage.inputTokens += stats.monthlyStats.inputTokens || 0
+        aggregated.monthlyUsage.outputTokens += stats.monthlyStats.outputTokens || 0
+        aggregated.monthlyUsage.cacheCreateTokens += stats.monthlyStats.cacheCreateTokens || 0
+        aggregated.monthlyUsage.cacheReadTokens += stats.monthlyStats.cacheReadTokens || 0
+        aggregated.monthlyUsage.allTokens += stats.monthlyStats.allTokens || 0
+        aggregated.monthlyUsage.cost += stats.monthlyStats.cost || 0
+
+        // 添加到个体统计
+        individualStats.push({
+          apiId: stats.apiId,
+          name: stats.name,
+          isActive: true,
+          usage: stats.usage,
+          dailyUsage: {
+            ...stats.dailyStats,
+            formattedCost: CostCalculator.formatCost(stats.dailyStats.cost || 0)
+          },
+          monthlyUsage: {
+            ...stats.monthlyStats,
+            formattedCost: CostCalculator.formatCost(stats.monthlyStats.cost || 0)
+          }
+        })
+      }
+    })
+
+    // 格式化费用显示
+    aggregated.usage.formattedCost = CostCalculator.formatCost(aggregated.usage.cost)
+    aggregated.dailyUsage.formattedCost = CostCalculator.formatCost(aggregated.dailyUsage.cost)
+    aggregated.monthlyUsage.formattedCost = CostCalculator.formatCost(aggregated.monthlyUsage.cost)
+
+    logger.api(`📊 Batch stats query for ${apiIds.length} keys from ${req.ip || 'unknown'}`)
+
+    return res.json({
+      success: true,
+      data: {
+        aggregated,
+        individual: individualStats
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to process batch stats query:', error)
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to retrieve batch statistics'
+    })
+  }
+})
+
+// 📊 批量模型统计查询接口
+router.post('/api/batch-model-stats', async (req, res) => {
+  try {
+    const { apiIds, period = 'daily' } = req.body
+
+    // 验证输入
+    if (!apiIds || !Array.isArray(apiIds) || apiIds.length === 0) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: 'API IDs array is required'
+      })
+    }
+
+    // 限制最多查询 30 个
+    if (apiIds.length > 30) {
+      return res.status(400).json({
+        error: 'Too many keys',
+        message: 'Maximum 30 API keys can be queried at once'
+      })
+    }
+
+    const client = redis.getClientSafe()
+    const tzDate = redis.getDateInTimezone()
+    const today = redis.getDateStringInTimezone()
+    const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`
+
+    const modelUsageMap = new Map()
+
+    // 并行查询所有 API Key 的模型统计
+    await Promise.all(
+      apiIds.map(async (apiId) => {
+        const pattern =
+          period === 'daily'
+            ? `usage:${apiId}:model:daily:*:${today}`
+            : `usage:${apiId}:model:monthly:*:${currentMonth}`
+
+        const keys = await client.keys(pattern)
+
+        for (const key of keys) {
+          const match = key.match(
+            period === 'daily'
+              ? /usage:.+:model:daily:(.+):\d{4}-\d{2}-\d{2}$/
+              : /usage:.+:model:monthly:(.+):\d{4}-\d{2}$/
+          )
+
+          if (!match) {
+            continue
+          }
+
+          const model = match[1]
+          const data = await client.hgetall(key)
+
+          if (data && Object.keys(data).length > 0) {
+            if (!modelUsageMap.has(model)) {
+              modelUsageMap.set(model, {
+                requests: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheCreateTokens: 0,
+                cacheReadTokens: 0,
+                allTokens: 0
+              })
+            }
+
+            const modelUsage = modelUsageMap.get(model)
+            modelUsage.requests += parseInt(data.requests) || 0
+            modelUsage.inputTokens += parseInt(data.inputTokens) || 0
+            modelUsage.outputTokens += parseInt(data.outputTokens) || 0
+            modelUsage.cacheCreateTokens += parseInt(data.cacheCreateTokens) || 0
+            modelUsage.cacheReadTokens += parseInt(data.cacheReadTokens) || 0
+            modelUsage.allTokens += parseInt(data.allTokens) || 0
+          }
+        }
+      })
+    )
+
+    // 转换为数组并计算费用
+    const modelStats = []
+    for (const [model, usage] of modelUsageMap) {
+      const usageData = {
+        input_tokens: usage.inputTokens,
+        output_tokens: usage.outputTokens,
+        cache_creation_input_tokens: usage.cacheCreateTokens,
+        cache_read_input_tokens: usage.cacheReadTokens
+      }
+
+      const costData = CostCalculator.calculateCost(usageData, model)
+
+      modelStats.push({
+        model,
+        requests: usage.requests,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheCreateTokens: usage.cacheCreateTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        allTokens: usage.allTokens,
+        costs: costData.costs,
+        formatted: costData.formatted,
+        pricing: costData.pricing
+      })
+    }
+
+    // 按总 token 数降序排列
+    modelStats.sort((a, b) => b.allTokens - a.allTokens)
+
+    logger.api(`📊 Batch model stats query for ${apiIds.length} keys, period: ${period}`)
+
+    return res.json({
+      success: true,
+      data: modelStats,
+      period
+    })
+  } catch (error) {
+    logger.error('❌ Failed to process batch model stats query:', error)
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to retrieve batch model statistics'
+    })
+  }
+})
+
+// 📊 用户模型统计查询接口 - 安全的自查询接口
+router.post('/api/user-model-stats', async (req, res) => {
+  try {
+    const { apiKey, apiId, period = 'monthly' } = req.body
 
     let keyData
     let keyId
@@ -473,7 +807,7 @@ router.post('/api/user-model-stats', async (req, res) => {
       }
 
       // 直接通过 ID 获取 API Key 数据
-      keyData = await database.getApiKey(apiId)
+      keyData = await redis.getApiKey(apiId)
 
       if (!keyData || Object.keys(keyData).length === 0) {
         logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`)
@@ -494,7 +828,7 @@ router.post('/api/user-model-stats', async (req, res) => {
       keyId = apiId
 
       // 获取使用统计
-      const usage = await database.getUsageStats(keyId)
+      const usage = await redis.getUsageStats(keyId)
       keyData.usage = { total: usage.total }
     } else if (apiKey) {
       // 通过 apiKey 查询（保持向后兼容）
@@ -526,179 +860,60 @@ router.post('/api/user-model-stats', async (req, res) => {
     }
 
     logger.api(
-      `📊 User model stats query from key: ${keyData.name} (${keyId}) for period: ${period}${period === 'hourly' ? `, date: ${date}, hours: ${hours}` : ''}`
+      `📊 User model stats query from key: ${keyData.name} (${keyId}) for period: ${period}`
     )
 
+    // 重用管理后台的模型统计逻辑，但只返回该API Key的数据
+    const client = redis.getClientSafe()
+    // 使用与管理页面相同的时区处理逻辑
+    const tzDate = redis.getDateInTimezone()
+    const today = redis.getDateStringInTimezone()
+    const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`
+
+    const pattern =
+      period === 'daily'
+        ? `usage:${keyId}:model:daily:*:${today}`
+        : `usage:${keyId}:model:monthly:*:${currentMonth}`
+
+    const keys = await client.keys(pattern)
     const modelStats = []
 
-    if (period === 'hourly') {
-      // 使用新的小时统计方法
-      try {
-        const startDate = new Date(`${date}T00:00:00.000Z`)
-        if (isNaN(startDate.getTime())) {
-          return res.status(400).json({
-            error: 'Invalid date format',
-            message: 'Unable to parse the provided date'
-          })
-        }
-
-        const hourlyStats = await database.getModelUsageHourly(keyId, startDate, hours)
-
-        // 聚合所有小时的模型数据
-        const modelAggregation = new Map()
-        let totalHourlyTokens = 0
-        let totalHourlyRequests = 0
-        let totalHourlyCost = 0
-        let peakHour = null
-        let peakHourTokens = 0
-
-        for (const hourStat of hourlyStats) {
-          // 计算峰值小时
-          if (hourStat.totalTokens > peakHourTokens) {
-            peakHourTokens = hourStat.totalTokens
-            peakHour = hourStat.hour
-          }
-
-          totalHourlyTokens += hourStat.totalTokens
-          totalHourlyRequests += hourStat.totalRequests
-          totalHourlyCost += hourStat.totalCost
-
-          // 聚合各模型数据
-          for (const [modelName, modelData] of Object.entries(hourStat.models)) {
-            if (!modelAggregation.has(modelName)) {
-              modelAggregation.set(modelName, {
-                model: modelName,
-                requests: 0,
-                inputTokens: 0,
-                outputTokens: 0,
-                cacheCreateTokens: 0,
-                cacheReadTokens: 0,
-                allTokens: 0,
-                totalCost: 0
-              })
-            }
-
-            const aggregated = modelAggregation.get(modelName)
-            aggregated.requests += modelData.requests
-            aggregated.inputTokens += modelData.inputTokens
-            aggregated.outputTokens += modelData.outputTokens
-            aggregated.cacheCreateTokens += modelData.cacheCreateTokens
-            aggregated.cacheReadTokens += modelData.cacheReadTokens
-            aggregated.allTokens += modelData.tokens
-            aggregated.totalCost += modelData.cost
-          }
-        }
-
-        // 转换为标准格式
-        for (const [modelName, aggregated] of modelAggregation) {
-          const usage = {
-            input_tokens: aggregated.inputTokens,
-            output_tokens: aggregated.outputTokens,
-            cache_creation_input_tokens: aggregated.cacheCreateTokens,
-            cache_read_input_tokens: aggregated.cacheReadTokens
-          }
-
-          const costData = CostCalculator.calculateCost(usage, modelName)
-
-          modelStats.push({
-            model: modelName,
-            requests: aggregated.requests,
-            inputTokens: aggregated.inputTokens,
-            outputTokens: aggregated.outputTokens,
-            cacheCreateTokens: aggregated.cacheCreateTokens,
-            cacheReadTokens: aggregated.cacheReadTokens,
-            allTokens: aggregated.allTokens,
-            costs: costData.costs,
-            formatted: costData.formatted,
-            pricing: costData.pricing,
-            // 小时统计特有字段
-            hourlyDetails: {
-              totalCost: aggregated.totalCost,
-              peakHour,
-              hoursWithActivity: hourlyStats.filter((h) => h.totalTokens > 0).length
-            }
-          })
-        }
-
-        // 为响应添加汇总信息
-        const hourlySummary = {
-          totalTokens: totalHourlyTokens,
-          totalRequests: totalHourlyRequests,
-          totalCost: totalHourlyCost,
-          activeModels: modelAggregation.size,
-          peakHour,
-          hourlyData: hourlyStats // 包含完整的小时数据
-        }
-
-        // 按总token数降序排列
-        modelStats.sort((a, b) => b.allTokens - a.allTokens)
-
-        return res.json({
-          success: true,
-          data: modelStats,
-          period,
-          range: period,
-          summary: hourlySummary
-        })
-      } catch (error) {
-        logger.error(`❌ Failed to get hourly model stats for ${keyId}:`, error)
-        return res.status(500).json({
-          error: 'Internal server error',
-          message: 'Failed to retrieve hourly model statistics'
-        })
-      }
-    } else {
-      // 原有的daily和monthly逻辑
-      const client = database.getClientSafe()
-      // 使用与管理页面相同的时区处理逻辑
-      const tzDate = database.getDateInTimezone()
-      const today = database.getDateStringInTimezone()
-      const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`
-
-      const pattern =
+    for (const key of keys) {
+      const match = key.match(
         period === 'daily'
-          ? `usage:${keyId}:model:daily:*:${today}`
-          : `usage:${keyId}:model:monthly:*:${currentMonth}`
+          ? /usage:.+:model:daily:(.+):\d{4}-\d{2}-\d{2}$/
+          : /usage:.+:model:monthly:(.+):\d{4}-\d{2}$/
+      )
 
-      const keys = await client.keys(pattern)
+      if (!match) {
+        continue
+      }
 
-      for (const key of keys) {
-        const match = key.match(
-          period === 'daily'
-            ? /usage:.+:model:daily:(.+):\d{4}-\d{2}-\d{2}$/
-            : /usage:.+:model:monthly:(.+):\d{4}-\d{2}$/
-        )
+      const model = match[1]
+      const data = await client.hgetall(key)
 
-        if (!match) {
-          continue
+      if (data && Object.keys(data).length > 0) {
+        const usage = {
+          input_tokens: parseInt(data.inputTokens) || 0,
+          output_tokens: parseInt(data.outputTokens) || 0,
+          cache_creation_input_tokens: parseInt(data.cacheCreateTokens) || 0,
+          cache_read_input_tokens: parseInt(data.cacheReadTokens) || 0
         }
 
-        const model = match[1]
-        const data = await client.hgetall(key)
+        const costData = CostCalculator.calculateCost(usage, model)
 
-        if (data && Object.keys(data).length > 0) {
-          const usage = {
-            input_tokens: parseInt(data.inputTokens) || 0,
-            output_tokens: parseInt(data.outputTokens) || 0,
-            cache_creation_input_tokens: parseInt(data.cacheCreateTokens) || 0,
-            cache_read_input_tokens: parseInt(data.cacheReadTokens) || 0
-          }
-
-          const costData = CostCalculator.calculateCost(usage, model)
-
-          modelStats.push({
-            model,
-            requests: parseInt(data.requests) || 0,
-            inputTokens: usage.input_tokens,
-            outputTokens: usage.output_tokens,
-            cacheCreateTokens: usage.cache_creation_input_tokens,
-            cacheReadTokens: usage.cache_read_input_tokens,
-            allTokens: parseInt(data.allTokens) || 0,
-            costs: costData.costs,
-            formatted: costData.formatted,
-            pricing: costData.pricing
-          })
-        }
+        modelStats.push({
+          model,
+          requests: parseInt(data.requests) || 0,
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+          cacheCreateTokens: usage.cache_creation_input_tokens,
+          cacheReadTokens: usage.cache_read_input_tokens,
+          allTokens: parseInt(data.allTokens) || 0,
+          costs: costData.costs,
+          formatted: costData.formatted,
+          pricing: costData.pricing
+        })
       }
     }
 
@@ -721,169 +936,6 @@ router.post('/api/user-model-stats', async (req, res) => {
     return res.status(500).json({
       error: 'Internal server error',
       message: 'Failed to retrieve model statistics'
-    })
-  }
-})
-
-// 📊 专用小时统计API接口 - 获取指定时间段的小时级模型使用统计
-router.post('/api/user-model-stats/hourly', async (req, res) => {
-  try {
-    const { apiKey, apiId, date, hours = 24 } = req.body
-
-    // 参数验证
-    if (!date) {
-      return res.status(400).json({
-        error: 'Missing date parameter',
-        message: 'Date parameter is required (format: YYYY-MM-DD)'
-      })
-    }
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.status(400).json({
-        error: 'Invalid date format',
-        message: 'Date must be in YYYY-MM-DD format'
-      })
-    }
-
-    if (typeof hours !== 'number' || hours < 1 || hours > 168) {
-      return res.status(400).json({
-        error: 'Invalid hours parameter',
-        message: 'Hours parameter must be between 1 and 168'
-      })
-    }
-
-    let keyData
-    let keyId
-
-    // API Key验证逻辑（复用现有逻辑）
-    if (apiId) {
-      // 通过 apiId 查询
-      if (
-        typeof apiId !== 'string' ||
-        !apiId.match(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i)
-      ) {
-        return res.status(400).json({
-          error: 'Invalid API ID format',
-          message: 'API ID must be a valid UUID'
-        })
-      }
-
-      keyData = await database.getApiKey(apiId)
-
-      if (!keyData || Object.keys(keyData).length === 0) {
-        logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`)
-        return res.status(404).json({
-          error: 'API key not found',
-          message: 'The specified API key does not exist'
-        })
-      }
-
-      if (keyData.isActive !== 'true') {
-        return res.status(403).json({
-          error: 'API key is disabled',
-          message: 'This API key has been disabled'
-        })
-      }
-
-      keyId = apiId
-      keyData.name = keyData.name || 'Unknown'
-    } else if (apiKey) {
-      // 通过 apiKey 查询
-      const validation = await apiKeyService.validateApiKey(apiKey)
-
-      if (!validation.valid) {
-        const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
-        logger.security(
-          `🔒 Invalid API key in hourly stats query: ${validation.error} from ${clientIP}`
-        )
-        return res.status(401).json({
-          error: 'Invalid API key',
-          message: validation.error
-        })
-      }
-
-      const { keyData: validatedKeyData } = validation
-      keyData = validatedKeyData
-      keyId = keyData.id
-    } else {
-      logger.security(`🔒 Missing API key or ID in hourly stats query from ${req.ip || 'unknown'}`)
-      return res.status(400).json({
-        error: 'API Key or ID is required',
-        message: 'Please provide your API Key or API ID'
-      })
-    }
-
-    logger.api(
-      `📊 Hourly model stats query from key: ${keyData.name} (${keyId}), date: ${date}, hours: ${hours}`
-    )
-
-    // 解析日期
-    const startDate = new Date(`${date}T00:00:00.000Z`)
-    if (isNaN(startDate.getTime())) {
-      return res.status(400).json({
-        error: 'Invalid date format',
-        message: 'Unable to parse the provided date'
-      })
-    }
-
-    // 获取小时级统计数据
-    const hourlyStats = await database.getModelUsageHourly(keyId, startDate, hours)
-
-    // 计算汇总信息
-    let totalTokens = 0
-    let totalRequests = 0
-    let totalCost = 0
-    const activeModels = new Set()
-    let peakHour = null
-    let peakHourTokens = 0
-
-    for (const hourStat of hourlyStats) {
-      totalTokens += hourStat.totalTokens
-      totalRequests += hourStat.totalRequests
-      totalCost += hourStat.totalCost
-
-      // 计算峰值小时
-      if (hourStat.totalTokens > peakHourTokens) {
-        peakHourTokens = hourStat.totalTokens
-        peakHour = hourStat.hour
-      }
-
-      // 统计活跃模型
-      for (const modelName of Object.keys(hourStat.models)) {
-        activeModels.add(modelName)
-      }
-    }
-
-    const summary = {
-      totalTokens,
-      totalRequests,
-      totalCost: Math.round(totalCost * 1000000) / 1000000, // 保留6位小数
-      activeModels: Array.from(activeModels),
-      peakHour,
-      hoursQueried: hours,
-      hoursWithActivity: hourlyStats.filter((h) => h.totalTokens > 0).length
-    }
-
-    const response = {
-      success: true,
-      data: {
-        range: 'hourly',
-        period: {
-          start: startDate.toISOString(),
-          hours,
-          end: new Date(startDate.getTime() + hours * 60 * 60 * 1000).toISOString()
-        },
-        hourlyStats,
-        summary
-      }
-    }
-
-    return res.json(response)
-  } catch (error) {
-    logger.error('❌ Failed to process hourly model stats query:', error)
-    return res.status(500).json({
-      error: 'Internal server error',
-      message: 'Failed to retrieve hourly model statistics'
     })
   }
 })

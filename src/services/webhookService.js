@@ -19,14 +19,9 @@ class WebhookService {
       telegram: this.sendToTelegram.bind(this),
       custom: this.sendToCustom.bind(this),
       bark: this.sendToBark.bind(this),
-      iyuu: this.sendToIYUU.bind(this),
       smtp: this.sendToSMTP.bind(this)
     }
-    this.timezone = appConfig.system?.timezone || 'Asia/Shanghai'
-  }
-
-  getLocalizedTimestamp(date = new Date()) {
-    return date.toLocaleString('zh-CN', { timeZone: this.timezone })
+    this.timezone = appConfig.system.timezone || 'Asia/Shanghai'
   }
 
   /**
@@ -212,324 +207,6 @@ class WebhookService {
   }
 
   /**
-   * Telegram Bot 通知
-   */
-  async sendToTelegram(platform, type, data) {
-    if (!platform.botToken) {
-      throw new Error('Telegram 配置缺少 botToken')
-    }
-
-    if (!platform.chatId) {
-      throw new Error('Telegram 配置缺少 chatId')
-    }
-
-    const title = this.getNotificationTitle(type)
-    const timestamp = this.getLocalizedTimestamp()
-    const details = this.buildNotificationDetails(data)
-
-    const lines = details.map(
-      (detail) => `<b>${this.escapeHtml(detail.label)}</b>: ${this.escapeHtml(detail.value)}`
-    )
-
-    const htmlMessage = `
-<b>${this.escapeHtml(title)}</b>
-
-<b>服务</b>: Claude Relay Service
-<b>时间</b>: ${this.escapeHtml(timestamp)}
-
-${lines.join('\n')}
-    `.trim()
-
-    const apiBase = platform.apiBaseUrl || 'https://api.telegram.org'
-    const url = `${apiBase.replace(/\/$/, '')}/bot${platform.botToken}/sendMessage`
-    const payload = {
-      chat_id: platform.chatId,
-      text: htmlMessage,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true
-    }
-
-    if (platform.messageThreadId) {
-      payload.message_thread_id = platform.messageThreadId
-    }
-
-    const axiosConfig = this.getProxyAxiosConfig(platform.proxyUrl)
-
-    await this.sendHttpRequest(url, payload, platform.timeout || 10000, axiosConfig)
-  }
-
-  /**
-   * SMTP 邮件通知
-   */
-  async sendToSMTP(platform, type, data) {
-    if (!platform.host) {
-      throw new Error('SMTP 配置缺少 host')
-    }
-    if (!platform.port) {
-      throw new Error('SMTP 配置缺少 port')
-    }
-    if (!platform.to) {
-      throw new Error('SMTP 配置缺少收件人 (to)')
-    }
-
-    const transportOptions = {
-      host: platform.host,
-      port: platform.port,
-      secure:
-        typeof platform.secure === 'boolean' ? platform.secure : Number(platform.port) === 465,
-      auth: platform.username
-        ? {
-            user: platform.username,
-            pass: platform.password
-          }
-        : undefined,
-      tls: platform.rejectUnauthorized === false ? { rejectUnauthorized: false } : undefined
-    }
-
-    if (platform.proxyUrl) {
-      transportOptions.proxy = platform.proxyUrl
-    }
-
-    const transporter = nodemailer.createTransport(transportOptions)
-
-    const title = this.getNotificationTitle(type)
-    const html = this.formatMessageForEmail(type, data)
-    const text = this.formatMessageForEmailText(type, data)
-
-    const mailOptions = {
-      from: platform.from || platform.username,
-      to: this.normalizeRecipients(platform.to),
-      subject: title.replace(/^([\p{Emoji}\p{Extended_Pictographic}]+\s*)/u, ''),
-      text,
-      html
-    }
-
-    if (platform.cc) {
-      mailOptions.cc = this.normalizeRecipients(platform.cc)
-    }
-    if (platform.bcc) {
-      mailOptions.bcc = this.normalizeRecipients(platform.bcc)
-    }
-
-    await transporter.sendMail(mailOptions)
-  }
-
-  /**
-   * Bark推送 - iOS推送通知服务
-   */
-  async sendToBark(platform, type, data) {
-    const title = this.getNotificationTitle(type)
-    const body = this.formatBarkMessage(data)
-
-    // Bark API格式: https://api.day.app/[key]/[title]/[body]?[params]
-    // 或者使用POST方式发送JSON
-
-    let { url } = platform
-    let method = 'GET'
-    let payload = null
-
-    // 检查URL格式，决定使用GET还是POST方式
-    if (platform.usePost || platform.url.includes('/push')) {
-      // POST方式 - 适用于自建Bark服务器或需要复杂参数的情况
-      method = 'POST'
-      payload = {
-        title,
-        body,
-        device_key: platform.deviceKey, // Bark设备密钥
-        ...this.getBarkExtraParams(platform, type)
-      }
-    } else {
-      // GET方式 - 传统Bark URL格式
-      // 确保URL格式正确: https://api.day.app/[deviceKey]/
-      if (!platform.deviceKey) {
-        throw new Error('Bark推送需要设备密钥 (deviceKey)')
-      }
-
-      // 构建GET请求URL
-      const encodedTitle = encodeURIComponent(title)
-      const encodedBody = encodeURIComponent(body)
-      const extraParams = this.getBarkExtraParams(platform, type)
-      const paramString = new URLSearchParams(extraParams).toString()
-
-      url = `${platform.url.replace(/\/$/, '')}/${platform.deviceKey}/${encodedTitle}/${encodedBody}`
-      if (paramString) {
-        url += `?${paramString}`
-      }
-    }
-
-    if (method === 'POST') {
-      await this.sendHttpRequest(url, payload, platform.timeout || 10000)
-    } else {
-      // GET请求
-      await this.sendHttpGetRequest(url, platform.timeout || 10000)
-    }
-  }
-
-  /**
-   * IYUU推送 - 支持GET/POST双模式和智能切换
-   */
-  async sendToIYUU(platform, type, data) {
-    const title = this.getNotificationTitle(type)
-    const content = this.formatMessageForIYUU(type, data)
-
-    // 构建IYUU API URL
-    const baseUrl = `https://iyuu.cn/${platform.token}.send`
-
-    // 准备参数
-    const params = {
-      text: title,
-      desp: content
-    }
-
-    // 检查参数长度，决定使用GET还是POST
-    const paramString = new URLSearchParams(params).toString()
-    const usePost = paramString.length > 1800 || platform.forcePost // URL长度限制或强制使用POST
-
-    try {
-      if (usePost) {
-        // POST方式发送
-        await this.sendHttpRequest(baseUrl, params, platform.timeout || 10000)
-      } else {
-        // GET方式发送
-        const url = `${baseUrl}?${paramString}`
-        await this.sendHttpGetRequest(url, platform.timeout || 10000)
-      }
-
-      logger.debug(`✅ IYUU推送成功 (${usePost ? 'POST' : 'GET'}方式)`, {
-        platform: platform.name || 'IYUU',
-        type,
-        titleLength: title.length,
-        contentLength: content.length
-      })
-    } catch (error) {
-      // 如果GET方式失败且是413错误，尝试POST方式
-      if (!usePost && error.response && error.response.status === 413) {
-        logger.warn('📝 IYUU GET请求过大，自动切换到POST方式重试')
-        await this.sendHttpRequest(baseUrl, params, platform.timeout || 10000)
-        logger.debug('✅ IYUU POST重试成功')
-      } else {
-        // 处理特定错误
-        this.handleIYUUError(error)
-        throw error
-      }
-    }
-  }
-
-  /**
-   * 处理IYUU推送错误
-   */
-  handleIYUUError(error) {
-    if (error.response) {
-      const { status } = error.response
-      const { data } = error.response
-
-      switch (status) {
-        case 404:
-          throw new Error('IYUU Token无效或不存在')
-        case 413:
-          throw new Error('请求参数过大，建议使用POST方式或减少内容长度')
-        case 429:
-          throw new Error('IYUU推送频率限制，请稍后再试')
-        case 500:
-          throw new Error('IYUU服务器内部错误，请稍后再试')
-        default:
-          if (data && data.errmsg) {
-            throw new Error(`IYUU推送失败: ${data.errmsg}`)
-          }
-          throw new Error(`IYUU推送失败: HTTP ${status}`)
-      }
-    } else if (error.code === 'ECONNREFUSED') {
-      throw new Error('无法连接到IYUU服务器，请检查网络连接')
-    } else if (error.code === 'ETIMEDOUT') {
-      throw new Error('IYUU推送超时，请稍后再试')
-    } else {
-      throw new Error(`IYUU推送失败: ${error.message}`)
-    }
-  }
-
-  /**
-   * 格式化IYUU消息内容
-   */
-  formatMessageForIYUU(type, data) {
-    const lines = []
-
-    // 添加服务信息
-    lines.push('**服务**: Claude Relay Service')
-    lines.push(`**时间**: ${this.getLocalizedTimestamp()}`)
-    lines.push('')
-
-    // 添加详细信息
-    if (data.accountName) {
-      lines.push(`**账号**: ${data.accountName}`)
-    }
-
-    if (data.platform) {
-      lines.push(`**平台**: ${data.platform}`)
-    }
-
-    if (data.status) {
-      lines.push(`**状态**: ${data.status}`)
-    }
-
-    if (data.errorCode) {
-      lines.push(`**错误代码**: ${data.errorCode}`)
-    }
-
-    if (data.reason) {
-      lines.push(`**原因**: ${data.reason}`)
-    }
-
-    if (data.message) {
-      lines.push(`**消息**: ${data.message}`)
-    }
-
-    if (data.quota) {
-      lines.push(`**配额信息**: ${data.quota.remaining}/${data.quota.total} 剩余`)
-      if (data.quota.percentage !== undefined) {
-        lines.push(`**使用率**: ${data.quota.percentage}%`)
-      }
-    }
-
-    if (data.usage) {
-      lines.push(`**使用率**: ${data.usage}%`)
-    }
-
-    // 添加操作建议（根据通知类型）
-    switch (type) {
-      case 'accountAnomaly':
-        lines.push('')
-        lines.push('🔧 **建议操作**:')
-        lines.push('- 检查账号登录状态')
-        lines.push('- 验证代理配置')
-        lines.push('- 查看详细日志')
-        break
-      case 'quotaWarning':
-        lines.push('')
-        lines.push('📈 **建议操作**:')
-        lines.push('- 监控使用情况')
-        lines.push('- 考虑增加配额')
-        lines.push('- 优化使用策略')
-        break
-      case 'systemError':
-        lines.push('')
-        lines.push('🚨 **建议操作**:')
-        lines.push('- 立即检查系统状态')
-        lines.push('- 查看错误日志')
-        lines.push('- 必要时重启服务')
-        break
-      case 'securityAlert':
-        lines.push('')
-        lines.push('🔒 **建议操作**:')
-        lines.push('- 立即检查安全设置')
-        lines.push('- 审查访问日志')
-        lines.push('- 更新安全配置')
-        break
-    }
-
-    return lines.join('\n')
-  }
-
-  /**
    * 自定义webhook
    */
   async sendToCustom(platform, type, data) {
@@ -545,39 +222,123 @@ ${lines.join('\n')}
   }
 
   /**
-   * 发送HTTP请求
+   * Telegram Bot 通知
    */
-  async sendHttpRequest(url, payload, timeout, extraConfig = {}) {
-    const headers = {
-      'Content-Type': 'application/json',
-      'User-Agent': 'claude-relay-service/2.0',
-      ...(extraConfig.headers || {})
+  async sendToTelegram(platform, type, data) {
+    if (!platform.botToken) {
+      throw new Error('缺少 Telegram 机器人 Token')
+    }
+    if (!platform.chatId) {
+      throw new Error('缺少 Telegram Chat ID')
     }
 
-    const axiosConfig = {
-      timeout,
-      ...extraConfig,
-      headers
+    const baseUrl = this.normalizeTelegramApiBase(platform.apiBaseUrl)
+    const apiUrl = `${baseUrl}/bot${platform.botToken}/sendMessage`
+    const payload = {
+      chat_id: platform.chatId,
+      text: this.formatMessageForTelegram(type, data),
+      disable_web_page_preview: true
     }
 
-    const response = await axios.post(url, payload, axiosConfig)
+    const axiosOptions = this.buildTelegramAxiosOptions(platform)
 
-    if (response.status < 200 || response.status >= 300) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    const response = await this.sendHttpRequest(
+      apiUrl,
+      payload,
+      platform.timeout || 10000,
+      axiosOptions
+    )
+    if (!response || response.ok !== true) {
+      throw new Error(`Telegram API 错误: ${response?.description || '未知错误'}`)
     }
-
-    return response.data
   }
 
   /**
-   * 发送HTTP GET请求 (用于Bark等GET方式的webhook)
+   * Bark webhook
    */
-  async sendHttpGetRequest(url, timeout) {
-    const response = await axios.get(url, {
-      timeout,
-      headers: {
-        'User-Agent': 'claude-relay-service/2.0'
+  async sendToBark(platform, type, data) {
+    const payload = {
+      device_key: platform.deviceKey,
+      title: this.getNotificationTitle(type),
+      body: this.formatMessageForBark(type, data),
+      level: platform.level || this.getBarkLevel(type),
+      sound: platform.sound || this.getBarkSound(type),
+      group: platform.group || 'claude-relay',
+      badge: 1
+    }
+
+    // 添加可选参数
+    if (platform.icon) {
+      payload.icon = platform.icon
+    }
+
+    if (platform.clickUrl) {
+      payload.url = platform.clickUrl
+    }
+
+    const url = platform.serverUrl || 'https://api.day.app/push'
+    await this.sendHttpRequest(url, payload, platform.timeout || 10000)
+  }
+
+  /**
+   * SMTP邮件通知
+   */
+  async sendToSMTP(platform, type, data) {
+    try {
+      // 创建SMTP传输器
+      const transporter = nodemailer.createTransport({
+        host: platform.host,
+        port: platform.port || 587,
+        secure: platform.secure || false, // true for 465, false for other ports
+        auth: {
+          user: platform.user,
+          pass: platform.pass
+        },
+        // 可选的TLS配置
+        tls: platform.ignoreTLS ? { rejectUnauthorized: false } : undefined,
+        // 连接超时
+        connectionTimeout: platform.timeout || 10000
+      })
+
+      // 构造邮件内容
+      const subject = this.getNotificationTitle(type)
+      const htmlContent = this.formatMessageForEmail(type, data)
+      const textContent = this.formatMessageForEmailText(type, data)
+
+      // 邮件选项
+      const mailOptions = {
+        from: platform.from || platform.user, // 发送者
+        to: platform.to, // 接收者（必填）
+        subject: `[Claude Relay Service] ${subject}`,
+        text: textContent,
+        html: htmlContent
       }
+
+      // 发送邮件
+      const info = await transporter.sendMail(mailOptions)
+      logger.info(`✅ 邮件发送成功: ${info.messageId}`)
+
+      return info
+    } catch (error) {
+      logger.error('SMTP邮件发送失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 发送HTTP请求
+   */
+  async sendHttpRequest(url, payload, timeout, axiosOptions = {}) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'claude-relay-service/2.0',
+      ...(axiosOptions.headers || {})
+    }
+
+    const response = await axios.post(url, payload, {
+      timeout,
+      ...axiosOptions,
+      headers
     })
 
     if (response.status < 200 || response.status >= 300) {
@@ -636,9 +397,11 @@ ${lines.join('\n')}
   formatMessageForWechatWork(type, data) {
     const title = this.getNotificationTitle(type)
     const details = this.formatNotificationDetails(data)
-
-    const timestamp = this.getLocalizedTimestamp()
-    return `## ${title}\n\n> **服务**: Claude Relay Service\n> **时间**: ${timestamp}\n\n${details}`
+    return (
+      `## ${title}\n\n` +
+      `> **服务**: Claude Relay Service\n` +
+      `> **时间**: ${new Date().toLocaleString('zh-CN', { timeZone: this.timezone })}\n\n${details}`
+    )
   }
 
   /**
@@ -647,8 +410,10 @@ ${lines.join('\n')}
   formatMessageForDingTalk(type, data) {
     const details = this.formatNotificationDetails(data)
 
-    const timestamp = this.getLocalizedTimestamp()
-    return `#### 服务: Claude Relay Service\n#### 时间: ${timestamp}\n\n${details}`
+    return (
+      `#### 服务: Claude Relay Service\n` +
+      `#### 时间: ${new Date().toLocaleString('zh-CN', { timeZone: this.timezone })}\n\n${details}`
+    )
   }
 
   /**
@@ -663,10 +428,86 @@ ${lines.join('\n')}
    */
   formatMessageForSlack(type, data) {
     const title = this.getNotificationTitle(type)
-    const timestamp = this.getLocalizedTimestamp()
     const details = this.formatNotificationDetails(data)
 
-    return `*${title}*\n服务: Claude Relay Service\n时间: ${timestamp}\n\n${details}`
+    return `*${title}*\n${details}`
+  }
+
+  /**
+   * 规范化Telegram基础地址
+   */
+  normalizeTelegramApiBase(baseUrl) {
+    const defaultBase = 'https://api.telegram.org'
+    if (!baseUrl) {
+      return defaultBase
+    }
+
+    try {
+      const parsed = new URL(baseUrl)
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error('Telegram API 基础地址必须使用 http 或 https 协议')
+      }
+
+      // 移除结尾的 /
+      return parsed.href.replace(/\/$/, '')
+    } catch (error) {
+      logger.warn(`⚠️ Telegram API 基础地址无效，将使用默认值: ${error.message}`)
+      return defaultBase
+    }
+  }
+
+  /**
+   * 构建 Telegram 请求的 axios 选项（代理等）
+   */
+  buildTelegramAxiosOptions(platform) {
+    const options = {}
+
+    if (platform.proxyUrl) {
+      try {
+        const proxyUrl = new URL(platform.proxyUrl)
+        const { protocol } = proxyUrl
+
+        if (protocol.startsWith('socks')) {
+          const agent = new SocksProxyAgent(proxyUrl.toString())
+          options.httpAgent = agent
+          options.httpsAgent = agent
+          options.proxy = false
+        } else if (protocol === 'http:' || protocol === 'https:') {
+          const agent = new HttpsProxyAgent(proxyUrl.toString())
+          options.httpAgent = agent
+          options.httpsAgent = agent
+          options.proxy = false
+        } else {
+          logger.warn(`⚠️ 不支持的Telegram代理协议: ${protocol}`)
+        }
+      } catch (error) {
+        logger.warn(`⚠️ Telegram代理配置无效，将忽略: ${error.message}`)
+      }
+    }
+
+    return options
+  }
+
+  /**
+   * 格式化 Telegram 消息
+   */
+  formatMessageForTelegram(type, data) {
+    const title = this.getNotificationTitle(type)
+    const timestamp = new Date().toLocaleString('zh-CN', { timeZone: this.timezone })
+    const details = this.buildNotificationDetails(data)
+
+    const lines = [`${title}`, '服务: Claude Relay Service']
+
+    if (details.length > 0) {
+      lines.push('')
+      for (const detail of details) {
+        lines.push(`${detail.label}: ${detail.value}`)
+      }
+    }
+
+    lines.push('', `时间: ${timestamp}`)
+
+    return lines.join('\n')
   }
 
   /**
@@ -681,121 +522,11 @@ ${lines.join('\n')}
       title,
       color,
       fields,
-      timestamp: new Date().toISOString(),
+      timestamp: getISOStringWithTimezone(new Date()),
       footer: {
         text: 'Claude Relay Service'
       }
     }
-  }
-
-  /**
-   * 格式化Bark消息内容
-   */
-  formatBarkMessage(data) {
-    const lines = []
-
-    if (data.accountName) {
-      lines.push(`账号: ${data.accountName}`)
-    }
-
-    if (data.platform) {
-      lines.push(`平台: ${data.platform}`)
-    }
-
-    if (data.status) {
-      lines.push(`状态: ${data.status}`)
-    }
-
-    if (data.errorCode) {
-      lines.push(`错误代码: ${data.errorCode}`)
-    }
-
-    if (data.reason) {
-      lines.push(`原因: ${data.reason}`)
-    }
-
-    if (data.message) {
-      lines.push(`消息: ${data.message}`)
-    }
-
-    if (data.quota) {
-      lines.push(`剩余配额: ${data.quota.remaining}/${data.quota.total}`)
-    }
-
-    if (data.usage) {
-      lines.push(`使用率: ${data.usage}%`)
-    }
-
-    // 添加时间戳
-    lines.push(`时间: ${this.getLocalizedTimestamp()}`)
-
-    return lines.join('\n')
-  }
-
-  /**
-   * 获取Bark额外参数
-   */
-  getBarkExtraParams(platform, type) {
-    const params = {}
-
-    // 设置声音
-    if (platform.sound) {
-      params.sound = platform.sound
-    } else {
-      // 根据通知类型设置不同声音
-      const sounds = {
-        systemError: 'alarm',
-        securityAlert: 'multiwayinvitation',
-        accountAnomaly: 'calypso',
-        quotaWarning: 'bell',
-        test: 'birdsong'
-      }
-      params.sound = sounds[type] || 'bell'
-    }
-
-    // 设置徽章数字
-    if (platform.badge !== undefined) {
-      params.badge = platform.badge
-    }
-
-    // 设置分组
-    if (platform.group) {
-      params.group = platform.group
-    } else {
-      params.group = 'claude-relay-service'
-    }
-
-    // 设置图标
-    if (platform.icon) {
-      params.icon = platform.icon
-    }
-
-    // 设置URL (点击通知时打开) - 这应该是点击通知后要打开的URL，不是推送服务的URL
-    if (platform.clickUrl) {
-      params.url = platform.clickUrl
-    }
-
-    // 自动复制到剪贴板
-    if (platform.copy) {
-      params.copy = platform.copy
-    }
-
-    // 设置中断级别 (iOS 15+)
-    if (platform.level) {
-      params.level = platform.level // passive, active, critical
-    } else {
-      // 根据通知类型设置中断级别
-      const levels = {
-        systemError: 'critical',
-        securityAlert: 'critical',
-        accountAnomaly: 'active',
-        quotaWarning: 'active',
-        test: 'passive'
-      }
-      params.level = levels[type] || 'active'
-    }
-
-    return params
   }
 
   /**
@@ -814,66 +545,186 @@ ${lines.join('\n')}
     return titles[type] || '📢 系统通知'
   }
 
-  buildNotificationDetails(data = {}) {
+  /**
+   * 获取Bark通知级别
+   */
+  getBarkLevel(type) {
+    const levels = {
+      accountAnomaly: 'timeSensitive',
+      quotaWarning: 'active',
+      systemError: 'critical',
+      securityAlert: 'critical',
+      rateLimitRecovery: 'active',
+      test: 'passive'
+    }
+
+    return levels[type] || 'active'
+  }
+
+  /**
+   * 获取Bark声音
+   */
+  getBarkSound(type) {
+    const sounds = {
+      accountAnomaly: 'alarm',
+      quotaWarning: 'bell',
+      systemError: 'alert',
+      securityAlert: 'alarm',
+      rateLimitRecovery: 'success',
+      test: 'default'
+    }
+
+    return sounds[type] || 'default'
+  }
+
+  /**
+   * 格式化Bark消息
+   */
+  formatMessageForBark(type, data) {
+    const lines = []
+
+    if (data.accountName) {
+      lines.push(`账号: ${data.accountName}`)
+    }
+
+    if (data.platform) {
+      lines.push(`平台: ${data.platform}`)
+    }
+
+    if (data.status) {
+      lines.push(`状态: ${data.status}`)
+    }
+
+    if (data.errorCode) {
+      lines.push(`错误: ${data.errorCode}`)
+    }
+
+    if (data.reason) {
+      lines.push(`原因: ${data.reason}`)
+    }
+
+    if (data.message) {
+      lines.push(`消息: ${data.message}`)
+    }
+
+    if (data.quota) {
+      lines.push(`剩余配额: ${data.quota.remaining}/${data.quota.total}`)
+    }
+
+    if (data.usage) {
+      lines.push(`使用率: ${data.usage}%`)
+    }
+
+    // 添加服务标识和时间戳
+    lines.push(`\n服务: Claude Relay Service`)
+    lines.push(`时间: ${new Date().toLocaleString('zh-CN', { timeZone: this.timezone })}`)
+
+    return lines.join('\n')
+  }
+
+  /**
+   * 构建通知详情数据
+   */
+  buildNotificationDetails(data) {
     const details = []
 
     if (data.accountName) {
       details.push({ label: '账号', value: data.accountName })
     }
-
     if (data.platform) {
       details.push({ label: '平台', value: data.platform })
     }
-
-    if (data.platforms && Array.isArray(data.platforms) && data.platforms.length > 0) {
-      details.push({ label: '涉及平台', value: data.platforms.join(', ') })
-    }
-
-    if (data.totalAccounts !== undefined) {
-      details.push({ label: '涉及账户数', value: String(data.totalAccounts) })
-    }
-
     if (data.status) {
-      const color = this.getStatusColor(data.status)
-      details.push({ label: '状态', value: data.status, color })
+      details.push({ label: '状态', value: data.status, color: this.getStatusColor(data.status) })
     }
-
     if (data.errorCode) {
       details.push({ label: '错误代码', value: data.errorCode, isCode: true })
     }
-
     if (data.reason) {
       details.push({ label: '原因', value: data.reason })
     }
-
     if (data.message) {
       details.push({ label: '消息', value: data.message })
     }
-
     if (data.quota) {
-      const quotaLine = `${data.quota.remaining}/${data.quota.total}`
-      details.push({ label: '剩余配额', value: quotaLine })
-      if (data.quota.percentage !== undefined) {
-        details.push({ label: '使用率', value: `${data.quota.percentage}%` })
-      }
+      details.push({ label: '配额', value: `${data.quota.remaining}/${data.quota.total}` })
     }
-
-    if (data.usage !== undefined) {
+    if (data.usage) {
       details.push({ label: '使用率', value: `${data.usage}%` })
-    }
-
-    if (data.metadata && typeof data.metadata === 'object') {
-      Object.entries(data.metadata).forEach(([key, value]) => {
-        details.push({
-          label: key,
-          value: typeof value === 'object' ? JSON.stringify(value) : value
-        })
-      })
     }
 
     return details
   }
 
+  /**
+   * 格式化邮件HTML内容
+   */
+  formatMessageForEmail(type, data) {
+    const title = this.getNotificationTitle(type)
+    const timestamp = new Date().toLocaleString('zh-CN', { timeZone: this.timezone })
+    const details = this.buildNotificationDetails(data)
+
+    let content = `
+      <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+          <h1 style="margin: 0; font-size: 24px;">${title}</h1>
+          <p style="margin: 10px 0 0 0; opacity: 0.9;">Claude Relay Service</p>
+        </div>
+        <div style="background: #f8f9fa; padding: 20px; border: 1px solid #e9ecef; border-top: none; border-radius: 0 0 8px 8px;">
+          <div style="background: white; padding: 16px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+    `
+
+    // 使用统一的详情数据渲染
+    details.forEach((detail) => {
+      if (detail.isCode) {
+        content += `<p><strong>${detail.label}:</strong> <code style="background: #f1f3f4; padding: 2px 6px; border-radius: 4px;">${detail.value}</code></p>`
+      } else if (detail.color) {
+        content += `<p><strong>${detail.label}:</strong> <span style="color: ${detail.color};">${detail.value}</span></p>`
+      } else {
+        content += `<p><strong>${detail.label}:</strong> ${detail.value}</p>`
+      }
+    })
+
+    content += `
+          </div>
+          <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e9ecef; font-size: 14px; color: #6c757d; text-align: center;">
+            <p>发送时间: ${timestamp}</p>
+            <p style="margin: 0;">此邮件由 Claude Relay Service 自动发送</p>
+          </div>
+        </div>
+      </div>
+    `
+
+    return content
+  }
+
+  /**
+   * 格式化邮件纯文本内容
+   */
+  formatMessageForEmailText(type, data) {
+    const title = this.getNotificationTitle(type)
+    const timestamp = new Date().toLocaleString('zh-CN', { timeZone: this.timezone })
+    const details = this.buildNotificationDetails(data)
+
+    let content = `${title}\n`
+    content += `=====================================\n\n`
+
+    // 使用统一的详情数据渲染
+    details.forEach((detail) => {
+      content += `${detail.label}: ${detail.value}\n`
+    })
+
+    content += `\n发送时间: ${timestamp}\n`
+    content += `服务: Claude Relay Service\n`
+    content += `=====================================\n`
+    content += `此邮件由系统自动发送，请勿回复。`
+
+    return content
+  }
+
+  /**
+   * 获取状态颜色
+   */
   getStatusColor(status) {
     const colors = {
       error: '#dc3545',
@@ -881,10 +732,8 @@ ${lines.join('\n')}
       blocked: '#6f42c1',
       disabled: '#6c757d',
       active: '#28a745',
-      warning: '#ffc107',
-      recovered: '#28a745'
+      warning: '#ffc107'
     }
-
     return colors[status] || '#007bff'
   }
 
@@ -892,68 +741,82 @@ ${lines.join('\n')}
    * 格式化通知详情
    */
   formatNotificationDetails(data) {
-    const details = this.buildNotificationDetails(data)
-    return details.map((detail) => `**${detail.label}**: ${detail.value}`).join('\n')
+    const lines = []
+
+    if (data.accountName) {
+      lines.push(`**账号**: ${data.accountName}`)
+    }
+
+    if (data.platform) {
+      lines.push(`**平台**: ${data.platform}`)
+    }
+
+    if (data.platforms) {
+      lines.push(`**涉及平台**: ${data.platforms.join(', ')}`)
+    }
+
+    if (data.totalAccounts) {
+      lines.push(`**恢复账户数**: ${data.totalAccounts}`)
+    }
+
+    if (data.status) {
+      lines.push(`**状态**: ${data.status}`)
+    }
+
+    if (data.errorCode) {
+      lines.push(`**错误代码**: ${data.errorCode}`)
+    }
+
+    if (data.reason) {
+      lines.push(`**原因**: ${data.reason}`)
+    }
+
+    if (data.message) {
+      lines.push(`**消息**: ${data.message}`)
+    }
+
+    if (data.quota) {
+      lines.push(`**剩余配额**: ${data.quota.remaining}/${data.quota.total}`)
+    }
+
+    if (data.usage) {
+      lines.push(`**使用率**: ${data.usage}%`)
+    }
+
+    return lines.join('\n')
   }
 
   /**
    * 格式化Discord字段
    */
   formatNotificationFields(data) {
-    const details = this.buildNotificationDetails(data)
-    return details.map((detail) => ({
-      name: detail.label,
-      value: String(detail.value),
-      inline: detail.value && String(detail.value).length <= 32
-    }))
-  }
+    const fields = []
 
-  formatMessageForEmail(type, data) {
-    const title = this.getNotificationTitle(type)
-    const timestamp = this.getLocalizedTimestamp()
-    const details = this.buildNotificationDetails(data)
+    if (data.accountName) {
+      fields.push({ name: '账号', value: data.accountName, inline: true })
+    }
 
-    const detailHtml = details
-      .map((detail) => {
-        const label = this.escapeHtml(detail.label)
-        const value = this.escapeHtml(detail.value)
-        if (detail.color) {
-          return `<p><strong>${label}:</strong> <span style="color: ${detail.color};">${value}</span></p>`
-        }
-        if (detail.isCode) {
-          return `<p><strong>${label}:</strong> <code style="background: #f1f3f4; padding: 2px 6px; border-radius: 4px;">${value}</code></p>`
-        }
-        return `<p><strong>${label}:</strong> ${value}</p>`
-      })
-      .join('\n')
+    if (data.platform) {
+      fields.push({ name: '平台', value: data.platform, inline: true })
+    }
 
-    return `
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; background: #f6f8fb; padding: 24px;">
-  <div style="max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); overflow: hidden;">
-    <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; padding: 20px 24px;">
-      <h2 style="margin: 0; font-size: 20px; font-weight: 600;">${this.escapeHtml(title)}</h2>
-      <p style="margin: 6px 0 0; opacity: 0.85;">Claude Relay Service</p>
-    </div>
-    <div style="padding: 24px;">
-      ${detailHtml || '<p>暂无更多详情</p>'}
-    </div>
-    <div style="padding: 16px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0; font-size: 13px; color: #475569;">
-      <p style="margin: 0 0 8px;"><strong>发送时间:</strong> ${this.escapeHtml(timestamp)}</p>
-      <p style="margin: 0;">此邮件由 Claude Relay Service 自动发送，请勿直接回复。</p>
-    </div>
-  </div>
-</div>
-    `.trim()
-  }
+    if (data.status) {
+      fields.push({ name: '状态', value: data.status, inline: true })
+    }
 
-  formatMessageForEmailText(type, data) {
-    const title = this.getNotificationTitle(type)
-    const timestamp = this.getLocalizedTimestamp()
-    const details = this.buildNotificationDetails(data)
+    if (data.errorCode) {
+      fields.push({ name: '错误代码', value: data.errorCode, inline: false })
+    }
 
-    const body = details.map((detail) => `${detail.label}: ${detail.value}`).join('\n')
+    if (data.reason) {
+      fields.push({ name: '原因', value: data.reason, inline: false })
+    }
 
-    return `${title}\n=====================================\n服务: Claude Relay Service\n时间: ${timestamp}\n\n${body}\n\n此邮件由系统自动发送，请勿回复。`
+    if (data.message) {
+      fields.push({ name: '消息', value: data.message, inline: false })
+    }
+
+    return fields
   }
 
   /**
@@ -1002,55 +865,6 @@ ${lines.join('\n')}
     }
 
     return colors[type] || 0x9e9e9e // 灰色
-  }
-
-  normalizeRecipients(value) {
-    if (!value) {
-      return undefined
-    }
-
-    if (Array.isArray(value)) {
-      return value.join(', ')
-    }
-
-    if (typeof value === 'string') {
-      return value
-        .split(/[;,]/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .join(', ')
-    }
-
-    return value
-  }
-
-  escapeHtml(value) {
-    if (value === undefined || value === null) {
-      return ''
-    }
-
-    return String(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;')
-  }
-
-  getProxyAxiosConfig(proxyUrl) {
-    if (!proxyUrl) {
-      return {}
-    }
-
-    const agent = /^socks/i.test(proxyUrl)
-      ? new SocksProxyAgent(proxyUrl)
-      : new HttpsProxyAgent(proxyUrl)
-
-    return {
-      httpsAgent: agent,
-      httpAgent: agent,
-      proxy: false
-    }
   }
 
   /**

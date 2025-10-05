@@ -2,110 +2,38 @@ const express = require('express')
 const claudeRelayService = require('../services/claudeRelayService')
 const claudeConsoleRelayService = require('../services/claudeConsoleRelayService')
 const bedrockRelayService = require('../services/bedrockRelayService')
+const ccrRelayService = require('../services/ccrRelayService')
 const bedrockAccountService = require('../services/bedrockAccountService')
 const unifiedClaudeScheduler = require('../services/unifiedClaudeScheduler')
 const apiKeyService = require('../services/apiKeyService')
-const claudeAccountService = require('../services/claudeAccountService')
-const { authenticateDual } = require('../middleware/auth')
+const pricingService = require('../services/pricingService')
+const { authenticateApiKey } = require('../middleware/auth')
 const logger = require('../utils/logger')
-const database = require('../models/database')
+const redis = require('../models/redis')
+const { getEffectiveModel, parseVendorPrefixedModel } = require('../utils/modelHelper')
 const sessionHelper = require('../utils/sessionHelper')
-const { unifiedLogServiceFactory } = require('../services/UnifiedLogServiceFactory')
-const { costLimitService } = require('../services/costLimitService')
-const { costEstimator } = require('../utils/costEstimator')
 
 const router = express.Router()
 
-// 💰 统一账户费用记录函数
-const recordAccountCostAsync = async (accountId, usageData, model) => {
-  if (!accountId || !usageData || !model || (typeof model === 'string' && model.trim() === '')) {
-    return
-  }
-
-  // 异步记录账户费用，不阻塞主流程
-  setImmediate(async () => {
-    try {
-      await claudeAccountService.recordAccountCost(accountId, usageData, model)
-    } catch (error) {
-      logger.warn(`⚠️ Account cost recording failed for ${accountId}:`, error.message)
-    }
-  })
-}
-
-// 🔧 统一日志服务实例获取
-let unifiedLogService = null
-const getUnifiedLogService = async () => {
-  if (!unifiedLogService) {
-    try {
-      unifiedLogService = await unifiedLogServiceFactory.getSingleton()
-    } catch (error) {
-      logger.error('❌ Failed to get UnifiedLogService instance:', error)
-      throw error
-    }
-  }
-  return unifiedLogService
-}
-
-// 🔧 统一日志记录函数
-const logRequestWithUnifiedService = async (req, res, usageData, startTime, accountId) => {
-  try {
-    const logService = await getUnifiedLogService()
-
-    // 构建统一的日志数据
-    const logData = {
-      // 基础请求信息
-      path: req.originalUrl,
-      method: req.method,
-      statusCode: res.statusCode,
-      responseTime: Date.now() - startTime,
-      userAgent: req.headers['user-agent'],
-      ipAddress: req.ip,
-
-      // 请求和响应数据
-      requestHeaders: req.headers,
-      responseHeaders: res.getHeaders(),
-      requestBody: req.body,
-
-      // Token 和使用统计
-      inputTokens: usageData?.input_tokens || 0,
-      outputTokens: usageData?.output_tokens || 0,
-      totalTokens: (usageData?.input_tokens || 0) + (usageData?.output_tokens || 0),
-      cacheCreateTokens: usageData?.cache_creation_input_tokens || 0,
-      cacheReadTokens: usageData?.cache_read_input_tokens || 0,
-
-      // 详细缓存信息
-      ephemeral5mTokens: usageData?.cache_creation?.ephemeral_5m_input_tokens || 0,
-      ephemeral1hTokens: usageData?.cache_creation?.ephemeral_1h_input_tokens || 0,
-
-      // 账户和模型信息
-      accountId,
-      model: usageData?.model || 'unknown',
-
-      // 流式标识
-      isStreaming: true,
-
-      // 时间戳
-      timestamp: Date.now()
-    }
-
-    // 记录日志 - 处理双重认证场景
-    const keyId = req.apiKey?.id || 'user_session'
-    const logId = await logService.logRequest(keyId, logData)
-    logger.debug(`✅ Request logged with UnifiedLogService: ${logId}`)
-
-    return logId
-  } catch (error) {
-    logger.error('❌ UnifiedLogService logging failed:', error)
-    // 不抛出错误，避免影响主流程
-    return null
-  }
-}
-
+// 🔧 共享的消息处理函数
 async function handleMessagesRequest(req, res) {
-  const startTime = Date.now()
-  let shouldLogRequest = false
-
   try {
+    const startTime = Date.now()
+
+    // Claude 服务权限校验，阻止未授权的 Key
+    if (
+      req.apiKey.permissions &&
+      req.apiKey.permissions !== 'all' &&
+      req.apiKey.permissions !== 'claude'
+    ) {
+      return res.status(403).json({
+        error: {
+          type: 'permission_error',
+          message: '此 API Key 无权访问 Claude 服务'
+        }
+      })
+    }
+
     // 严格的输入验证
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({
@@ -128,82 +56,29 @@ async function handleMessagesRequest(req, res) {
       })
     }
 
+    // 模型限制（黑名单）校验：统一在此处处理（去除供应商前缀）
+    if (
+      req.apiKey.enableModelRestriction &&
+      Array.isArray(req.apiKey.restrictedModels) &&
+      req.apiKey.restrictedModels.length > 0
+    ) {
+      const effectiveModel = getEffectiveModel(req.body.model || '')
+      if (req.apiKey.restrictedModels.includes(effectiveModel)) {
+        return res.status(403).json({
+          error: {
+            type: 'forbidden',
+            message: '暂无该模型访问权限'
+          }
+        })
+      }
+    }
+
     // 检查是否为流式请求
     const isStream = req.body.stream === true
-    const requestedModel = req.body.model || 'unknown'
-
-    // 获取认证信息描述
-    const authInfo = req.apiKey
-      ? `API Key: ${req.apiKey.name}`
-      : req.user
-        ? `User: ${req.user.username} (${req.user.id})`
-        : 'unknown'
 
     logger.api(
-      `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for ${authInfo}, model: ${requestedModel}`
+      `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for key: ${req.apiKey.name}`
     )
-
-    // 💰 费用预估和限制检查（P1.2 核心功能）
-    let estimatedCost = 0
-    let costEstimation = null
-
-    try {
-      // 1. 预估请求费用
-      costEstimation = costEstimator.estimateRequestCost(req.body, requestedModel)
-      estimatedCost = costEstimation.estimatedCost || 0
-
-      logger.debug(
-        `💰 Request cost estimation: $${estimatedCost.toFixed(4)} (confidence: ${costEstimation.confidence})`
-      )
-
-      // 2. 执行API Key级别的费用限制检查（包含预估费用） - 仅适用于API Key认证
-      if (req.apiKey) {
-        const apiKeyCostCheck = await costLimitService.checkApiKeyCostLimit(
-          req.apiKey.id,
-          estimatedCost
-        )
-
-        if (!apiKeyCostCheck.allowed) {
-          const violationResponse = costLimitService.formatViolationResponse(
-            apiKeyCostCheck.violations
-          )
-
-          logger.security(
-            `💰 API Key cost limit exceeded before request: ${req.apiKey.id} (${req.apiKey.name}), estimated: $${estimatedCost.toFixed(4)}`
-          )
-
-          return res.status(429).json({
-            ...violationResponse,
-            type: 'api_key_cost_limit',
-            estimatedCost,
-            estimation: {
-              breakdown: costEstimation.breakdown,
-              confidence: costEstimation.confidence
-            }
-          })
-        }
-      }
-
-      // 3. 添加预估费用信息到请求对象（供后续使用）
-      req.costEstimation = costEstimation
-      req.estimatedCost = estimatedCost
-    } catch (costError) {
-      // 费用预估失败不应阻塞请求，但需要记录日志
-      logger.warn(`⚠️ Cost estimation failed for request: ${costError.message}`)
-      estimatedCost = 0
-      req.estimatedCost = 0
-    }
-
-    // 智能采样决策：检查是否应该记录此请求到日志系统
-    shouldLogRequest = false
-    try {
-      // 🔧 UnifiedLogService 内置智能重复检测，默认启用日志记录
-      shouldLogRequest = true
-      logger.debug('🔍 Request logging enabled with UnifiedLogService')
-    } catch (samplingError) {
-      logger.warn('⚠️ Request logging initialization failed:', samplingError.message)
-      shouldLogRequest = false
-    }
 
     if (isStream) {
       // 流式响应 - 只使用官方真实usage数据
@@ -225,108 +100,33 @@ async function handleMessagesRequest(req, res) {
       // 生成会话哈希用于sticky会话
       const sessionHash = sessionHelper.generateSessionHash(req.body)
 
-      // 🎯 智能账户选择：优先使用用户组调度，否则使用API Key调度
-      let accountId, accountType
-
-      // 检查是否有用户上下文（用户会话认证）
-      if (req.user && req.user.id) {
-        logger.info(
-          `👤 Using user-based account selection for user: ${req.user.username} (${req.user.id})`
-        )
-        try {
-          // 使用claudeAccountService的组调度功能
-          const localClaudeAccountService = require('../services/claudeAccountService')
-          const groupAccountId = await localClaudeAccountService.selectAccountByGroup(req.user.id, {
-            sessionHash,
-            modelName: requestedModel
-          })
-
-          if (groupAccountId) {
-            logger.success(`🎯 Selected group-based Claude account: ${groupAccountId}`)
-            accountId = groupAccountId
-            accountType = 'claude-official'
-          } else {
-            logger.info(
-              `⚠️ No group-based account found for user ${req.user.username}, using API Key fallback`
-            )
-            // 回退到API Key调度
-            const result = await unifiedClaudeScheduler.selectAccountForApiKey(
-              req.apiKey,
-              sessionHash,
-              requestedModel
-            )
-            const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-            accountId = selectedAccountId
-            accountType = selectedAccountType
-          }
-        } catch (groupError) {
-          logger.warn(
-            `⚠️ Group-based account selection failed: ${groupError.message}, using API Key fallback`
-          )
-          // 回退到API Key调度
-          const result = await unifiedClaudeScheduler.selectAccountForApiKey(
-            req.apiKey,
-            sessionHash,
-            requestedModel
-          )
-          const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-          accountId = selectedAccountId
-          accountType = selectedAccountType
-        }
-      } else {
-        // API Key认证模式：使用传统的统一调度选择账号
-        logger.info(`🔑 Using API Key-based account selection for key: ${req.apiKey.name}`)
-        const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+      // 使用统一调度选择账号（传递请求的模型）
+      const requestedModel = req.body.model
+      let accountId
+      let accountType
+      try {
+        const selection = await unifiedClaudeScheduler.selectAccountForApiKey(
           req.apiKey,
           sessionHash,
           requestedModel
         )
-        const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-        accountId = selectedAccountId
-        accountType = selectedAccountType
-      }
-
-      // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 流式请求）
-      if (accountId && (accountType === 'claude-official' || accountType === 'claude-console')) {
-        try {
-          const accountCostCheck = await costLimitService.checkAccountCostLimit(
-            accountId,
-            estimatedCost
+        ;({ accountId, accountType } = selection)
+      } catch (error) {
+        if (error.code === 'CLAUDE_DEDICATED_RATE_LIMITED') {
+          const limitMessage = claudeRelayService._buildStandardRateLimitMessage(
+            error.rateLimitEndAt
           )
-
-          if (!accountCostCheck.allowed) {
-            const violationResponse = costLimitService.formatViolationResponse(
-              accountCostCheck.violations
-            )
-
-            logger.security(
-              `💰 Account cost limit exceeded before stream request: ${accountId}, estimated: $${estimatedCost.toFixed(4)}`
-            )
-
-            return res.status(429).json({
-              ...violationResponse,
-              type: 'account_cost_limit',
-              accountId,
-              estimatedCost,
-              estimation: {
-                breakdown: costEstimation?.breakdown,
-                confidence: costEstimation?.confidence
-              }
+          res.status(403)
+          res.setHeader('Content-Type', 'application/json')
+          res.end(
+            JSON.stringify({
+              error: 'upstream_rate_limited',
+              message: limitMessage
             })
-          }
-
-          // 记录账户费用预警（如果有）
-          if (accountCostCheck.warnings && accountCostCheck.warnings.length > 0) {
-            logger.warn(
-              `💰 Account cost usage warning for stream request: ${accountId}, warnings: ${accountCostCheck.warnings.length}, estimated: $${estimatedCost.toFixed(4)}`
-            )
-          }
-        } catch (accountCostError) {
-          // 账户费用检查失败不应阻塞请求，但需要记录日志
-          logger.warn(
-            `⚠️ Account cost limit check failed for stream request ${accountId}: ${accountCostError.message}`
           )
+          return
         }
+        throw error
       }
 
       // 根据账号类型选择对应的转发服务并调用
@@ -364,10 +164,7 @@ async function handleMessagesRequest(req, res) {
               }
 
               const cacheReadTokens = usageData.cache_read_input_tokens || 0
-              const model =
-                (usageData.model && usageData.model.trim()) ||
-                (req.body.model && req.body.model.trim()) ||
-                'unknown'
+              const model = usageData.model || 'unknown'
 
               // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
               const { accountId: usageAccountId } = usageData
@@ -388,49 +185,43 @@ async function handleMessagesRequest(req, res) {
                 }
               }
 
-              // 记录使用统计 - 仅在有API Key时记录
-              if (req.apiKey) {
-                apiKeyService
-                  .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId)
-                  .catch((error) => {
-                    logger.error('❌ Failed to record stream usage (Claude Official):', error)
-                  })
-              } else if (req.user) {
-                logger.info(
-                  `👤 User session stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens (Claude Official)`
-                )
-              }
+              apiKeyService
+                .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId, 'claude')
+                .catch((error) => {
+                  logger.error('❌ Failed to record stream usage:', error)
+                })
 
-              // 更新时间窗口内的token计数
+              // 更新时间窗口内的token计数和费用
               if (req.rateLimitInfo) {
                 const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-                database
+
+                // 更新Token计数（向后兼容）
+                redis
                   .getClient()
                   .incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
                   .catch((error) => {
                     logger.error('❌ Failed to update rate limit token count:', error)
                   })
                 logger.api(`📊 Updated rate limit token count: +${totalTokens} tokens`)
+
+                // 计算并更新费用计数（新功能）
+                if (req.rateLimitInfo.costCountKey) {
+                  const costInfo = pricingService.calculateCost(usageData, model)
+                  if (costInfo.totalCost > 0) {
+                    redis
+                      .getClient()
+                      .incrbyfloat(req.rateLimitInfo.costCountKey, costInfo.totalCost)
+                      .catch((error) => {
+                        logger.error('❌ Failed to update rate limit cost count:', error)
+                      })
+                    logger.api(
+                      `💰 Updated rate limit cost count: +$${costInfo.totalCost.toFixed(6)}`
+                    )
+                  }
+                }
               }
 
               usageDataCaptured = true
-
-              // 💰 记录账户费用（异步，不阻塞主流程）
-              recordAccountCostAsync(usageAccountId, usageObject, model)
-
-              // 🔍 使用统一日志服务记录 (Claude Official)
-              if (shouldLogRequest) {
-                logger.info(`🚀 Logging with UnifiedLogService (Claude Official)`)
-                logRequestWithUnifiedService(req, res, usageData, startTime, usageAccountId).catch(
-                  (error) => {
-                    logger.error(
-                      '❌ UnifiedLogService logging failed (Claude Official):',
-                      error.message
-                    )
-                  }
-                )
-              }
-
               logger.api(
                 `📊 Stream usage recorded (real) - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Cache Create: ${cacheCreateTokens}, Cache Read: ${cacheReadTokens}, Total: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
               )
@@ -476,10 +267,7 @@ async function handleMessagesRequest(req, res) {
               }
 
               const cacheReadTokens = usageData.cache_read_input_tokens || 0
-              const model =
-                (usageData.model && usageData.model.trim()) ||
-                (req.body.model && req.body.model.trim()) ||
-                'unknown'
+              const model = usageData.model || 'unknown'
 
               // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
               const usageAccountId = usageData.accountId
@@ -500,49 +288,49 @@ async function handleMessagesRequest(req, res) {
                 }
               }
 
-              // 记录使用统计 - 仅在有API Key时记录
-              if (req.apiKey) {
-                apiKeyService
-                  .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId)
-                  .catch((error) => {
-                    logger.error('❌ Failed to record stream usage (Claude Console):', error)
-                  })
-              } else if (req.user) {
-                logger.info(
-                  `👤 User session stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens (Claude Console)`
+              apiKeyService
+                .recordUsageWithDetails(
+                  req.apiKey.id,
+                  usageObject,
+                  model,
+                  usageAccountId,
+                  'claude-console'
                 )
-              }
+                .catch((error) => {
+                  logger.error('❌ Failed to record stream usage:', error)
+                })
 
-              // 更新时间窗口内的token计数
+              // 更新时间窗口内的token计数和费用
               if (req.rateLimitInfo) {
                 const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-                database
+
+                // 更新Token计数（向后兼容）
+                redis
                   .getClient()
                   .incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
                   .catch((error) => {
                     logger.error('❌ Failed to update rate limit token count:', error)
                   })
                 logger.api(`📊 Updated rate limit token count: +${totalTokens} tokens`)
+
+                // 计算并更新费用计数（新功能）
+                if (req.rateLimitInfo.costCountKey) {
+                  const costInfo = pricingService.calculateCost(usageData, model)
+                  if (costInfo.totalCost > 0) {
+                    redis
+                      .getClient()
+                      .incrbyfloat(req.rateLimitInfo.costCountKey, costInfo.totalCost)
+                      .catch((error) => {
+                        logger.error('❌ Failed to update rate limit cost count:', error)
+                      })
+                    logger.api(
+                      `💰 Updated rate limit cost count: +$${costInfo.totalCost.toFixed(6)}`
+                    )
+                  }
+                }
               }
 
               usageDataCaptured = true
-
-              // 💰 记录账户费用（异步，不阻塞主流程）
-              recordAccountCostAsync(usageAccountId, usageObject, model)
-
-              // 🔍 使用统一日志服务记录 (Claude Console)
-              if (shouldLogRequest) {
-                logger.info(`🚀 Logging with UnifiedLogService (Claude Console)`)
-                logRequestWithUnifiedService(req, res, usageData, startTime, usageAccountId).catch(
-                  (error) => {
-                    logger.error(
-                      '❌ UnifiedLogService logging failed (Claude Console):',
-                      error.message
-                    )
-                  }
-                )
-              }
-
               logger.api(
                 `📊 Stream usage recorded (real) - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Cache Create: ${cacheCreateTokens}, Cache Read: ${cacheReadTokens}, Total: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
               )
@@ -574,37 +362,38 @@ async function handleMessagesRequest(req, res) {
             const inputTokens = result.usage.input_tokens || 0
             const outputTokens = result.usage.output_tokens || 0
 
-            // 记录Bedrock使用统计 - 仅在有API Key时记录
-            if (req.apiKey) {
-              apiKeyService
-                .recordUsage(
-                  req.apiKey.id,
-                  inputTokens,
-                  outputTokens,
-                  0,
-                  0,
-                  result.model,
-                  accountId
-                )
-                .catch((error) => {
-                  logger.error('❌ Failed to record Bedrock stream usage:', error)
-                })
-            } else if (req.user) {
-              logger.info(
-                `👤 User session Bedrock stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens} tokens`
-              )
-            }
+            apiKeyService
+              .recordUsage(req.apiKey.id, inputTokens, outputTokens, 0, 0, result.model, accountId)
+              .catch((error) => {
+                logger.error('❌ Failed to record Bedrock stream usage:', error)
+              })
 
-            // 更新时间窗口内的token计数
+            // 更新时间窗口内的token计数和费用
             if (req.rateLimitInfo) {
               const totalTokens = inputTokens + outputTokens
-              database
+
+              // 更新Token计数（向后兼容）
+              redis
                 .getClient()
                 .incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
                 .catch((error) => {
                   logger.error('❌ Failed to update rate limit token count:', error)
                 })
               logger.api(`📊 Updated rate limit token count: +${totalTokens} tokens`)
+
+              // 计算并更新费用计数（新功能）
+              if (req.rateLimitInfo.costCountKey) {
+                const costInfo = pricingService.calculateCost(result.usage, result.model)
+                if (costInfo.totalCost > 0) {
+                  redis
+                    .getClient()
+                    .incrbyfloat(req.rateLimitInfo.costCountKey, costInfo.totalCost)
+                    .catch((error) => {
+                      logger.error('❌ Failed to update rate limit cost count:', error)
+                    })
+                  logger.api(`💰 Updated rate limit cost count: +$${costInfo.totalCost.toFixed(6)}`)
+                }
+              }
             }
 
             usageDataCaptured = true
@@ -619,6 +408,110 @@ async function handleMessagesRequest(req, res) {
           }
           return undefined
         }
+      } else if (accountType === 'ccr') {
+        // CCR账号使用CCR转发服务（需要传递accountId）
+        await ccrRelayService.relayStreamRequestWithUsageCapture(
+          req.body,
+          req.apiKey,
+          res,
+          req.headers,
+          (usageData) => {
+            // 回调函数：当检测到完整usage数据时记录真实token使用量
+            logger.info(
+              '🎯 CCR usage callback triggered with complete data:',
+              JSON.stringify(usageData, null, 2)
+            )
+
+            if (
+              usageData &&
+              usageData.input_tokens !== undefined &&
+              usageData.output_tokens !== undefined
+            ) {
+              const inputTokens = usageData.input_tokens || 0
+              const outputTokens = usageData.output_tokens || 0
+              // 兼容处理：如果有详细的 cache_creation 对象，使用它；否则使用总的 cache_creation_input_tokens
+              let cacheCreateTokens = usageData.cache_creation_input_tokens || 0
+              let ephemeral5mTokens = 0
+              let ephemeral1hTokens = 0
+
+              if (usageData.cache_creation && typeof usageData.cache_creation === 'object') {
+                ephemeral5mTokens = usageData.cache_creation.ephemeral_5m_input_tokens || 0
+                ephemeral1hTokens = usageData.cache_creation.ephemeral_1h_input_tokens || 0
+                // 总的缓存创建 tokens 是两者之和
+                cacheCreateTokens = ephemeral5mTokens + ephemeral1hTokens
+              }
+
+              const cacheReadTokens = usageData.cache_read_input_tokens || 0
+              const model = usageData.model || 'unknown'
+
+              // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
+              const usageAccountId = usageData.accountId
+
+              // 构建 usage 对象以传递给 recordUsage
+              const usageObject = {
+                input_tokens: inputTokens,
+                output_tokens: outputTokens,
+                cache_creation_input_tokens: cacheCreateTokens,
+                cache_read_input_tokens: cacheReadTokens
+              }
+
+              // 如果有详细的缓存创建数据，添加到 usage 对象中
+              if (ephemeral5mTokens > 0 || ephemeral1hTokens > 0) {
+                usageObject.cache_creation = {
+                  ephemeral_5m_input_tokens: ephemeral5mTokens,
+                  ephemeral_1h_input_tokens: ephemeral1hTokens
+                }
+              }
+
+              apiKeyService
+                .recordUsageWithDetails(req.apiKey.id, usageObject, model, usageAccountId, 'ccr')
+                .catch((error) => {
+                  logger.error('❌ Failed to record CCR stream usage:', error)
+                })
+
+              // 更新时间窗口内的token计数和费用
+              if (req.rateLimitInfo) {
+                const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+
+                // 更新Token计数（向后兼容）
+                redis
+                  .getClient()
+                  .incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
+                  .catch((error) => {
+                    logger.error('❌ Failed to update rate limit token count:', error)
+                  })
+                logger.api(`📊 Updated rate limit token count: +${totalTokens} tokens`)
+
+                // 计算并更新费用计数（新功能）
+                if (req.rateLimitInfo.costCountKey) {
+                  const costInfo = pricingService.calculateCost(usageData, model)
+                  if (costInfo.totalCost > 0) {
+                    redis
+                      .getClient()
+                      .incrbyfloat(req.rateLimitInfo.costCountKey, costInfo.totalCost)
+                      .catch((error) => {
+                        logger.error('❌ Failed to update rate limit cost count:', error)
+                      })
+                    logger.api(
+                      `💰 Updated rate limit cost count: +$${costInfo.totalCost.toFixed(6)}`
+                    )
+                  }
+                }
+              }
+
+              usageDataCaptured = true
+              logger.api(
+                `📊 CCR stream usage recorded (real) - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Cache Create: ${cacheCreateTokens}, Cache Read: ${cacheReadTokens}, Total: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
+              )
+            } else {
+              logger.warn(
+                '⚠️ CCR usage callback triggered but data is incomplete:',
+                JSON.stringify(usageData)
+              )
+            }
+          },
+          accountId
+        )
       }
 
       // 流式请求完成后 - 如果没有捕获到usage数据，记录警告但不进行估算
@@ -639,112 +532,36 @@ async function handleMessagesRequest(req, res) {
       // 生成会话哈希用于sticky会话
       const sessionHash = sessionHelper.generateSessionHash(req.body)
 
-      // 🎯 智能账户选择：优先使用用户组调度，否则使用API Key调度
-      let accountId, accountType
-
-      // 检查是否有用户上下文（用户会话认证）
-      if (req.user && req.user.id) {
-        logger.info(
-          `👤 Using user-based account selection for user: ${req.user.username} (${req.user.id})`
-        )
-        try {
-          // 使用claudeAccountService的组调度功能
-          const localClaudeAccountService = require('../services/claudeAccountService')
-          const groupAccountId = await localClaudeAccountService.selectAccountByGroup(req.user.id, {
-            sessionHash,
-            modelName: requestedModel
-          })
-
-          if (groupAccountId) {
-            logger.success(`🎯 Selected group-based Claude account: ${groupAccountId}`)
-            accountId = groupAccountId
-            accountType = 'claude-official'
-          } else {
-            logger.info(
-              `⚠️ No group-based account found for user ${req.user.username}, using API Key fallback`
-            )
-            // 回退到API Key调度
-            const result = await unifiedClaudeScheduler.selectAccountForApiKey(
-              req.apiKey,
-              sessionHash,
-              requestedModel
-            )
-            const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-            accountId = selectedAccountId
-            accountType = selectedAccountType
-          }
-        } catch (groupError) {
-          logger.warn(
-            `⚠️ Group-based account selection failed: ${groupError.message}, using API Key fallback`
-          )
-          // 回退到API Key调度
-          const result = await unifiedClaudeScheduler.selectAccountForApiKey(
-            req.apiKey,
-            sessionHash,
-            requestedModel
-          )
-          const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-          accountId = selectedAccountId
-          accountType = selectedAccountType
-        }
-      } else {
-        // API Key认证模式：使用传统的统一调度选择账号
-        logger.info(`🔑 Using API Key-based account selection for key: ${req.apiKey.name}`)
-        const result = await unifiedClaudeScheduler.selectAccountForApiKey(
+      // 使用统一调度选择账号（传递请求的模型）
+      const requestedModel = req.body.model
+      let accountId
+      let accountType
+      try {
+        const selection = await unifiedClaudeScheduler.selectAccountForApiKey(
           req.apiKey,
           sessionHash,
           requestedModel
         )
-        const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-        accountId = selectedAccountId
-        accountType = selectedAccountType
-      }
-
-      // 💰 执行账户级别的费用限制检查（P1.2 核心功能 - 非流式请求）
-      if (accountId && (accountType === 'claude-official' || accountType === 'claude-console')) {
-        try {
-          const accountCostCheck = await costLimitService.checkAccountCostLimit(
-            accountId,
-            estimatedCost
+        ;({ accountId, accountType } = selection)
+      } catch (error) {
+        if (error.code === 'CLAUDE_DEDICATED_RATE_LIMITED') {
+          const limitMessage = claudeRelayService._buildStandardRateLimitMessage(
+            error.rateLimitEndAt
           )
-
-          if (!accountCostCheck.allowed) {
-            const violationResponse = costLimitService.formatViolationResponse(
-              accountCostCheck.violations
-            )
-
-            logger.security(
-              `💰 Account cost limit exceeded before non-stream request: ${accountId}, estimated: $${estimatedCost.toFixed(4)}`
-            )
-
-            return res.status(429).json({
-              ...violationResponse,
-              type: 'account_cost_limit',
-              accountId,
-              estimatedCost,
-              estimation: {
-                breakdown: costEstimation?.breakdown,
-                confidence: costEstimation?.confidence
-              }
-            })
-          }
-
-          // 记录账户费用预警（如果有）
-          if (accountCostCheck.warnings && accountCostCheck.warnings.length > 0) {
-            logger.warn(
-              `💰 Account cost usage warning for non-stream request: ${accountId}, warnings: ${accountCostCheck.warnings.length}, estimated: $${estimatedCost.toFixed(4)}`
-            )
-          }
-        } catch (accountCostError) {
-          // 账户费用检查失败不应阻塞请求，但需要记录日志
-          logger.warn(
-            `⚠️ Account cost limit check failed for non-stream request ${accountId}: ${accountCostError.message}`
-          )
+          return res.status(403).json({
+            error: 'upstream_rate_limited',
+            message: limitMessage
+          })
         }
+        throw error
       }
 
       // 根据账号类型选择对应的转发服务
       let response
+      logger.debug(`[DEBUG] Request query params: ${JSON.stringify(req.query)}`)
+      logger.debug(`[DEBUG] Request URL: ${req.url}`)
+      logger.debug(`[DEBUG] Request path: ${req.path}`)
+
       if (accountType === 'claude-official') {
         // 官方Claude账号使用原有的转发服务
         response = await claudeRelayService.relayRequest(
@@ -755,6 +572,10 @@ async function handleMessagesRequest(req, res) {
           req.headers
         )
       } else if (accountType === 'claude-console') {
+        // Claude Console账号使用Console转发服务
+        logger.debug(
+          `[DEBUG] Calling claudeConsoleRelayService.relayRequest with accountId: ${accountId}`
+        )
         response = await claudeConsoleRelayService.relayRequest(
           req.body,
           req.apiKey,
@@ -800,6 +621,17 @@ async function handleMessagesRequest(req, res) {
             accountId
           }
         }
+      } else if (accountType === 'ccr') {
+        // CCR账号使用CCR转发服务
+        logger.debug(`[DEBUG] Calling ccrRelayService.relayRequest with accountId: ${accountId}`)
+        response = await ccrRelayService.relayRequest(
+          req.body,
+          req.apiKey,
+          req,
+          res,
+          req.headers,
+          accountId
+        )
       }
 
       logger.info('📡 Claude API response received', {
@@ -836,49 +668,44 @@ async function handleMessagesRequest(req, res) {
           const outputTokens = jsonData.usage.output_tokens || 0
           const cacheCreateTokens = jsonData.usage.cache_creation_input_tokens || 0
           const cacheReadTokens = jsonData.usage.cache_read_input_tokens || 0
-          const model =
-            (jsonData.model && jsonData.model.trim()) ||
-            (req.body.model && req.body.model.trim()) ||
-            'unknown'
+          // Parse the model to remove vendor prefix if present (e.g., "ccr,gemini-2.5-pro" -> "gemini-2.5-pro")
+          const rawModel = jsonData.model || req.body.model || 'unknown'
+          const { baseModel } = parseVendorPrefixedModel(rawModel)
+          const model = baseModel || rawModel
 
           // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
           const { accountId: responseAccountId } = response
+          await apiKeyService.recordUsage(
+            req.apiKey.id,
+            inputTokens,
+            outputTokens,
+            cacheCreateTokens,
+            cacheReadTokens,
+            model,
+            responseAccountId
+          )
 
-          // 记录使用统计 - 仅在有API Key时记录
-          if (req.apiKey) {
-            await apiKeyService.recordUsage(
-              req.apiKey.id,
-              inputTokens,
-              outputTokens,
-              cacheCreateTokens,
-              cacheReadTokens,
-              model,
-              responseAccountId
-            )
-          } else if (req.user) {
-            logger.info(
-              `👤 User session non-stream usage recorded for user ${req.user.username}: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
-            )
-          }
-
-          // 更新时间窗口内的token计数
+          // 更新时间窗口内的token计数和费用
           if (req.rateLimitInfo) {
             const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
-            await database.getClient().incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
+
+            // 更新Token计数（向后兼容）
+            await redis.getClient().incrby(req.rateLimitInfo.tokenCountKey, totalTokens)
             logger.api(`📊 Updated rate limit token count: +${totalTokens} tokens`)
+
+            // 计算并更新费用计数（新功能）
+            if (req.rateLimitInfo.costCountKey) {
+              const costInfo = pricingService.calculateCost(jsonData.usage, model)
+              if (costInfo.totalCost > 0) {
+                await redis
+                  .getClient()
+                  .incrbyfloat(req.rateLimitInfo.costCountKey, costInfo.totalCost)
+                logger.api(`💰 Updated rate limit cost count: +$${costInfo.totalCost.toFixed(6)}`)
+              }
+            }
           }
 
           usageRecorded = true
-
-          // 💰 记录账户费用（异步，不阻塞主流程）
-          const nonStreamUsageObject = {
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            cache_creation_input_tokens: cacheCreateTokens,
-            cache_read_input_tokens: cacheReadTokens
-          }
-          recordAccountCostAsync(responseAccountId, nonStreamUsageObject, model)
-
           logger.api(
             `📊 Non-stream usage recorded (real) - Model: ${model}, Input: ${inputTokens}, Output: ${outputTokens}, Cache Create: ${cacheCreateTokens}, Cache Read: ${cacheReadTokens}, Total: ${inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens} tokens`
           )
@@ -902,96 +729,13 @@ async function handleMessagesRequest(req, res) {
     }
 
     const duration = Date.now() - startTime
-    logger.api(`✅ Request completed in ${duration}ms for ${authInfo}`)
-
-    // 请求完成后的日志记录
-    if (shouldLogRequest) {
-      try {
-        const logEntry = {
-          keyId: req.apiKey?.id || 'user_session',
-          method: req.method,
-          path: req.path,
-          statusCode: res.statusCode || 200,
-          responseTime: duration,
-          userAgent: req.get('User-Agent') || '',
-          ipAddress: req.ip || req.connection.remoteAddress || '',
-          model: req.body.model || 'unknown',
-          tokens: 0, // Token信息从usage统计中获取，这里设为0
-          inputTokens: 0,
-          outputTokens: 0,
-          error: null
-        }
-
-        // 🔧 使用统一日志服务记录完成的请求
-        try {
-          const logService = await getUnifiedLogService()
-          const keyId = req.apiKey?.id || 'user_session'
-          await logService.logRequest(keyId, logEntry)
-          logger.debug(`📝 Request completed and logged successfully for ${authInfo}`)
-        } catch (logError) {
-          logger.warn(`⚠️ UnifiedLogService logging failed for ${authInfo}:`, logError.message)
-        }
-      } catch (loggingError) {
-        logger.warn('⚠️ Request logging failed:', loggingError.message)
-        // 不影响响应，只记录警告
-      }
-    }
-
+    logger.api(`✅ Request completed in ${duration}ms for key: ${req.apiKey.name}`)
     return undefined
   } catch (error) {
-    const duration = Date.now() - startTime
     logger.error('❌ Claude relay error:', error.message, {
       code: error.code,
       stack: error.stack
     })
-
-    // 错误情况下的日志记录
-    // 🔧 UnifiedLogService 处理错误请求，默认启用
-    const shouldLogError = true
-
-    if (shouldLogError) {
-      try {
-        const logEntry = {
-          keyId: req.apiKey?.id || 'user_session',
-          method: req.method,
-          path: req.path,
-          statusCode: 500, // 错误状态码
-          responseTime: duration,
-          userAgent: req.get('User-Agent') || '',
-          ipAddress: req.ip || req.connection.remoteAddress || '',
-          model: req.body?.model || 'unknown',
-          tokens: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          error: error.message || 'An unexpected error occurred'
-        }
-
-        // 🔧 使用统一日志服务记录错误请求
-        try {
-          const logService = await getUnifiedLogService()
-          const keyId = req.apiKey?.id || 'user_session'
-          await logService.logRequest(keyId, logEntry)
-          const errorAuthInfo = req.apiKey
-            ? `key: ${req.apiKey.name}`
-            : req.user
-              ? `user: ${req.user.username}`
-              : 'unknown'
-          logger.debug(`📝 Error request logged successfully for ${errorAuthInfo}`)
-        } catch (logError) {
-          const errorAuthInfo = req.apiKey
-            ? `key: ${req.apiKey.name}`
-            : req.user
-              ? `user: ${req.user.username}`
-              : 'unknown'
-          logger.warn(
-            `⚠️ UnifiedLogService error logging failed for ${errorAuthInfo}:`,
-            logError.message
-          )
-        }
-      } catch (loggingError) {
-        logger.warn('⚠️ Error request logging failed:', loggingError.message)
-      }
-    }
 
     // 确保在任何情况下都能返回有效的JSON响应
     if (!res.headersSent) {
@@ -1028,14 +772,14 @@ async function handleMessagesRequest(req, res) {
   }
 }
 
-// 🚀 Claude API messages 端点 - /api/v1/messages (支持智能双重认证)
-router.post('/v1/messages', authenticateDual, handleMessagesRequest)
+// 🚀 Claude API messages 端点 - /api/v1/messages
+router.post('/v1/messages', authenticateApiKey, handleMessagesRequest)
 
 // 🚀 Claude API messages 端点 - /claude/v1/messages (别名)
-router.post('/claude/v1/messages', authenticateDual, handleMessagesRequest)
+router.post('/claude/v1/messages', authenticateApiKey, handleMessagesRequest)
 
-// 📋 模型列表端点 - Claude Code 客户端需要 (支持智能双重认证)
-router.get('/v1/models', authenticateDual, async (req, res) => {
+// 📋 模型列表端点 - Claude Code 客户端需要
+router.get('/v1/models', authenticateApiKey, async (req, res) => {
   try {
     // 返回支持的模型列表
     const models = [
@@ -1100,85 +844,42 @@ router.get('/health', async (req, res) => {
   }
 })
 
-// 📊 API Key状态检查端点 - /api/v1/key-info (支持智能双重认证)
-router.get('/v1/key-info', authenticateDual, async (req, res) => {
+// 📊 API Key状态检查端点 - /api/v1/key-info
+router.get('/v1/key-info', authenticateApiKey, async (req, res) => {
   try {
-    if (req.apiKey) {
-      // API Key认证模式
-      const usage = await apiKeyService.getUsageStats(req.apiKey.id)
+    const usage = await apiKeyService.getUsageStats(req.apiKey.id)
 
-      res.json({
-        keyInfo: {
-          id: req.apiKey.id,
-          name: req.apiKey.name,
-          tokenLimit: req.apiKey.tokenLimit,
-          usage
-        },
-        timestamp: new Date().toISOString()
-      })
-    } else if (req.user) {
-      // 用户会话认证模式
-      res.json({
-        userInfo: {
-          id: req.user.id,
-          username: req.user.username,
-          fullName: req.user.fullName,
-          role: req.user.role,
-          groups: req.user.groups || []
-        },
-        timestamp: new Date().toISOString()
-      })
-    } else {
-      res.status(401).json({
-        error: 'Authentication required',
-        message: 'No valid authentication method found'
-      })
-    }
+    res.json({
+      keyInfo: {
+        id: req.apiKey.id,
+        name: req.apiKey.name,
+        tokenLimit: req.apiKey.tokenLimit,
+        usage
+      },
+      timestamp: new Date().toISOString()
+    })
   } catch (error) {
-    logger.error('❌ Key/User info error:', error)
+    logger.error('❌ Key info error:', error)
     res.status(500).json({
-      error: 'Failed to get authentication info',
+      error: 'Failed to get key info',
       message: error.message
     })
   }
 })
 
-// 📈 使用统计端点 - /api/v1/usage (支持智能双重认证)
-router.get('/v1/usage', authenticateDual, async (req, res) => {
+// 📈 使用统计端点 - /api/v1/usage
+router.get('/v1/usage', authenticateApiKey, async (req, res) => {
   try {
-    if (req.apiKey) {
-      // API Key认证模式
-      const usage = await apiKeyService.getUsageStats(req.apiKey.id)
+    const usage = await apiKeyService.getUsageStats(req.apiKey.id)
 
-      res.json({
-        usage,
-        limits: {
-          tokens: req.apiKey.tokenLimit,
-          requests: 0 // 请求限制已移除
-        },
-        timestamp: new Date().toISOString()
-      })
-    } else if (req.user) {
-      // 用户会话认证模式 - 返回用户级别的使用统计
-      res.json({
-        usage: {
-          totalTokens: 0, // TODO: 实现用户级别的token统计
-          totalRequests: 0,
-          lastUsed: null
-        },
-        userInfo: {
-          id: req.user.id,
-          username: req.user.username,
-          role: req.user.role
-        },
-        timestamp: new Date().toISOString()
-      })
-    } else {
-      res.status(401).json({
-        error: 'Authentication required',
-        message: 'No valid authentication method found'
-      })
-    }
+    res.json({
+      usage,
+      limits: {
+        tokens: req.apiKey.tokenLimit,
+        requests: 0 // 请求限制已移除
+      },
+      timestamp: new Date().toISOString()
+    })
   } catch (error) {
     logger.error('❌ Usage stats error:', error)
     res.status(500).json({
@@ -1188,34 +889,16 @@ router.get('/v1/usage', authenticateDual, async (req, res) => {
   }
 })
 
-// 👤 用户信息端点 - Claude Code 客户端需要 (支持智能双重认证)
-router.get('/v1/me', authenticateDual, async (req, res) => {
+// 👤 用户信息端点 - Claude Code 客户端需要
+router.get('/v1/me', authenticateApiKey, async (req, res) => {
   try {
-    if (req.apiKey) {
-      // API Key认证模式 - 返回模拟用户信息
-      res.json({
-        id: `user_${req.apiKey.id}`,
-        type: 'user',
-        display_name: req.apiKey.name || 'API User',
-        created_at: new Date().toISOString()
-      })
-    } else if (req.user) {
-      // 用户会话认证模式 - 返回真实用户信息
-      res.json({
-        id: req.user.id,
-        type: 'user',
-        display_name: req.user.fullName || req.user.username,
-        username: req.user.username,
-        email: req.user.email,
-        role: req.user.role,
-        created_at: new Date().toISOString()
-      })
-    } else {
-      res.status(401).json({
-        error: 'Authentication required',
-        message: 'No valid authentication method found'
-      })
-    }
+    // 返回基础用户信息
+    res.json({
+      id: `user_${req.apiKey.id}`,
+      type: 'user',
+      display_name: req.apiKey.name || 'API User',
+      created_at: new Date().toISOString()
+    })
   } catch (error) {
     logger.error('❌ User info error:', error)
     res.status(500).json({
@@ -1225,39 +908,20 @@ router.get('/v1/me', authenticateDual, async (req, res) => {
   }
 })
 
-// 💰 余额/限制端点 - Claude Code 客户端需要 (支持智能双重认证)
-router.get('/v1/organizations/:org_id/usage', authenticateDual, async (req, res) => {
+// 💰 余额/限制端点 - Claude Code 客户端需要
+router.get('/v1/organizations/:org_id/usage', authenticateApiKey, async (req, res) => {
   try {
-    if (req.apiKey) {
-      // API Key认证模式
-      const usage = await apiKeyService.getUsageStats(req.apiKey.id)
+    const usage = await apiKeyService.getUsageStats(req.apiKey.id)
 
-      res.json({
-        object: 'usage',
-        data: [
-          {
-            type: 'credit_balance',
-            credit_balance: req.apiKey.tokenLimit - (usage.totalTokens || 0)
-          }
-        ]
-      })
-    } else if (req.user) {
-      // 用户会话认证模式 - 返回无限制的信用
-      res.json({
-        object: 'usage',
-        data: [
-          {
-            type: 'credit_balance',
-            credit_balance: 999999999 // 用户会话模式下提供充足的信用额度
-          }
-        ]
-      })
-    } else {
-      res.status(401).json({
-        error: 'Authentication required',
-        message: 'No valid authentication method found'
-      })
-    }
+    res.json({
+      object: 'usage',
+      data: [
+        {
+          type: 'credit_balance',
+          credit_balance: req.apiKey.tokenLimit - (usage.totalTokens || 0)
+        }
+      ]
+    })
   } catch (error) {
     logger.error('❌ Organization usage error:', error)
     res.status(500).json({
@@ -1267,108 +931,35 @@ router.get('/v1/organizations/:org_id/usage', authenticateDual, async (req, res)
   }
 })
 
-// 🔢 Token计数端点 - count_tokens beta API (支持智能双重认证)
-router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
+// 🔢 Token计数端点 - count_tokens beta API
+router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) => {
   try {
-    // 检查权限 - 仅对API Key认证进行权限检查
-    if (req.apiKey) {
-      if (
-        req.apiKey.permissions &&
-        req.apiKey.permissions !== 'all' &&
-        req.apiKey.permissions !== 'claude'
-      ) {
-        return res.status(403).json({
-          error: {
-            type: 'permission_error',
-            message: 'This API key does not have permission to access Claude'
-          }
-        })
-      }
-      logger.info(`🔢 Processing token count request for key: ${req.apiKey.name}`)
-    } else if (req.user) {
-      logger.info(`🔢 Processing token count request for user: ${req.user.username}`)
-    } else {
-      return res.status(401).json({
+    // 检查权限
+    if (
+      req.apiKey.permissions &&
+      req.apiKey.permissions !== 'all' &&
+      req.apiKey.permissions !== 'claude'
+    ) {
+      return res.status(403).json({
         error: {
-          type: 'authentication_error',
-          message: 'Authentication required'
+          type: 'permission_error',
+          message: 'This API key does not have permission to access Claude'
         }
       })
     }
 
+    logger.info(`🔢 Processing token count request for key: ${req.apiKey.name}`)
+
     // 生成会话哈希用于sticky会话
     const sessionHash = sessionHelper.generateSessionHash(req.body)
 
-    // 智能账户选择：优先使用用户组调度，否则使用API Key调度
+    // 选择可用的Claude账户
     const requestedModel = req.body.model
-    let accountId, accountType
-
-    // 检查是否有用户上下文（用户会话认证）
-    if (req.user && req.user.id) {
-      logger.info(
-        `👤 Using user-based account selection for count_tokens, user: ${req.user.username}`
-      )
-      try {
-        const localClaudeService = require('../services/claudeAccountService')
-        const groupAccountId = await localClaudeService.selectAccountByGroup(req.user.id, {
-          sessionHash,
-          modelName: requestedModel
-        })
-
-        if (groupAccountId) {
-          logger.success(`🎯 Selected group-based account for count_tokens: ${groupAccountId}`)
-          accountId = groupAccountId
-          accountType = 'claude-official'
-        } else {
-          logger.info(
-            `⚠️ No group-based account found for user ${req.user.username}, using API Key fallback`
-          )
-          // 回退到API Key调度（如果有API Key）
-          if (req.apiKey) {
-            const result = await unifiedClaudeScheduler.selectAccountForApiKey(
-              req.apiKey,
-              sessionHash,
-              requestedModel
-            )
-            const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-            accountId = selectedAccountId
-            accountType = selectedAccountType
-          } else {
-            throw new Error('No available accounts for count_tokens request')
-          }
-        }
-      } catch (groupError) {
-        logger.warn(
-          `⚠️ Group-based account selection failed for count_tokens: ${groupError.message}`
-        )
-        // 回退到API Key调度（如果有API Key）
-        if (req.apiKey) {
-          const result = await unifiedClaudeScheduler.selectAccountForApiKey(
-            req.apiKey,
-            sessionHash,
-            requestedModel
-          )
-          const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-          accountId = selectedAccountId
-          accountType = selectedAccountType
-        } else {
-          throw new Error('No available accounts for count_tokens request')
-        }
-      }
-    } else if (req.apiKey) {
-      // API Key认证模式：使用传统的统一调度选择账号
-      logger.info(`🔑 Using API Key-based account selection for count_tokens: ${req.apiKey.name}`)
-      const result = await unifiedClaudeScheduler.selectAccountForApiKey(
-        req.apiKey,
-        sessionHash,
-        requestedModel
-      )
-      const { accountId: selectedAccountId, accountType: selectedAccountType } = result
-      accountId = selectedAccountId
-      accountType = selectedAccountType
-    } else {
-      throw new Error('No authentication method available for count_tokens request')
-    }
+    const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
+      req.apiKey,
+      sessionHash,
+      requestedModel
+    )
 
     let response
     if (accountType === 'claude-official') {
@@ -1398,6 +989,14 @@ router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
           customPath: '/v1/messages/count_tokens' // 指定count_tokens路径
         }
       )
+    } else if (accountType === 'ccr') {
+      // CCR不支持count_tokens
+      return res.status(501).json({
+        error: {
+          type: 'not_supported',
+          message: 'Token counting is not supported for CCR accounts'
+        }
+      })
     } else {
       // Bedrock不支持count_tokens
       return res.status(501).json({
@@ -1427,12 +1026,7 @@ router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
       res.send(response.body)
     }
 
-    const authInfo = req.apiKey
-      ? `key: ${req.apiKey.name}`
-      : req.user
-        ? `user: ${req.user.username}`
-        : 'unknown'
-    logger.info(`✅ Token count request completed for ${authInfo}`)
+    logger.info(`✅ Token count request completed for key: ${req.apiKey.name}`)
   } catch (error) {
     logger.error('❌ Token count error:', error)
     res.status(500).json({
@@ -1445,3 +1039,4 @@ router.post('/v1/messages/count_tokens', authenticateDual, async (req, res) => {
 })
 
 module.exports = router
+module.exports.handleMessagesRequest = handleMessagesRequest

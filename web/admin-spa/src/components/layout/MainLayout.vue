@@ -1,24 +1,7 @@
 <template>
   <div class="min-h-screen p-3 sm:p-4 md:p-6">
-    <!-- Session Manager for authenticated pages (不显示 indicator，在 AppHeader 中显示) -->
-    <SessionManager
-      :auto-refresh="true"
-      :expires-at="authStore.expiresAt"
-      :session-token="authStore.sessionToken"
-      :show-indicator="false"
-      :show-status-text="false"
-      @logout="handleLogout"
-      @refresh-failed="handleRefreshFailed"
-      @session-expired="handleSessionExpired"
-      @session-refreshed="handleSessionRefresh"
-    />
-
     <!-- 顶部导航 -->
-    <AppHeader
-      :session-token="authStore.sessionToken"
-      :expires-at="authStore.expiresAt"
-      @logout="handleLogout"
-    />
+    <AppHeader />
 
     <!-- 主内容区域 -->
     <div
@@ -37,12 +20,11 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import AppHeader from './AppHeader.vue'
 import TabBar from './TabBar.vue'
-import SessionManager from '@/components/auth/SessionManager.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,22 +33,30 @@ const authStore = useAuthStore()
 // 根据路由设置当前激活的标签
 const activeTab = ref('dashboard')
 
-const tabRouteMap = {
-  dashboard: '/dashboard',
-  apiKeys: '/api-keys',
-  accounts: '/accounts',
-  users: '/users',
-  groups: '/groups',
-  'user-groups': '/user-groups',
-  requestLogs: '/request-logs',
-  tutorial: '/tutorial',
-  settings: '/settings'
-}
+// 根据 LDAP 配置动态生成路由映射
+const tabRouteMap = computed(() => {
+  const baseMap = {
+    dashboard: '/dashboard',
+    apiKeys: '/api-keys',
+    accounts: '/accounts',
+    tutorial: '/tutorial',
+    settings: '/settings'
+  }
+
+  // 只有在 LDAP 启用时才包含用户管理路由
+  if (authStore.oemSettings?.ldapEnabled) {
+    baseMap.userManagement = '/user-management'
+  }
+
+  return baseMap
+})
 
 // 初始化当前激活的标签
 const initActiveTab = () => {
   const currentPath = route.path
-  const tabKey = Object.keys(tabRouteMap).find((key) => tabRouteMap[key] === currentPath)
+  const tabKey = Object.keys(tabRouteMap.value).find(
+    (key) => tabRouteMap.value[key] === currentPath
+  )
 
   if (tabKey) {
     activeTab.value = tabKey
@@ -77,10 +67,6 @@ const initActiveTab = () => {
       Dashboard: 'dashboard',
       ApiKeys: 'apiKeys',
       Accounts: 'accounts',
-      Users: 'users',
-      Groups: 'groups',
-      UserGroups: 'user-groups',
-      DataManagement: 'data-management',
       Tutorial: 'tutorial',
       Settings: 'settings'
     }
@@ -100,7 +86,7 @@ initActiveTab()
 watch(
   () => route.path,
   (newPath) => {
-    const tabKey = Object.keys(tabRouteMap).find((key) => tabRouteMap[key] === newPath)
+    const tabKey = Object.keys(tabRouteMap.value).find((key) => tabRouteMap.value[key] === newPath)
     if (tabKey) {
       activeTab.value = tabKey
     } else {
@@ -110,10 +96,6 @@ watch(
         Dashboard: 'dashboard',
         ApiKeys: 'apiKeys',
         Accounts: 'accounts',
-        Users: 'users',
-        Groups: 'groups',
-        UserGroups: 'user-groups',
-        DataManagement: 'data-management',
         Tutorial: 'tutorial',
         Settings: 'settings'
       }
@@ -127,7 +109,7 @@ watch(
 // 处理标签切换
 const handleTabChange = async (tabKey) => {
   // 如果已经在目标路由，不需要做任何事
-  if (tabRouteMap[tabKey] === route.path) {
+  if (tabRouteMap.value[tabKey] === route.path) {
     return
   }
 
@@ -136,7 +118,7 @@ const handleTabChange = async (tabKey) => {
 
   // 使用 await 确保路由切换完成
   try {
-    await router.push(tabRouteMap[tabKey])
+    await router.push(tabRouteMap.value[tabKey])
     // 等待下一个DOM更新周期，确保组件正确渲染
     await nextTick()
   } catch (err) {
@@ -147,32 +129,6 @@ const handleTabChange = async (tabKey) => {
       initActiveTab()
     }
   }
-}
-
-// Session management handlers
-const handleSessionRefresh = async () => {
-  try {
-    const success = await authStore.refreshSession()
-    if (!success) {
-      console.warn('Session refresh failed in MainLayout')
-    }
-  } catch (error) {
-    console.error('Session refresh error in MainLayout:', error)
-  }
-}
-
-const handleSessionExpired = () => {
-  console.warn('Session expired in MainLayout')
-  authStore.clearAuthState()
-}
-
-const handleRefreshFailed = (error) => {
-  console.error('Session refresh failed in MainLayout:', error)
-  authStore.clearAuthState()
-}
-
-const handleLogout = () => {
-  authStore.logout()
 }
 
 // OEM设置已在App.vue中加载，无需重复加载
