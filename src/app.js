@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs')
 const config = require('../config/config')
 const logger = require('./utils/logger')
 const redis = require('./models/redis')
+const database = require('./models/database')
 const pricingService = require('./services/pricingService')
 const cacheMonitor = require('./utils/cacheMonitor')
 
@@ -45,10 +46,15 @@ class Application {
 
   async initialize() {
     try {
-      // 🔗 连接Redis
-      logger.info('🔄 Connecting to Redis...')
+      // 🔗 连接Redis（老版本客户端）
+      logger.info('🔄 Connecting to Redis (legacy client)...')
       await redis.connect()
-      logger.success('✅ Redis connected successfully')
+      logger.success('✅ Redis legacy client connected successfully')
+
+      // 🔗 初始化数据库抽象层（新版本）
+      logger.info('🔄 Initializing database abstraction layer...')
+      await database.connect()
+      logger.success('✅ Database abstraction layer initialized successfully')
 
       // 💰 初始化价格服务
       logger.info('🔄 Initializing pricing service...')

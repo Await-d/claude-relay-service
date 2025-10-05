@@ -468,7 +468,15 @@ const databaseProxy = new Proxy(
               const result = databaseManager.instance[prop].apply(databaseManager.instance, args)
               return result
             } else {
-              logger.warn(`⚠️ Database not initialized, ${prop} returning null`)
+              const errorMsg = `⚠️ Database not initialized, ${prop} returning null`
+              logger.warn(errorMsg)
+              
+              // 对于 getClientSafe，我们应该抛出错误而不是返回 null
+              if (prop === 'getClientSafe') {
+                logger.error('❌ getClientSafe called before database initialization')
+                throw new Error('Database client is not initialized. Please ensure database.connect() is called during application startup.')
+              }
+              
               return null
             }
           } catch (error) {
