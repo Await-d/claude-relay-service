@@ -15,6 +15,10 @@ logs/
 # Data files
 data/
 temp/
+redis_data/
+mongodb_data/
+postgres_data/
+mysql_data/
 
 # Git
 .git/
