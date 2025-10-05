@@ -41,17 +41,6 @@ class WebhookNotifier {
    * @param {string} eventType - 事件类型
    * @param {Object} data - 事件数据
    */
-  async sendAccountEvent(eventType, data = {}) {
-    try {
-      await webhookService.sendNotification('accountEvent', {
-        eventType,
-        ...data,
-        timestamp: data.timestamp || getISOStringWithTimezone(new Date())
-      })
-    } catch (error) {
-      logger.error(`Failed to send account event (${eventType}):`, error)
-    }
-  }
 
   /**
    * 测试Webhook连通性（兼容旧接口）

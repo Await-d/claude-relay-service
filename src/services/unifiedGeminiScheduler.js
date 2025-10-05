@@ -3,6 +3,7 @@ const accountGroupService = require('./accountGroupService')
 const database = require('../models/database')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
+const redis = require('../models/redis')
 
 class UnifiedGeminiScheduler {
   constructor() {

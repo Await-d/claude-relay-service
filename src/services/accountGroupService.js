@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid')
 const logger = require('../utils/logger')
 const database = require('../models/database')
+const redis = require('../models/redis')
 const schedulingValidator = require('../utils/schedulingValidator')
 
 class AccountGroupService {
