@@ -3695,7 +3695,6 @@ import OAuthFlow from './OAuthFlow.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import GroupManagementModal from './GroupManagementModal.vue'
 import ApiKeyManagementModal from './ApiKeyManagementModal.vue'
-import RateLimitConfig from '@/components/common/RateLimitConfig.vue'
 
 const props = defineProps({
   account: {

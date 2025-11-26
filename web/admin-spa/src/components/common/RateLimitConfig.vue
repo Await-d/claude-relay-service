@@ -24,11 +24,11 @@
           >限流时间 (分钟)</label
         >
         <input
-          :value="duration"
           class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
           min="1"
           placeholder="默认60分钟"
           type="number"
+          :value="duration"
           @input="$emit('update:duration', parseInt($event.target.value) || 60)"
         />
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
