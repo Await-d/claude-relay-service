@@ -1511,8 +1511,40 @@
                 </p>
               </div>
 
-              <!-- 限流时长字段 - 隐藏不显示，使用默认值60 -->
-              <input v-model.number="form.rateLimitDuration" type="hidden" value="60" />
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >限流机制</label
+                >
+                <div class="mb-3">
+                  <label class="inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="form.enableRateLimit"
+                      class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                      type="checkbox"
+                    />
+                    <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    启用后，当账号返回429错误时将暂停调度一段时间
+                  </p>
+                </div>
+
+                <div v-if="form.enableRateLimit">
+                  <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                    >限流时间 (分钟)</label
+                  >
+                  <input
+                    v-model.number="form.rateLimitDuration"
+                    class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                    min="1"
+                    placeholder="默认60分钟"
+                    type="number"
+                  />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    账号被限流后暂停调度的时间（分钟）
+                  </p>
+                </div>
+              </div>
             </div>
 
             <!-- Gemini API 配置 -->
@@ -1973,6 +2005,50 @@
                     异常后账号将暂停调度。
                   </li>
                 </ul>
+              </div>
+            </div>
+
+            <!-- OpenAI 和 Droid 限流机制配置 -->
+            <div
+              v-if="
+                (form.platform === 'openai' || form.platform === 'droid') &&
+                (form.addType === 'oauth' || form.addType === 'setup-token')
+              "
+              class="space-y-4"
+            >
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >限流机制</label
+                >
+                <div class="mb-3">
+                  <label class="inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="form.enableRateLimit"
+                      class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                      type="checkbox"
+                    />
+                    <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    启用后，当账号返回429错误时将暂停调度一段时间
+                  </p>
+                </div>
+
+                <div v-if="form.enableRateLimit">
+                  <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                    >限流时间 (分钟)</label
+                  >
+                  <input
+                    v-model.number="form.rateLimitDuration"
+                    class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                    min="1"
+                    placeholder="默认60分钟"
+                    type="number"
+                  />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    账号被限流后暂停调度的时间（分钟）
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -2968,8 +3044,40 @@
               </p>
             </div>
 
-            <!-- 限流时长字段 - 隐藏不显示，保持原值 -->
-            <input v-model.number="form.rateLimitDuration" type="hidden" />
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >限流机制</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.enableRateLimit"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，当账号返回429错误时将暂停调度一段时间
+                </p>
+              </div>
+
+              <div v-if="form.enableRateLimit">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >限流时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.rateLimitDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认60分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号被限流后暂停调度的时间（分钟）
+                </p>
+              </div>
+            </div>
 
             <!-- 额度管理字段 -->
             <div class="grid grid-cols-2 gap-4">
@@ -3387,6 +3495,44 @@
             </div>
           </div>
 
+          <!-- Droid API Key 模式限流机制配置（编辑模式）-->
+          <div v-if="isEdit && isEditingDroidApiKey" class="space-y-4">
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >限流机制</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.enableRateLimit"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，当账号返回429错误时将暂停调度一段时间
+                </p>
+              </div>
+
+              <div v-if="form.enableRateLimit">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >限流时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.rateLimitDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认60分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号被限流后暂停调度的时间（分钟）
+                </p>
+              </div>
+            </div>
+          </div>
+
           <div
             v-if="
               !(isEdit && isEditingDroidApiKey) &&
@@ -3436,6 +3582,50 @@
                   placeholder="留空表示不更新..."
                   rows="4"
                 />
+              </div>
+            </div>
+          </div>
+
+          <!-- OpenAI 和 Droid 限流机制配置（编辑模式）-->
+          <div
+            v-if="
+              (form.platform === 'openai' || form.platform === 'droid') &&
+              !(isEdit && isEditingDroidApiKey)
+            "
+            class="space-y-4"
+          >
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >限流机制</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.enableRateLimit"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，当账号返回429错误时将暂停调度一段时间
+                </p>
+              </div>
+
+              <div v-if="form.enableRateLimit">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >限流时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.rateLimitDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认60分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号被限流后暂停调度的时间（分钟）
+                </p>
               </div>
             </div>
           </div>
@@ -3505,6 +3695,7 @@ import OAuthFlow from './OAuthFlow.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import GroupManagementModal from './GroupManagementModal.vue'
 import ApiKeyManagementModal from './ApiKeyManagementModal.vue'
+import RateLimitConfig from '@/components/common/RateLimitConfig.vue'
 
 const props = defineProps({
   account: {

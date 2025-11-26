@@ -3516,9 +3516,9 @@ router.post('/ccr-accounts', authenticateAdmin, async (req, res) => {
       quotaResetTime: quotaResetTime || '00:00'
     })
 
-    // 如果是分组类型，将账户添加到分组
+    // 如果是分组类型，将账户添加到分组（CCR 归属 Claude 平台分组）
     if (accountType === 'group' && groupId) {
-      await accountGroupService.addAccountToGroup(newAccount.id, groupId)
+      await accountGroupService.addAccountToGroup(newAccount.id, groupId, 'ccr')
     }
 
     logger.success(`🔧 Admin created CCR account: ${name}`)
@@ -8770,7 +8770,62 @@ router.get('/openai-responses-accounts', authenticateAdmin, async (req, res) => 
 // 创建 OpenAI-Responses 账户
 router.post('/openai-responses-accounts', authenticateAdmin, async (req, res) => {
   try {
+    const { accountType, groupId, groupIds } = req.body
+
+    // 验证分组类型账户必须提供分组信息
+    if (accountType === 'group' && !groupId && (!groupIds || groupIds.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        error: '分组类型账户必须指定至少一个分组'
+      })
+    }
+
     const account = await openaiResponsesAccountService.createAccount(req.body)
+
+    // 如果是分组类型，将账户添加到分组
+    if (accountType === 'group') {
+      if (groupIds && groupIds.length > 0) {
+        // 验证 groupIds 是否有效
+        const validGroupIds = []
+        for (const gId of groupIds) {
+          const group = await accountGroupService.getGroup(gId)
+          if (group) {
+            validGroupIds.push(gId)
+          } else {
+            logger.warn(`跳过无效的分组 ID: ${gId}`)
+          }
+        }
+        if (validGroupIds.length > 0) {
+          // 使用多分组设置
+          await accountGroupService.setAccountGroups(
+            account.id,
+            validGroupIds,
+            'openai-responses'
+          )
+        } else {
+          // 所有分组 ID 都无效，删除刚创建的账户并返回错误
+          await openaiResponsesAccountService.deleteAccount(account.id)
+          return res.status(400).json({
+            success: false,
+            error: '所有提供的分组 ID 都无效'
+          })
+        }
+      } else if (groupId) {
+        // 兼容单分组模式
+        const group = await accountGroupService.getGroup(groupId)
+        if (group) {
+          await accountGroupService.addAccountToGroup(account.id, groupId, 'openai-responses')
+        } else {
+          // 分组无效，删除刚创建的账户并返回错误
+          await openaiResponsesAccountService.deleteAccount(account.id)
+          return res.status(400).json({
+            success: false,
+            error: `无效的分组 ID: ${groupId}`
+          })
+        }
+      }
+    }
+
     const formattedAccount = formatAccountExpiry(account)
     res.json({ success: true, data: formattedAccount })
   } catch (error) {
@@ -8801,6 +8856,66 @@ router.put('/openai-responses-accounts/:id', authenticateAdmin, async (req, res)
         })
       }
       mappedUpdates.priority = priority.toString()
+    }
+
+    // 🔧 处理分组变更
+    // 获取当前账户信息以确定是否需要处理分组
+    const currentAccount = await openaiResponsesAccountService.getAccount(id)
+    const isCurrentlyGroup = currentAccount && currentAccount.accountType === 'group'
+    const willBeGroup = mappedUpdates.accountType === 'group'
+    const accountTypeChanging = Object.prototype.hasOwnProperty.call(mappedUpdates, 'accountType')
+
+    // 需要处理分组的情况：
+    // 1. accountType 正在变更为 group
+    // 2. 账户当前是 group 且 groupIds 正在变更
+    if (
+      (accountTypeChanging && willBeGroup) ||
+      (isCurrentlyGroup && Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupIds'))
+    ) {
+      if (Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupIds')) {
+        // 如果明确提供了 groupIds 参数（包括空数组）
+        if (mappedUpdates.groupIds && mappedUpdates.groupIds.length > 0) {
+          // 验证 groupIds 是否有效
+          const validGroupIds = []
+          for (const groupId of mappedUpdates.groupIds) {
+            const group = await accountGroupService.getGroup(groupId)
+            if (group) {
+              validGroupIds.push(groupId)
+            } else {
+              logger.warn(`跳过无效的分组 ID: ${groupId}`)
+            }
+          }
+          if (validGroupIds.length > 0) {
+            // 设置新的多分组
+            await accountGroupService.setAccountGroups(
+              id,
+              validGroupIds,
+              'openai-responses'
+            )
+          } else {
+            // 所有 groupIds 都无效，从所有分组中移除
+            await accountGroupService.removeAccountFromAllGroups(id)
+          }
+        } else {
+          // groupIds 为空数组，从所有分组中移除
+          await accountGroupService.removeAccountFromAllGroups(id)
+        }
+      } else if (mappedUpdates.groupId) {
+        // 向后兼容：仅当没有 groupIds 但有 groupId 时使用单分组逻辑
+        const group = await accountGroupService.getGroup(mappedUpdates.groupId)
+        if (group) {
+          await accountGroupService.addAccountToGroup(
+            id,
+            mappedUpdates.groupId,
+            'openai-responses'
+          )
+        } else {
+          logger.warn(`无效的分组 ID: ${mappedUpdates.groupId}`)
+        }
+      }
+    } else if (accountTypeChanging && !willBeGroup && isCurrentlyGroup) {
+      // 账户类型从 group 变更为非 group，需要从所有分组中移除
+      await accountGroupService.removeAccountFromAllGroups(id)
     }
 
     const result = await openaiResponsesAccountService.updateAccount(id, mappedUpdates)

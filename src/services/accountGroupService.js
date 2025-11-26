@@ -10,6 +10,34 @@ class AccountGroupService {
   }
 
   /**
+   * 规范化账户平台类型到分组平台类型
+   * @param {string} accountPlatform - 账户平台类型
+   * @returns {string} 规范化后的平台类型
+   */
+  _normalizePlatform(accountPlatform) {
+    // Claude 系列账户统一归类为 claude 平台
+    if (['claude', 'claude-console', 'ccr', 'bedrock'].includes(accountPlatform)) {
+      return 'claude'
+    }
+    // OpenAI 系列账户统一归类为 openai 平台
+    if (
+      ['openai', 'openai-responses', 'azure-openai', 'azure_openai'].includes(accountPlatform)
+    ) {
+      return 'openai'
+    }
+    // Gemini 系列账户统一归类为 gemini 平台
+    if (['gemini', 'gemini-api'].includes(accountPlatform)) {
+      return 'gemini'
+    }
+    // Droid 保持原样
+    if (accountPlatform === 'droid') {
+      return 'droid'
+    }
+    // 其他情况返回原值
+    return accountPlatform
+  }
+
+  /**
    * 创建账户分组
    * @param {Object} groupData - 分组数据
    * @param {string} groupData.name - 分组名称
@@ -224,11 +252,13 @@ class AccountGroupService {
         throw new Error('分组不存在')
       }
 
-      // 验证平台一致性 (Claude和Claude Console视为同一平台)
-      const normalizedAccountPlatform =
-        accountPlatform === 'claude-console' ? 'claude' : accountPlatform
-      if (normalizedAccountPlatform !== group.platform) {
-        throw new Error('账户平台与分组平台不匹配')
+      // 验证平台一致性 (使用规范化函数)
+      const normalizedAccountPlatform = this._normalizePlatform(accountPlatform)
+      const normalizedGroupPlatform = this._normalizePlatform(group.platform)
+      if (normalizedAccountPlatform !== normalizedGroupPlatform) {
+        throw new Error(
+          `账户平台与分组平台不匹配: 账户平台 ${accountPlatform} (规范化为 ${normalizedAccountPlatform}), 分组平台 ${group.platform} (规范化为 ${normalizedGroupPlatform})`
+        )
       }
 
       // 添加到分组成员集合
