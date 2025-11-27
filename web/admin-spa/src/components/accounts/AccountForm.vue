@@ -821,6 +821,41 @@
               </div>
             </div>
 
+            <!-- Gemini 平台自动错误恢复配置 -->
+            <div v-if="form.platform === 'gemini'">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
+            </div>
+
             <!-- Bedrock 特定字段 -->
             <div v-if="form.platform === 'bedrock' && !isEdit" class="space-y-4">
               <div>
@@ -1100,6 +1135,42 @@
               </div>
             </div>
 
+            <!-- Bedrock 自动错误恢复 -->
+            <div v-if="form.platform === 'bedrock' && !isEdit">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
+            </div>
+
             <!-- Claude Console 和 CCR 特定字段 -->
             <div
               v-if="(form.platform === 'claude-console' || form.platform === 'ccr') && !isEdit"
@@ -1189,6 +1260,42 @@
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   限制该账户的并发请求数量，0 表示不限制
                 </p>
+              </div>
+
+              <!-- 自动错误恢复 -->
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >自动错误恢复</label
+                >
+                <div class="mb-3">
+                  <label class="inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="form.autoRecoverErrors"
+                      class="mr-2 rounded border-gray-300 text-blue-600 dark:border-gray-600"
+                      type="checkbox"
+                    />
+                    <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                  </p>
+                </div>
+
+                <div v-if="form.autoRecoverErrors">
+                  <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    恢复时间 (分钟)
+                  </label>
+                  <input
+                    v-model.number="form.errorRecoveryDuration"
+                    class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                    min="1"
+                    placeholder="默认5分钟"
+                    type="number"
+                  />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    账号出现网络错误后自动恢复的等待时间（分钟）
+                  </p>
+                </div>
               </div>
 
               <div>
@@ -1545,6 +1652,41 @@
                   </p>
                 </div>
               </div>
+
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >自动错误恢复</label
+                >
+                <div class="mb-3">
+                  <label class="inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="form.autoRecoverErrors"
+                      class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                      type="checkbox"
+                    />
+                    <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                  </p>
+                </div>
+
+                <div v-if="form.autoRecoverErrors">
+                  <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                    >恢复时间 (分钟)</label
+                  >
+                  <input
+                    v-model.number="form.errorRecoveryDuration"
+                    class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                    min="1"
+                    placeholder="默认5分钟"
+                    type="number"
+                  />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    账号出现网络错误后自动恢复的等待时间（分钟）
+                  </p>
+                </div>
+              </div>
             </div>
 
             <!-- Gemini API 配置 -->
@@ -1601,6 +1743,42 @@
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   从 Google AI Studio 获取的 API 密钥
                 </p>
+              </div>
+
+              <!-- 自动错误恢复 -->
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >自动错误恢复</label
+                >
+                <div class="mb-3">
+                  <label class="inline-flex cursor-pointer items-center">
+                    <input
+                      v-model="form.autoRecoverErrors"
+                      class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                      type="checkbox"
+                    />
+                    <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                  </p>
+                </div>
+
+                <div v-if="form.autoRecoverErrors">
+                  <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                    >恢复时间 (分钟)</label
+                  >
+                  <input
+                    v-model.number="form.errorRecoveryDuration"
+                    class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                    min="1"
+                    placeholder="默认5分钟"
+                    type="number"
+                  />
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    账号出现网络错误后自动恢复的等待时间（分钟）
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -1773,6 +1951,114 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 数字越小优先级越高，建议范围：1-100
               </p>
+            </div>
+
+            <!-- Claude 平台自动错误恢复配置 (创建模式) -->
+            <div v-if="form.platform === 'claude'">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
+            </div>
+
+            <!-- Azure OpenAI 平台自动错误恢复配置 (创建模式) -->
+            <div v-if="form.platform === 'azure_openai'">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
+            </div>
+
+            <!-- OpenAI 平台自动错误恢复配置 (创建模式) -->
+            <div v-if="form.platform === 'openai'">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
             </div>
 
             <!-- 手动输入 Token 字段 -->
@@ -2049,6 +2335,47 @@
                     账号被限流后暂停调度的时间（分钟）
                   </p>
                 </div>
+              </div>
+            </div>
+
+            <!-- Droid 自动错误恢复 -->
+            <div
+              v-if="
+                form.platform === 'droid' &&
+                (form.addType === 'oauth' || form.addType === 'setup-token')
+              "
+            >
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
               </div>
             </div>
 
@@ -2456,6 +2783,75 @@
             </p>
           </div>
 
+          <!-- Gemini 平台自动错误恢复配置（编辑模式） -->
+          <div v-if="form.platform === 'gemini'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >自动错误恢复</label
+            >
+            <div class="mb-3">
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.autoRecoverErrors"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+              </p>
+            </div>
+            <div v-if="form.autoRecoverErrors">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >恢复时间 (分钟)</label
+              >
+              <input
+                v-model.number="form.errorRecoveryDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="默认5分钟"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                账号出现网络错误后自动恢复的等待时间（分钟）
+              </p>
+            </div>
+
+            <!-- Gemini 限流机制配置 (编辑模式) -->
+            <label class="mb-3 mt-4 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >限流机制</label
+            >
+            <div class="mb-3">
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.enableRateLimit"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                启用后，当账号返回429错误时将暂停调度一段时间
+              </p>
+            </div>
+
+            <div v-if="form.enableRateLimit">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >限流时间 (分钟)</label
+              >
+              <input
+                v-model.number="form.rateLimitDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="默认60分钟"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                账号被限流后暂停调度的时间（分钟）
+              </p>
+            </div>
+          </div>
+
           <!-- Claude 订阅类型选择（编辑模式） -->
           <div v-if="form.platform === 'claude'">
             <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
@@ -2627,6 +3023,150 @@
             </p>
           </div>
 
+          <!-- Claude 平台自动错误恢复配置 (编辑模式) -->
+          <div v-if="form.platform === 'claude'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >自动错误恢复</label
+            >
+            <div class="mb-3">
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.autoRecoverErrors"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+              </p>
+            </div>
+
+            <div v-if="form.autoRecoverErrors">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >恢复时间 (分钟)</label
+              >
+              <input
+                v-model.number="form.errorRecoveryDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="默认5分钟"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                账号出现网络错误后自动恢复的等待时间（分钟）
+              </p>
+            </div>
+          </div>
+
+          <!-- Azure OpenAI 平台自动错误恢复配置 (编辑模式) -->
+          <div v-if="form.platform === 'azure_openai'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >自动错误恢复</label
+            >
+            <div class="mb-3">
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.autoRecoverErrors"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+              </p>
+            </div>
+
+            <div v-if="form.autoRecoverErrors">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >恢复时间 (分钟)</label
+              >
+              <input
+                v-model.number="form.errorRecoveryDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="默认5分钟"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                账号出现网络错误后自动恢复的等待时间（分钟）
+              </p>
+            </div>
+          </div>
+
+          <!-- OpenAI 平台自动错误恢复配置 (编辑模式) -->
+          <div v-if="form.platform === 'openai'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >自动错误恢复</label
+            >
+            <div class="mb-3">
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.autoRecoverErrors"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+              </p>
+            </div>
+
+            <div v-if="form.autoRecoverErrors">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >恢复时间 (分钟)</label
+              >
+              <input
+                v-model.number="form.errorRecoveryDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="默认5分钟"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                账号出现网络错误后自动恢复的等待时间（分钟）
+              </p>
+            </div>
+          </div>
+
+          <!-- OpenAI 限流机制配置 (编辑模式) -->
+          <div v-if="form.platform === 'openai'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >限流机制</label
+            >
+            <div class="mb-3">
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.enableRateLimit"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                启用后，当账号返回429错误时将暂停调度一段时间
+              </p>
+            </div>
+
+            <div v-if="form.enableRateLimit">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >限流时间 (分钟)</label
+              >
+              <input
+                v-model.number="form.rateLimitDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="默认60分钟"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                账号被限流后暂停调度的时间（分钟）
+              </p>
+            </div>
+          </div>
+
           <!-- Claude Console 和 CCR 特定字段（编辑模式）-->
           <div
             v-if="form.platform === 'claude-console' || form.platform === 'ccr'"
@@ -2738,6 +3278,42 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 限制该账户的并发请求数量，0 表示不限制
               </p>
+            </div>
+
+            <!-- 自动错误恢复（编辑模式）-->
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 dark:border-gray-600"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  恢复时间 (分钟)
+                </label>
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
             </div>
 
             <div>
@@ -3079,6 +3655,41 @@
               </div>
             </div>
 
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
+            </div>
+
             <!-- 额度管理字段 -->
             <div class="grid grid-cols-2 gap-4">
               <div>
@@ -3174,6 +3785,78 @@
                 </button>
               </div>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">留空表示不更新 API Key</p>
+            </div>
+
+            <!-- 自动错误恢复 -->
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
+            </div>
+
+            <!-- Gemini-API 限流机制配置 (编辑模式) -->
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >限流机制</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.enableRateLimit"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，当账号返回429错误时将暂停调度一段时间
+                </p>
+              </div>
+
+              <div v-if="form.enableRateLimit">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >限流时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.rateLimitDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认60分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号被限流后暂停调度的时间（分钟）
+                </p>
+              </div>
             </div>
           </div>
 
@@ -3294,6 +3977,42 @@
                 <p class="mt-1 text-xs text-gray-500">账号被限流后暂停调度的时间（分钟）</p>
               </div>
             </div>
+
+            <!-- Bedrock 自动错误恢复（编辑模式）-->
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自动错误恢复</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.autoRecoverErrors"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+                </p>
+              </div>
+
+              <div v-if="form.autoRecoverErrors">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >恢复时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.errorRecoveryDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认5分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号出现网络错误后自动恢复的等待时间（分钟）
+                </p>
+              </div>
+            </div>
           </div>
 
           <!-- Azure OpenAI 特定字段（编辑模式）-->
@@ -3392,6 +4111,42 @@
                 </label>
               </div>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">选择此部署支持的模型类型</p>
+            </div>
+
+            <!-- Azure OpenAI 限流机制配置 (编辑模式) -->
+            <div>
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >限流机制</label
+              >
+              <div class="mb-3">
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.enableRateLimit"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">启用限流机制</span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  启用后，当账号返回429错误时将暂停调度一段时间
+                </p>
+              </div>
+
+              <div v-if="form.enableRateLimit">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >限流时间 (分钟)</label
+                >
+                <input
+                  v-model.number="form.rateLimitDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  min="1"
+                  placeholder="默认60分钟"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  账号被限流后暂停调度的时间（分钟）
+                </p>
+              </div>
             </div>
           </div>
 
@@ -3627,6 +4382,42 @@
                   账号被限流后暂停调度的时间（分钟）
                 </p>
               </div>
+            </div>
+          </div>
+
+          <!-- Droid 自动错误恢复（编辑模式）-->
+          <div v-if="form.platform === 'droid' && !(isEdit && isEditingDroidApiKey)">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >自动错误恢复</label
+            >
+            <div class="mb-3">
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.autoRecoverErrors"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">启用自动错误恢复</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                启用后，账号出现网络错误时会在指定时间后自动恢复；禁用则需要手动重置
+              </p>
+            </div>
+
+            <div v-if="form.autoRecoverErrors">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >恢复时间 (分钟)</label
+              >
+              <input
+                v-model.number="form.errorRecoveryDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                min="1"
+                placeholder="默认5分钟"
+                type="number"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                账号出现网络错误后自动恢复的等待时间（分钟）
+              </p>
             </div>
           </div>
 
@@ -3907,6 +4698,12 @@ const form = ref({
   // OpenAI-Responses 特定字段
   baseApi: props.account?.baseApi || '',
   rateLimitDuration: props.account?.rateLimitDuration || 60,
+  autoRecoverErrors: props.account
+    ? props.account.autoRecoverErrors === 'true' || props.account.autoRecoverErrors === true
+    : false,
+  errorRecoveryDuration: props.account?.errorRecoveryDuration
+    ? parseInt(props.account.errorRecoveryDuration)
+    : 5,
   supportedModels: (() => {
     const models = props.account?.supportedModels
     if (!models) return []
@@ -3969,13 +4766,37 @@ const allowedModels = ref([
 
 // 常用模型列表
 const commonModels = [
-  { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5', color: 'blue' },
-  { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', color: 'blue' },
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', color: 'indigo' },
-  { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', color: 'green' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', color: 'emerald' },
+  {
+    value: 'claude-opus-4-5-20251101',
+    label: 'Claude Opus 4.5',
+    color: 'blue'
+  },
+  {
+    value: 'claude-sonnet-4-20250514',
+    label: 'Claude Sonnet 4',
+    color: 'blue'
+  },
+  {
+    value: 'claude-sonnet-4-5-20250929',
+    label: 'Claude Sonnet 4.5',
+    color: 'indigo'
+  },
+  {
+    value: 'claude-3-5-haiku-20241022',
+    label: 'Claude 3.5 Haiku',
+    color: 'green'
+  },
+  {
+    value: 'claude-haiku-4-5-20251001',
+    label: 'Claude Haiku 4.5',
+    color: 'emerald'
+  },
   { value: 'claude-opus-4-20250514', label: 'Claude Opus 4', color: 'purple' },
-  { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1', color: 'purple' },
+  {
+    value: 'claude-opus-4-1-20250805',
+    label: 'Claude Opus 4.1',
+    color: 'purple'
+  },
   { value: 'deepseek-chat', label: 'DeepSeek Chat', color: 'cyan' },
   { value: 'Qwen', label: 'Qwen', color: 'orange' },
   { value: 'Kimi', label: 'Kimi', color: 'pink' },
@@ -4840,7 +5661,13 @@ const createAccount = async () => {
       data.apiKey = form.value.apiKey
       data.userAgent = form.value.userAgent || ''
       data.priority = form.value.priority || 50
-      data.rateLimitDuration = 60 // 默认值60，不从用户输入获取
+      // 如果不启用限流，传递 0 表示不限流
+      data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
+      // 自动错误恢复配置
+      data.autoRecoverErrors = form.value.autoRecoverErrors || false
+      data.errorRecoveryDuration = form.value.autoRecoverErrors
+        ? form.value.errorRecoveryDuration || 5
+        : 5
       data.dailyQuota = form.value.dailyQuota || 0
       data.quotaResetTime = form.value.quotaResetTime || '00:00'
     } else if (form.value.platform === 'gemini-api') {
@@ -5125,11 +5952,20 @@ const updateAccount = async () => {
     // OpenAI 账号优先级更新
     if (props.account.platform === 'openai') {
       data.priority = form.value.priority || 50
+      // 如果不启用限流，传递 0 表示不限流
+      data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
+      // 自动错误恢复配置
+      data.autoRecoverErrors = form.value.autoRecoverErrors || false
+      data.errorRecoveryDuration = form.value.autoRecoverErrors
+        ? form.value.errorRecoveryDuration || 5
+        : 5
     }
 
     // Gemini 账号优先级更新
     if (props.account.platform === 'gemini') {
       data.priority = form.value.priority || 50
+      // 如果不启用限流，传递 0 表示不限流
+      data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
     }
 
     // Claude Console 特定更新
@@ -5158,7 +5994,13 @@ const updateAccount = async () => {
       }
       data.userAgent = form.value.userAgent || ''
       data.priority = form.value.priority || 50
-      // 编辑时不上传 rateLimitDuration，保持原值
+      // 如果不启用限流，传递 0 表示不限流
+      data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
+      // 自动错误恢复配置
+      data.autoRecoverErrors = form.value.autoRecoverErrors || false
+      data.errorRecoveryDuration = form.value.autoRecoverErrors
+        ? form.value.errorRecoveryDuration || 5
+        : 5
       data.dailyQuota = form.value.dailyQuota || 0
       data.quotaResetTime = form.value.quotaResetTime || '00:00'
     }
@@ -5202,6 +6044,8 @@ const updateAccount = async () => {
       if (form.value.apiKey && form.value.apiKey.trim()) {
         data.apiKey = form.value.apiKey
       }
+      // 如果不启用限流，传递 0 表示不限流
+      data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
     }
 
     // Gemini API 特定更新
@@ -5215,6 +6059,8 @@ const updateAccount = async () => {
       data.supportedModels = Array.isArray(form.value.supportedModels)
         ? form.value.supportedModels
         : []
+      // 如果不启用限流，传递 0 表示不限流
+      data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
     }
 
     if (props.account.platform === 'claude') {
