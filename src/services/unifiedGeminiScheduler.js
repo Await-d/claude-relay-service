@@ -35,6 +35,22 @@ class UnifiedGeminiScheduler {
         if (apiKeyData.geminiAccountId.startsWith('api:')) {
           const accountId = apiKeyData.geminiAccountId.replace('api:', '')
           const boundAccount = await geminiApiAccountService.getAccount(accountId)
+
+          // 🔧 在检查 isActive 之前，先尝试自动恢复 error 状态
+          if (boundAccount && boundAccount.status === 'error') {
+            const isErrorCleared = await geminiApiAccountService.checkAndClearErrorStatus(accountId)
+            if (isErrorCleared) {
+              // 刷新账户状态
+              const refreshedAccount = await geminiApiAccountService.getAccount(accountId)
+              if (refreshedAccount) {
+                Object.assign(boundAccount, refreshedAccount)
+                logger.info(
+                  `✅ Dedicated Gemini-API account ${boundAccount.name || accountId} auto-recovered from error state`
+                )
+              }
+            }
+          }
+
           if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
             logger.info(
               `🎯 Using bound Gemini-API account: ${boundAccount.name} (${accountId}) for API key ${apiKeyData.name}`
@@ -68,6 +84,26 @@ class UnifiedGeminiScheduler {
         // 普通 Gemini OAuth 专属账户
         else {
           const boundAccount = await geminiAccountService.getAccount(apiKeyData.geminiAccountId)
+
+          // 🔧 在检查 isActive 之前，先尝试自动恢复 error 状态
+          if (boundAccount && boundAccount.status === 'error') {
+            const isErrorCleared = await geminiAccountService.checkAndClearErrorStatus(
+              apiKeyData.geminiAccountId
+            )
+            if (isErrorCleared) {
+              // 刷新账户状态
+              const refreshedAccount = await geminiAccountService.getAccount(
+                apiKeyData.geminiAccountId
+              )
+              if (refreshedAccount) {
+                Object.assign(boundAccount, refreshedAccount)
+                logger.info(
+                  `✅ Dedicated Gemini account ${boundAccount.name || apiKeyData.geminiAccountId} auto-recovered from error state`
+                )
+              }
+            }
+          }
+
           if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
             logger.info(
               `🎯 Using bound dedicated Gemini account: ${boundAccount.name} (${apiKeyData.geminiAccountId}) for API key ${apiKeyData.name}`
@@ -184,6 +220,22 @@ class UnifiedGeminiScheduler {
       if (apiKeyData.geminiAccountId.startsWith('api:')) {
         const accountId = apiKeyData.geminiAccountId.replace('api:', '')
         const boundAccount = await geminiApiAccountService.getAccount(accountId)
+
+        // 🔧 在检查 isActive 之前，先尝试自动恢复 error 状态
+        if (boundAccount && boundAccount.status === 'error') {
+          const isErrorCleared = await geminiApiAccountService.checkAndClearErrorStatus(accountId)
+          if (isErrorCleared) {
+            // 刷新账户状态
+            const refreshedAccount = await geminiApiAccountService.getAccount(accountId)
+            if (refreshedAccount) {
+              Object.assign(boundAccount, refreshedAccount)
+              logger.info(
+                `✅ Gemini-API account ${boundAccount.name || accountId} auto-recovered from error state in pool selection`
+              )
+            }
+          }
+        }
+
         if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
           const isRateLimited = await this.isAccountRateLimited(accountId)
           if (!isRateLimited) {
@@ -275,6 +327,19 @@ class UnifiedGeminiScheduler {
     // 获取所有Gemini OAuth账户（共享池）
     const geminiAccounts = await geminiAccountService.getAllAccounts()
     for (const account of geminiAccounts) {
+      // 🔧 自动恢复检查
+      if (account.status === 'error') {
+        const isErrorCleared = await geminiAccountService.checkAndClearErrorStatus(account.id)
+        if (isErrorCleared) {
+          account.status = 'active'
+          account.schedulable = true
+          account.errorMessage = ''
+          logger.info(
+            `✅ Gemini account ${account.name} (${account.id}) auto-recovered from error state`
+          )
+        }
+      }
+
       if (
         account.isActive === 'true' &&
         account.status !== 'error' &&
@@ -325,6 +390,19 @@ class UnifiedGeminiScheduler {
     if (allowApiAccounts) {
       const geminiApiAccounts = await geminiApiAccountService.getAllAccounts()
       for (const account of geminiApiAccounts) {
+        // 🔧 自动恢复检查
+        if (account.status === 'error') {
+          const isErrorCleared = await geminiApiAccountService.checkAndClearErrorStatus(account.id)
+          if (isErrorCleared) {
+            account.status = 'active'
+            account.schedulable = 'true'
+            account.errorMessage = ''
+            logger.info(
+              `✅ Gemini-API account ${account.name} (${account.id}) auto-recovered from error state`
+            )
+          }
+        }
+
         if (
           account.isActive === 'true' &&
           account.status !== 'error' &&

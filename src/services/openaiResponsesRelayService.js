@@ -293,12 +293,39 @@ class OpenAIResponsesRelayService {
       }
       logger.error('OpenAI-Responses relay error:', errorInfo)
 
-      // 检查是否是网络错误
+      // 检查是否是网络错误 - 根据账户配置决定是否自动恢复
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-        await openaiResponsesAccountService.updateAccount(account.id, {
-          status: 'error',
-          errorMessage: `Connection error: ${error.code}`
-        })
+        const autoRecover = fullAccount.autoRecoverErrors === 'true' || fullAccount.autoRecoverErrors === true
+
+        if (autoRecover) {
+          // 启用自动恢复：设置恢复时间
+          const recoveryMinutes = parseInt(fullAccount.errorRecoveryDuration) || 5
+          const errorOccurredAt = new Date()
+          const errorRecoveryAt = new Date(errorOccurredAt.getTime() + recoveryMinutes * 60000)
+
+          await openaiResponsesAccountService.updateAccount(account.id, {
+            status: 'error',
+            errorMessage: `Connection error: ${error.code} (auto-recover in ${recoveryMinutes} min at ${errorRecoveryAt.toISOString()})`,
+            errorOccurredAt: errorOccurredAt.toISOString(),
+            errorRecoveryAt: errorRecoveryAt.toISOString(),
+            schedulable: 'false' // 暂时禁用调度
+          })
+
+          logger.warn(
+            `⏳ OpenAI-Responses account ${account.name} marked as temporary error, will auto-recover in ${recoveryMinutes} minutes (auto-recover enabled)`
+          )
+        } else {
+          // 禁用自动恢复：保持永久 error 状态
+          await openaiResponsesAccountService.updateAccount(account.id, {
+            status: 'error',
+            errorMessage: `Connection error: ${error.code}`,
+            schedulable: 'false'
+          })
+
+          logger.warn(
+            `🚫 OpenAI-Responses account ${account.name} marked as error (auto-recover disabled, manual reset required)`
+          )
+        }
       }
 
       // 如果已经发送了响应头，直接结束

@@ -830,7 +830,8 @@
                         </div>
                       </div>
                       <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        重置剩余 {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
+                        重置剩余
+                        {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
                       </div>
                     </div>
                     <!-- 7天窗口 -->
@@ -863,7 +864,8 @@
                         </div>
                       </div>
                       <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
+                        重置剩余
+                        {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
                       </div>
                     </div>
                     <!-- 7天Opus窗口 -->
@@ -896,7 +898,8 @@
                         </div>
                       </div>
                       <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                        重置剩余
+                        {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
                       </div>
                     </div>
                   </div>
@@ -939,7 +942,9 @@
                               account
                             )
                           ]"
-                          :style="{ width: account.sessionWindow.progress + '%' }"
+                          :style="{
+                            width: account.sessionWindow.progress + '%'
+                          }"
                         />
                       </div>
                       <span
@@ -963,7 +968,8 @@
                         v-if="account.sessionWindow.remainingTime > 0"
                         class="font-medium text-indigo-600 dark:text-indigo-400"
                       >
-                        剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
+                        剩余
+                        {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
                       </div>
                     </div>
                   </div>
@@ -986,7 +992,9 @@
                               'h-2 rounded-full transition-all duration-300',
                               getQuotaBarClass(getQuotaUsagePercent(account))
                             ]"
-                            :style="{ width: Math.min(100, getQuotaUsagePercent(account)) + '%' }"
+                            :style="{
+                              width: Math.min(100, getQuotaUsagePercent(account)) + '%'
+                            }"
                           />
                         </div>
                         <span
@@ -1085,7 +1093,8 @@
                         </div>
                       </div>
                       <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        重置剩余 {{ formatCodexRemaining(account.codexUsage.primary) }}
+                        重置剩余
+                        {{ formatCodexRemaining(account.codexUsage.primary) }}
                       </div>
                     </div>
                     <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
@@ -1117,7 +1126,8 @@
                         </div>
                       </div>
                       <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        重置剩余 {{ formatCodexRemaining(account.codexUsage.secondary) }}
+                        重置剩余
+                        {{ formatCodexRemaining(account.codexUsage.secondary) }}
                       </div>
                     </div>
                   </div>
@@ -1372,7 +1382,8 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
+                    重置剩余
+                    {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
                   </div>
                 </div>
                 <!-- 7天窗口 -->
@@ -1405,7 +1416,8 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
+                    重置剩余
+                    {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
                   </div>
                 </div>
                 <!-- 7天Opus窗口 -->
@@ -1438,7 +1450,8 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                    重置剩余
+                    {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
                   </div>
                 </div>
               </div>
@@ -1489,7 +1502,8 @@
                     v-if="account.sessionWindow.remainingTime > 0"
                     class="font-medium text-indigo-600"
                   >
-                    剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
+                    剩余
+                    {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
                   </span>
                   <span v-else class="text-gray-500"> 已结束 </span>
                 </div>
@@ -1527,7 +1541,8 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余 {{ formatCodexRemaining(account.codexUsage.primary) }}
+                    重置剩余
+                    {{ formatCodexRemaining(account.codexUsage.primary) }}
                   </div>
                 </div>
                 <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700">
@@ -1559,7 +1574,8 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余 {{ formatCodexRemaining(account.codexUsage.secondary) }}
+                    重置剩余
+                    {{ formatCodexRemaining(account.codexUsage.secondary) }}
                   </div>
                 </div>
               </div>
@@ -2971,7 +2987,10 @@ const batchDeleteAccounts = async () => {
 
   let confirmMessage = `确定要删除选中的 ${targets.length} 个账户吗？此操作不可恢复。`
   const boundInfo = targets
-    .map((account) => ({ account, boundKeys: getBoundApiKeysForAccount(account) }))
+    .map((account) => ({
+      account,
+      boundKeys: getBoundApiKeysForAccount(account)
+    }))
     .filter((item) => item.boundKeys.length > 0)
 
   if (boundInfo.length > 0) {

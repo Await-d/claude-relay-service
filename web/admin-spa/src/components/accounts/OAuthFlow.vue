@@ -419,7 +419,8 @@
                     </p>
                     <p class="mb-3 text-sm text-orange-700 dark:text-orange-300">
                       授权完成后，当页面地址变为
-                      <strong class="font-mono">http://localhost:1455/...</strong> 时：
+                      <strong class="font-mono">http://localhost:1455/...</strong>
+                      时：
                     </p>
                     <div class="space-y-3">
                       <div>
@@ -534,7 +535,8 @@
                               class="inline-flex items-center gap-1 rounded-md border border-cyan-200 bg-white px-3 py-1.5 text-xs font-medium text-cyan-600 shadow-sm transition-colors hover:border-cyan-300 hover:bg-cyan-50 dark:border-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-200 dark:hover:border-cyan-500 dark:hover:bg-cyan-900/60"
                               @click="openVerificationPage"
                             >
-                              <i class="fas fa-external-link-alt text-xs" /> 在新标签中打开
+                              <i class="fas fa-external-link-alt text-xs" />
+                              在新标签中打开
                             </button>
                             <button
                               class="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-cyan-600 transition-colors hover:text-cyan-700 dark:text-cyan-300 dark:hover:text-cyan-200"

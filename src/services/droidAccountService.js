@@ -828,7 +828,11 @@ class DroidAccountService {
           : '',
       apiKeys: hasApiKeys ? JSON.stringify(apiKeyEntries) : '',
       apiKeyCount: hasApiKeys ? String(apiKeyEntries.length) : '0',
-      apiKeyStrategy: hasApiKeys ? 'random_sticky' : ''
+      apiKeyStrategy: hasApiKeys ? 'random_sticky' : '',
+
+      // 自动错误恢复
+      autoRecoverErrors: (options.autoRecoverErrors || false).toString(),
+      errorRecoveryDuration: (options.errorRecoveryDuration || 5).toString()
     }
 
     await redis.setDroidAccount(accountId, accountData)
@@ -1443,6 +1447,21 @@ class DroidAccountService {
 
     const normalizedFilter = endpointType ? this._sanitizeEndpointType(endpointType) : null
 
+    // 🔧 自动恢复检查：在过滤前检查并清除过期的 error 状态
+    for (const account of allAccounts) {
+      if (account.status === 'error') {
+        const isErrorCleared = await this.checkAndClearErrorStatus(account.id)
+        if (isErrorCleared) {
+          account.status = 'active'
+          account.schedulable = 'true'
+          account.errorMessage = ''
+          logger.info(
+            `✅ Droid account ${account.name} (${account.id}) auto-recovered from error state`
+          )
+        }
+      }
+    }
+
     return allAccounts
       .filter((account) => {
         const isActive = this._isTruthy(account.isActive)
@@ -1557,6 +1576,23 @@ class DroidAccountService {
     } catch (error) {
       logger.warn(`⚠️ Failed to update lastUsedAt for Droid account ${accountId}:`, error)
     }
+  }
+
+  /**
+   * 检查并清除过期的 error 状态（自动恢复）
+   * @param {string} accountId - 账户ID
+   * @returns {boolean} - 是否已清除错误状态
+   */
+  async checkAndClearErrorStatus(accountId) {
+    const account = await this.getAccount(accountId)
+    const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+    if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'Droid')) {
+      await this.updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+      return true
+    }
+
+    return false
   }
 }
 

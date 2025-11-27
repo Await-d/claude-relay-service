@@ -330,6 +330,28 @@ async function sendGeminiRequest({
     // 检查是否是请求被中止
     if (error.name === 'CanceledError' || error.code === 'ECONNABORTED') {
       logger.info('Gemini request was aborted by client')
+
+      // 🔧 集成自动错误恢复（ECONNABORTED）
+      if (error.code === 'ECONNABORTED' && accountId) {
+        const geminiAccountService = require('./geminiAccountService')
+        const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+        try {
+          const account = await geminiAccountService.getAccount(accountId)
+          if (account && ErrorRecoveryHelper.isNetworkError(error.code)) {
+            const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+              account,
+              error.code,
+              'Gemini'
+            )
+            await geminiAccountService.updateAccount(accountId, recoveryData)
+            logger.info(`🔧 Gemini account ${accountId} marked with auto-recovery for ECONNABORTED`)
+          }
+        } catch (recoveryError) {
+          logger.error('Failed to apply error recovery for ECONNABORTED:', recoveryError)
+        }
+      }
+
       const err = new Error('Request canceled by client')
       err.status = 499
       err.error = {
@@ -338,6 +360,27 @@ async function sendGeminiRequest({
         code: 'request_canceled'
       }
       throw err
+    }
+
+    // 🔧 集成自动错误恢复（ECONNREFUSED, ETIMEDOUT）
+    if (accountId && (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT')) {
+      const geminiAccountService = require('./geminiAccountService')
+      const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+      try {
+        const account = await geminiAccountService.getAccount(accountId)
+        if (account && ErrorRecoveryHelper.isNetworkError(error.code)) {
+          const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+            account,
+            error.code,
+            'Gemini'
+          )
+          await geminiAccountService.updateAccount(accountId, recoveryData)
+          logger.info(`🔧 Gemini account ${accountId} marked with auto-recovery for ${error.code}`)
+        }
+      } catch (recoveryError) {
+        logger.error(`Failed to apply error recovery for ${error.code}:`, recoveryError)
+      }
     }
 
     logger.error('Gemini API request failed:', error.response?.data || error.message)

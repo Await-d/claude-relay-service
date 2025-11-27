@@ -7172,7 +7172,7 @@ router.get('/check-updates', authenticateAdmin, async (req, res) => {
     }
 
     // 请求 GitHub API
-    const githubRepo = 'wei-shaw/claude-relay-service'
+    const githubRepo = process.env.UPDATE_CHECK_REPO || 'Await-d/claude-relay-service'
     const response = await axios.get(`https://api.github.com/repos/${githubRepo}/releases/latest`, {
       headers: {
         Accept: 'application/vnd.github.v3+json',

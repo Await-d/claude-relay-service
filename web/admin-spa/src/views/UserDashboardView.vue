@@ -416,7 +416,10 @@ const loadApiKeysStats = async () => {
     console.log('Active count:', activeKeys.length)
     console.log('Deleted count:', deletedKeys.length)
 
-    apiKeysStats.value = { active: activeKeys.length, deleted: deletedKeys.length }
+    apiKeysStats.value = {
+      active: activeKeys.length,
+      deleted: deletedKeys.length
+    }
   } catch (error) {
     console.error('Failed to load API keys stats:', error)
     apiKeysStats.value = { active: 0, deleted: 0 }

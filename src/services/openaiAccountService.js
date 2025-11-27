@@ -580,7 +580,10 @@ async function createAccount(accountData) {
     schedulable: accountData.schedulable !== false ? 'true' : 'false',
     lastRefresh: now,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    // 自动错误恢复
+    autoRecoverErrors: (accountData.autoRecoverErrors || false).toString(),
+    errorRecoveryDuration: (accountData.errorRecoveryDuration || 5).toString()
   }
 
   // 代理配置
@@ -1258,6 +1261,23 @@ async function updateCodexUsageSnapshot(accountId, usageSnapshot) {
   await client.hset(`${OPENAI_ACCOUNT_KEY_PREFIX}${accountId}`, updates)
 }
 
+/**
+ * 检查并清除过期的 error 状态（自动恢复）
+ * @param {string} accountId - 账户ID
+ * @returns {boolean} - 是否已清除错误状态
+ */
+async function checkAndClearErrorStatus(accountId) {
+  const account = await getAccount(accountId)
+  const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+  if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'OpenAI')) {
+    await updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+    return true
+  }
+
+  return false
+}
+
 module.exports = {
   createAccount,
   getAccount,
@@ -1276,6 +1296,7 @@ module.exports = {
   updateAccountUsage,
   recordUsage, // 别名，指向updateAccountUsage
   updateCodexUsageSnapshot,
+  checkAndClearErrorStatus,
   encrypt,
   decrypt,
   generateEncryptionKey,

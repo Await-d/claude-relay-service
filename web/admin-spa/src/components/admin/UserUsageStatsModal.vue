@@ -241,8 +241,12 @@
                 <tbody class="divide-y divide-gray-200 bg-white">
                   <tr v-for="apiKey in userDetails.apiKeys" :key="apiKey.id">
                     <td class="whitespace-nowrap px-6 py-4">
-                      <div class="text-sm font-medium text-gray-900">{{ apiKey.name }}</div>
-                      <div class="text-sm text-gray-500">{{ apiKey.keyPreview }}</div>
+                      <div class="text-sm font-medium text-gray-900">
+                        {{ apiKey.name }}
+                      </div>
+                      <div class="text-sm text-gray-500">
+                        {{ apiKey.keyPreview }}
+                      </div>
                     </td>
                     <td class="whitespace-nowrap px-6 py-4">
                       <span

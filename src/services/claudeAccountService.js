@@ -75,7 +75,9 @@ class ClaudeAccountService {
       useUnifiedClientId = false, // 是否使用统一的客户端标识
       unifiedClientId = '', // 统一的客户端标识
       expiresAt = null, // 账户订阅到期时间
-      extInfo = null // 额外扩展信息
+      extInfo = null, // 额外扩展信息
+      autoRecoverErrors = false, // 自动错误恢复（默认禁用）
+      errorRecoveryDuration = 5 // 错误恢复时间（分钟，默认5分钟）
     } = options
 
     const accountId = uuidv4()
@@ -120,7 +122,10 @@ class ClaudeAccountService {
         // 账户订阅到期时间
         subscriptionExpiresAt: expiresAt || '',
         // 扩展信息
-        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : ''
+        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : '',
+        // 自动错误恢复
+        autoRecoverErrors: autoRecoverErrors.toString(),
+        errorRecoveryDuration: errorRecoveryDuration.toString()
       }
     } else {
       // 兼容旧格式
@@ -152,7 +157,10 @@ class ClaudeAccountService {
         // 账户订阅到期时间
         subscriptionExpiresAt: expiresAt || '',
         // 扩展信息
-        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : ''
+        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : '',
+        // 自动错误恢复
+        autoRecoverErrors: autoRecoverErrors.toString(),
+        errorRecoveryDuration: errorRecoveryDuration.toString()
       }
     }
 
@@ -814,6 +822,23 @@ class ClaudeAccountService {
       logger.error('❌ Failed to delete Claude account:', error)
       throw error
     }
+  }
+
+  /**
+   * 检查并清除过期的 error 状态（自动恢复）
+   * @param {string} accountId - 账户ID
+   * @returns {boolean} - 是否已清除错误状态
+   */
+  async checkAndClearErrorStatus(accountId) {
+    const account = await this.getAccount(accountId)
+    const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+    if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'Claude')) {
+      await this.updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+      return true
+    }
+
+    return false
   }
 
   /**

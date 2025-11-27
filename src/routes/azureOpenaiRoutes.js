@@ -162,6 +162,18 @@ router.post('/chat/completions', authenticateApiKey, async (req, res) => {
     let account = null
     if (req.apiKey?.azureOpenaiAccountId) {
       account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
+
+      // 自动恢复检查
+      if (account && account.status === 'error') {
+        const isErrorCleared = await azureOpenaiAccountService.checkAndClearErrorStatus(account.id)
+        if (isErrorCleared) {
+          account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
+          logger.info(
+            `✅ Dedicated Azure OpenAI account ${account?.name || account.id} auto-recovered from error state`
+          )
+        }
+      }
+
       if (!account) {
         logger.warn(`Bound Azure OpenAI account not found: ${req.apiKey.azureOpenaiAccountId}`)
       }
@@ -255,6 +267,18 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     let account = null
     if (req.apiKey?.azureOpenaiAccountId) {
       account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
+
+      // 自动恢复检查
+      if (account && account.status === 'error') {
+        const isErrorCleared = await azureOpenaiAccountService.checkAndClearErrorStatus(account.id)
+        if (isErrorCleared) {
+          account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
+          logger.info(
+            `✅ Dedicated Azure OpenAI account ${account?.name || account.id} auto-recovered from error state`
+          )
+        }
+      }
+
       if (!account) {
         logger.warn(`Bound Azure OpenAI account not found: ${req.apiKey.azureOpenaiAccountId}`)
       }
@@ -347,6 +371,18 @@ router.post('/embeddings', authenticateApiKey, async (req, res) => {
     let account = null
     if (req.apiKey?.azureOpenaiAccountId) {
       account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
+
+      // 自动恢复检查
+      if (account && account.status === 'error') {
+        const isErrorCleared = await azureOpenaiAccountService.checkAndClearErrorStatus(account.id)
+        if (isErrorCleared) {
+          account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
+          logger.info(
+            `✅ Dedicated Azure OpenAI account ${account?.name || account.id} auto-recovered from error state`
+          )
+        }
+      }
+
       if (!account) {
         logger.warn(`Bound Azure OpenAI account not found: ${req.apiKey.azureOpenaiAccountId}`)
       }

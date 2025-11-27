@@ -536,6 +536,30 @@ async function handleMessages(req, res) {
   } catch (error) {
     logger.error('Gemini request error:', error)
 
+    // 🔧 集成自动错误恢复（网络错误，仅针对 API 账户）
+    if (accountId && accountType === 'gemini-api') {
+      const networkErrorCodes = ['ECONNREFUSED', 'ETIMEDOUT', 'ECONNABORTED']
+      if (error.code && networkErrorCodes.includes(error.code)) {
+        try {
+          const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+          if (ErrorRecoveryHelper.isNetworkError(error.code)) {
+            const account = await geminiApiAccountService.getAccount(accountId)
+            if (account) {
+              const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+                account,
+                error.code,
+                'Gemini API'
+              )
+              await geminiApiAccountService.updateAccount(accountId, recoveryData)
+              logger.info(`🔧 Gemini API account ${accountId} marked with auto-recovery for ${error.code}`)
+            }
+          }
+        } catch (recoveryError) {
+          logger.error(`Failed to apply error recovery for ${error.code}:`, recoveryError)
+        }
+      }
+    }
+
     // 处理速率限制
     const errorStatus = error.response?.status || error.status
     if (errorStatus === 429 && accountId) {

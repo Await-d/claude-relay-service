@@ -200,7 +200,8 @@
               >
                 <span class="text-gray-600 dark:text-gray-300">并发限制</span>
                 <span class="font-semibold text-purple-600 dark:text-purple-300">
-                  {{ apiKey.currentConcurrency || 0 }} / {{ apiKey.concurrencyLimit }}
+                  {{ apiKey.currentConcurrency || 0 }} /
+                  {{ apiKey.concurrencyLimit }}
                 </span>
               </div>
 

@@ -94,7 +94,9 @@
                 </svg>
               </div>
               <div class="ml-3">
-                <p class="text-sm text-red-700 dark:text-red-400">{{ error }}</p>
+                <p class="text-sm text-red-700 dark:text-red-400">
+                  {{ error }}
+                </p>
               </div>
             </div>
           </div>

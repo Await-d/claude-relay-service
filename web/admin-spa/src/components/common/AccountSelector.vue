@@ -71,7 +71,9 @@
                 v-for="option in specialOptionsList"
                 :key="`special-${option.value}`"
                 class="cursor-pointer px-4 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700"
-                :class="{ 'bg-blue-50 dark:bg-blue-900/20': modelValue === option.value }"
+                :class="{
+                  'bg-blue-50 dark:bg-blue-900/20': modelValue === option.value
+                }"
                 @click="selectAccount(option.value)"
               >
                 <span class="text-gray-700 dark:text-gray-300">{{ option.label }}</span>
@@ -104,7 +106,9 @@
                 v-for="group in filteredGroups"
                 :key="`group:${group.id}`"
                 class="cursor-pointer px-4 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700"
-                :class="{ 'bg-blue-50 dark:bg-blue-900/20': modelValue === `group:${group.id}` }"
+                :class="{
+                  'bg-blue-50 dark:bg-blue-900/20': modelValue === `group:${group.id}`
+                }"
                 @click="selectAccount(`group:${group.id}`)"
               >
                 <div class="flex items-center justify-between">
@@ -137,7 +141,9 @@
                 v-for="account in filteredOAuthAccounts"
                 :key="account.id"
                 class="cursor-pointer px-4 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-gray-700"
-                :class="{ 'bg-blue-50 dark:bg-blue-900/20': modelValue === account.id }"
+                :class="{
+                  'bg-blue-50 dark:bg-blue-900/20': modelValue === account.id
+                }"
                 @click="selectAccount(account.id)"
               >
                 <div class="flex items-center justify-between">
@@ -556,7 +562,10 @@ const formatDate = (dateString) => {
     // 7天内
     return `${Math.floor(diffInHours / 24)} 天前`
   } else {
-    return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+    return date.toLocaleDateString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit'
+    })
   }
 }
 

@@ -14,7 +14,9 @@
                 : 'fas fa-info-circle text-blue-500'
             "
           />
-          <h3 class="header-title">{{ multiKeyMode ? '批量查询概要' : 'API Key 信息' }}</h3>
+          <h3 class="header-title">
+            {{ multiKeyMode ? '批量查询概要' : 'API Key 信息' }}
+          </h3>
         </header>
 
         <div v-if="multiKeyMode && aggregatedStats" class="info-grid">
@@ -25,7 +27,8 @@
           <div class="info-item">
             <p class="info-label">有效 Keys 数</p>
             <p class="info-value text-green-600 dark:text-emerald-400">
-              <i class="fas fa-check-circle mr-1" />{{ aggregatedStats.activeKeys }} 个
+              <i class="fas fa-check-circle mr-1" />{{ aggregatedStats.activeKeys }}
+              个
             </p>
           </div>
           <div v-if="invalidKeys.length > 0" class="info-item">
@@ -36,11 +39,15 @@
           </div>
           <div class="info-item">
             <p class="info-label">总请求数</p>
-            <p class="info-value">{{ formatNumber(aggregatedStats.usage.requests) }}</p>
+            <p class="info-value">
+              {{ formatNumber(aggregatedStats.usage.requests) }}
+            </p>
           </div>
           <div class="info-item">
             <p class="info-label">总 Token 数</p>
-            <p class="info-value">{{ formatNumber(aggregatedStats.usage.allTokens) }}</p>
+            <p class="info-value">
+              {{ formatNumber(aggregatedStats.usage.allTokens) }}
+            </p>
           </div>
           <div class="info-item">
             <p class="info-label">总费用</p>
@@ -83,11 +90,15 @@
           </div>
           <div class="info-item">
             <p class="info-label">权限</p>
-            <p class="info-value">{{ formatPermissions(statsData.permissions) }}</p>
+            <p class="info-value">
+              {{ formatPermissions(statsData.permissions) }}
+            </p>
           </div>
           <div class="info-item">
             <p class="info-label">创建时间</p>
-            <p class="info-value break-all">{{ formatDate(statsData.createdAt) }}</p>
+            <p class="info-value break-all">
+              {{ formatDate(statsData.createdAt) }}
+            </p>
           </div>
           <div class="info-item xl:col-span-2">
             <p class="info-label">过期时间</p>
@@ -231,7 +242,8 @@
                 v-if="account.sessionWindow?.remainingTime > 0"
                 class="font-medium text-indigo-600 dark:text-indigo-400"
               >
-                剩余 {{ formatSessionRemaining(account.sessionWindow.remainingTime) }}
+                剩余
+                {{ formatSessionRemaining(account.sessionWindow.remainingTime) }}
               </span>
             </div>
           </div>
@@ -255,11 +267,14 @@
                   <div
                     class="progress-bar"
                     :class="getCodexUsageBarClass(account.codexUsage?.[type])"
-                    :style="{ width: getCodexUsageWidth(account.codexUsage?.[type]) }"
+                    :style="{
+                      width: getCodexUsageWidth(account.codexUsage?.[type])
+                    }"
                   />
                 </div>
                 <div class="quota-foot">
-                  重置剩余 {{ formatCodexRemaining(account.codexUsage?.[type]) }}
+                  重置剩余
+                  {{ formatCodexRemaining(account.codexUsage?.[type]) }}
                 </div>
               </div>
             </div>

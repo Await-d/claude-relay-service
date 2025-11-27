@@ -392,6 +392,38 @@ async function handleMessagesRequest(req, res) {
           }
         } catch (error) {
           logger.error('❌ Bedrock stream request failed:', error)
+
+          // 🔧 集成自动错误恢复（网络错误）
+          try {
+            const networkErrorCodes = [
+              'ECONNREFUSED',
+              'ETIMEDOUT',
+              'ECONNABORTED',
+              'NetworkingError'
+            ]
+            const errorCode = error.code || error.name
+            if (errorCode && networkErrorCodes.includes(errorCode)) {
+              const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+              if (ErrorRecoveryHelper.isNetworkError(errorCode)) {
+                const bedrockAccountResult = await bedrockAccountService.getAccount(accountId)
+                if (bedrockAccountResult.success) {
+                  const account = bedrockAccountResult.data
+                  const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+                    account,
+                    errorCode,
+                    'AWS Bedrock'
+                  )
+                  await bedrockAccountService.updateAccount(accountId, recoveryData)
+                  logger.info(
+                    `🔧 Bedrock account ${accountId} marked with auto-recovery for ${errorCode}`
+                  )
+                }
+              }
+            }
+          } catch (recoveryError) {
+            logger.error(`Failed to apply error recovery for Bedrock stream:`, recoveryError)
+          }
+
           if (!res.headersSent) {
             return res.status(500).json({ error: 'Bedrock service error', message: error.message })
           }
@@ -585,6 +617,38 @@ async function handleMessagesRequest(req, res) {
           }
         } catch (error) {
           logger.error('❌ Bedrock non-stream request failed:', error)
+
+          // 🔧 集成自动错误恢复（网络错误）
+          try {
+            const networkErrorCodes = [
+              'ECONNREFUSED',
+              'ETIMEDOUT',
+              'ECONNABORTED',
+              'NetworkingError'
+            ]
+            const errorCode = error.code || error.name
+            if (errorCode && networkErrorCodes.includes(errorCode)) {
+              const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+              if (ErrorRecoveryHelper.isNetworkError(errorCode)) {
+                const bedrockAccountResult = await bedrockAccountService.getAccount(accountId)
+                if (bedrockAccountResult.success) {
+                  const account = bedrockAccountResult.data
+                  const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+                    account,
+                    errorCode,
+                    'AWS Bedrock'
+                  )
+                  await bedrockAccountService.updateAccount(accountId, recoveryData)
+                  logger.info(
+                    `🔧 Bedrock account ${accountId} marked with auto-recovery for ${errorCode}`
+                  )
+                }
+              }
+            }
+          } catch (recoveryError) {
+            logger.error(`Failed to apply error recovery for Bedrock non-stream:`, recoveryError)
+          }
+
           response = {
             statusCode: 500,
             headers: { 'Content-Type': 'application/json' },

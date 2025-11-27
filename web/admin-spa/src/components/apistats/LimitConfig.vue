@@ -116,7 +116,8 @@
                 }}
               </span>
               <span v-else class="flex items-center gap-1">
-                ${{ statsData.limits.currentDailyCost.toFixed(4) }} / <i class="fas fa-infinity" />
+                ${{ statsData.limits.currentDailyCost.toFixed(4) }} /
+                <i class="fas fa-infinity" />
               </span>
             </span>
           </div>
@@ -148,7 +149,8 @@
                 }}
               </span>
               <span v-else class="flex items-center gap-1">
-                ${{ statsData.limits.currentTotalCost.toFixed(4) }} / <i class="fas fa-infinity" />
+                ${{ statsData.limits.currentTotalCost.toFixed(4) }} /
+                <i class="fas fa-infinity" />
               </span>
             </span>
           </div>
@@ -257,7 +259,9 @@
               <span class="text-sm font-medium text-gray-900 md:text-base">
                 <span v-if="hasClientRestrictions" class="text-orange-600">
                   <i class="fas fa-exclamation-triangle mr-1 text-xs md:text-sm" />
-                  限 {{ statsData.restrictions.allowedClients.length }} 种客户端使用
+                  限
+                  {{ statsData.restrictions.allowedClients.length }}
+                  种客户端使用
                 </span>
                 <span v-else class="text-green-600">
                   <i class="fas fa-check-circle mr-1 text-xs md:text-sm" />

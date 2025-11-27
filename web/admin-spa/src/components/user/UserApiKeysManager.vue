@@ -95,7 +95,9 @@
               </div>
               <div class="ml-4">
                 <div class="flex items-center">
-                  <p class="text-sm font-medium text-gray-900">{{ apiKey.name }}</p>
+                  <p class="text-sm font-medium text-gray-900">
+                    {{ apiKey.name }}
+                  </p>
                   <span
                     v-if="apiKey.isDeleted === 'true' || apiKey.deletedAt"
                     class="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800"
@@ -110,7 +112,9 @@
                   </span>
                 </div>
                 <div class="mt-1">
-                  <p class="text-sm text-gray-500">{{ apiKey.description || 'No description' }}</p>
+                  <p class="text-sm text-gray-500">
+                    {{ apiKey.description || 'No description' }}
+                  </p>
                   <div class="mt-1 flex items-center space-x-4 text-xs text-gray-400">
                     <span>Created: {{ formatDate(apiKey.createdAt) }}</span>
                     <span v-if="apiKey.isDeleted === 'true' || apiKey.deletedAt"

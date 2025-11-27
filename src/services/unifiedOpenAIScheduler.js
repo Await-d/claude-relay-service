@@ -150,10 +150,37 @@ class UnifiedOpenAIScheduler {
           const accountId = apiKeyData.openaiAccountId.replace('responses:', '')
           boundAccount = await openaiResponsesAccountService.getAccount(accountId)
           accountType = 'openai-responses'
+
+          // 🔧 在检查 isActive 之前，先尝试自动恢复 error 状态
+          if (boundAccount && boundAccount.status === 'error') {
+            const isErrorCleared =
+              await openaiResponsesAccountService.checkAndClearErrorStatus(accountId)
+            if (isErrorCleared) {
+              // 刷新账户状态
+              boundAccount = await openaiResponsesAccountService.getAccount(accountId)
+              logger.info(
+                `✅ Dedicated OpenAI-Responses account ${boundAccount?.name || accountId} auto-recovered from error state`
+              )
+            }
+          }
         } else {
           // 普通 OpenAI 账户
           boundAccount = await openaiAccountService.getAccount(apiKeyData.openaiAccountId)
           accountType = 'openai'
+
+          // 🔧 在检查 isActive 之前，先尝试自动恢复 error 状态
+          if (boundAccount && boundAccount.status === 'error') {
+            const isErrorCleared = await openaiAccountService.checkAndClearErrorStatus(
+              apiKeyData.openaiAccountId
+            )
+            if (isErrorCleared) {
+              // 刷新账户状态
+              boundAccount = await openaiAccountService.getAccount(apiKeyData.openaiAccountId)
+              logger.info(
+                `✅ Dedicated OpenAI account ${boundAccount?.name || apiKeyData.openaiAccountId} auto-recovered from error state`
+              )
+            }
+          }
         }
 
         const isActiveBoundAccount =
@@ -370,6 +397,19 @@ class UnifiedOpenAIScheduler {
     // 获取所有OpenAI账户（共享池）
     const openaiAccounts = await openaiAccountService.getAllAccounts()
     for (let account of openaiAccounts) {
+      // 🔧 自动恢复检查
+      if (account.status === 'error') {
+        const isErrorCleared = await openaiAccountService.checkAndClearErrorStatus(account.id)
+        if (isErrorCleared) {
+          account.status = 'active'
+          account.schedulable = 'true'
+          account.errorMessage = ''
+          logger.info(
+            `✅ OpenAI account ${account.name} (${account.id}) auto-recovered from error state`
+          )
+        }
+      }
+
       if (
         account.isActive &&
         account.status !== 'error' &&
@@ -440,10 +480,34 @@ class UnifiedOpenAIScheduler {
     for (const account of openaiResponsesAccounts) {
       if (
         (account.isActive === true || account.isActive === 'true') &&
-        account.status !== 'error' &&
-        account.status !== 'rateLimited' &&
         (account.accountType === 'shared' || !account.accountType)
       ) {
+        // 🔧 检查并自动恢复 error 状态
+        if (account.status === 'error') {
+          const isErrorCleared = await openaiResponsesAccountService.checkAndClearErrorStatus(
+            account.id
+          )
+          if (!isErrorCleared) {
+            logger.debug(
+              `⏭️ Skipping OpenAI-Responses account ${account.name} - still in error state`
+            )
+            continue
+          }
+          // Error 状态已解除，更新本地账户信息
+          account.status = 'active'
+          account.schedulable = 'true'
+          account.errorMessage = ''
+          logger.info(`✅ OpenAI-Responses账号 ${account.name} 已自动从错误状态恢复`)
+        }
+
+        // 跳过其他非正常状态
+        if (account.status !== 'active' && account.status !== 'rateLimited') {
+          logger.debug(
+            `⏭️ Skipping OpenAI-Responses account ${account.name} - status: ${account.status}`
+          )
+          continue
+        }
+
         const hasRateLimitFlag = this._hasRateLimitFlag(account.rateLimitStatus)
         const schedulable = this._isSchedulable(account.schedulable)
 
@@ -540,14 +604,26 @@ class UnifiedOpenAIScheduler {
         return true
       } else if (accountType === 'openai-responses') {
         const account = await openaiResponsesAccountService.getAccount(accountId)
-        if (
-          !account ||
-          (account.isActive !== true && account.isActive !== 'true') ||
-          account.status === 'error' ||
-          account.status === 'unauthorized'
-        ) {
+        if (!account || (account.isActive !== true && account.isActive !== 'true')) {
           return false
         }
+
+        // 🔧 检查并自动恢复 error 状态
+        if (account.status === 'error') {
+          const isErrorCleared =
+            await openaiResponsesAccountService.checkAndClearErrorStatus(accountId)
+          if (!isErrorCleared) {
+            logger.debug(`🚫 OpenAI-Responses account ${accountId} still in error state`)
+            return false
+          }
+          logger.info(`✅ OpenAI-Responses account ${accountId} auto-recovered from error state`)
+        }
+
+        // 跳过其他非正常状态
+        if (account.status !== 'active' && account.status !== 'rateLimited') {
+          return false
+        }
+
         // 检查是否可调度
         if (!this._isSchedulable(account.schedulable)) {
           logger.info(`🚫 OpenAI-Responses account ${accountId} is not schedulable`)

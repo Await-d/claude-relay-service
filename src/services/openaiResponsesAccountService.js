@@ -49,7 +49,9 @@ class OpenAIResponsesAccountService {
       schedulable = true, // 是否可被调度
       dailyQuota = 0, // 每日额度限制（美元），0表示不限制
       quotaResetTime = '00:00', // 额度重置时间（HH:mm格式）
-      rateLimitDuration = 60 // 限流时间（分钟）
+      rateLimitDuration = 60, // 限流时间（分钟）
+      autoRecoverErrors = false, // 自动错误恢复（默认禁用）
+      errorRecoveryDuration = 5 // 错误恢复时间（分钟，默认5分钟）
     } = options
 
     // 验证必填字段
@@ -88,6 +90,9 @@ class OpenAIResponsesAccountService {
       rateLimitedAt: '',
       rateLimitStatus: '',
       rateLimitDuration: rateLimitDuration.toString(),
+      // 自动错误恢复配置
+      autoRecoverErrors: autoRecoverErrors.toString(),
+      errorRecoveryDuration: errorRecoveryDuration.toString(),
       // 额度管理
       dailyQuota: dailyQuota.toString(),
       dailyUsage: '0',
@@ -387,6 +392,38 @@ class OpenAIResponsesAccountService {
       })
 
       logger.info(`✅ Rate limit cleared for account ${account.name}`)
+      return true
+    }
+
+    return false
+  }
+
+  // 检查并清除过期的 error 状态（自动恢复）
+  async checkAndClearErrorStatus(accountId) {
+    const account = await this.getAccount(accountId)
+    if (!account || account.status !== 'error') {
+      return false
+    }
+
+    // 如果没有设置自动恢复时间，则不自动恢复（保持旧行为）
+    if (!account.errorRecoveryAt) {
+      return false
+    }
+
+    const now = new Date()
+    const recoveryAt = new Date(account.errorRecoveryAt)
+
+    if (now >= recoveryAt) {
+      // Error 状态已过期，自动恢复
+      await this.updateAccount(accountId, {
+        status: 'active',
+        schedulable: 'true', // 恢复调度
+        errorMessage: '',
+        errorOccurredAt: '',
+        errorRecoveryAt: ''
+      })
+
+      logger.info(`✅ Auto-recovered error status for account ${account.name}`)
       return true
     }
 

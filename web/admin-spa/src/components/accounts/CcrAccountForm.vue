@@ -37,7 +37,9 @@
               required
               type="text"
             />
-            <p v-if="errors.name" class="mt-1 text-xs text-red-500">{{ errors.name }}</p>
+            <p v-if="errors.name" class="mt-1 text-xs text-red-500">
+              {{ errors.name }}
+            </p>
           </div>
 
           <div>
@@ -65,7 +67,9 @@
                 required
                 type="text"
               />
-              <p v-if="errors.apiUrl" class="mt-1 text-xs text-red-500">{{ errors.apiUrl }}</p>
+              <p v-if="errors.apiUrl" class="mt-1 text-xs text-red-500">
+                {{ errors.apiUrl }}
+              </p>
             </div>
             <div>
               <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
@@ -79,7 +83,9 @@
                 :required="!isEdit"
                 type="password"
               />
-              <p v-if="errors.apiKey" class="mt-1 text-xs text-red-500">{{ errors.apiKey }}</p>
+              <p v-if="errors.apiKey" class="mt-1 text-xs text-red-500">
+                {{ errors.apiKey }}
+              </p>
             </div>
           </div>
 

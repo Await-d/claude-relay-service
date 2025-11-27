@@ -1,0 +1,15 @@
+# 常用命令
+- 安装依赖：`npm install`
+- 安装前端依赖：`npm run install:web`（web/admin-spa）
+- 开发模式（热重载）：`npm run dev`
+- 生产启动（含 lint）：`npm start`
+- 构建前端：`npm run build:web`
+- 初始化配置/管理员：`npm run setup`（生成 data/init.json）
+- 服务管理：`npm run service:start[:daemon]`、`npm run service:restart[:daemon]`、`npm run service:stop`、`npm run service:status`、`npm run service:logs`、`npm run service:logs:follow`
+- CLI 工具：`npm run cli` 基础，子命令 `npm run cli admin|keys|accounts|status`
+- 数据导入导出：`npm run data:export` / `npm run data:import`（增强版同名后缀）
+- 迁移脚本：`npm run migrate:apikey-expiry[:dry]`、`npm run migrate:fix-usage-stats`
+- 测试：`npm test`
+- Lint：`npm run lint`（自动修复），检查模式 `npm run lint:check`
+- 格式化：`npm run format`
+- Makefile 便捷：`make help` 查看；常用 `make setup`、`make dev`、`make build-web`、`make service-daemon`、`make logs-follow`、`make test`、`make lint`

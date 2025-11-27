@@ -218,7 +218,9 @@
                 <div class="h-2 w-2 rounded-full bg-blue-500"></div>
               </div>
               <div class="ml-3">
-                <p class="text-sm font-medium text-gray-900">{{ model.name }}</p>
+                <p class="text-sm font-medium text-gray-900">
+                  {{ model.name }}
+                </p>
               </div>
             </div>
             <div class="text-right">
@@ -279,8 +281,12 @@
             <tbody class="divide-y divide-gray-200 bg-white">
               <tr v-for="apiKey in userApiKeys" :key="apiKey.id">
                 <td class="whitespace-nowrap px-6 py-4">
-                  <div class="text-sm font-medium text-gray-900">{{ apiKey.name }}</div>
-                  <div class="text-sm text-gray-500">{{ apiKey.keyPreview }}</div>
+                  <div class="text-sm font-medium text-gray-900">
+                    {{ apiKey.name }}
+                  </div>
+                  <div class="text-sm text-gray-500">
+                    {{ apiKey.keyPreview }}
+                  </div>
                 </td>
                 <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
                   {{ formatNumber(apiKey.usage?.requests || 0) }}

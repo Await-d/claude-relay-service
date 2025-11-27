@@ -44,7 +44,9 @@ class GeminiApiAccountService {
       accountType = 'shared', // 'dedicated' or 'shared'
       schedulable = true, // 是否可被调度
       supportedModels = [], // 支持的模型列表
-      rateLimitDuration = 60 // 限流时间（分钟）
+      rateLimitDuration = 60, // 限流时间（分钟）
+      autoRecoverErrors = false, // 自动恢复错误状态
+      errorRecoveryDuration = 5 // 错误恢复时长（分钟）
     } = options
 
     // 验证必填字段
@@ -79,7 +81,11 @@ class GeminiApiAccountService {
       // 限流相关
       rateLimitedAt: '',
       rateLimitStatus: '',
-      rateLimitDuration: rateLimitDuration.toString()
+      rateLimitDuration: rateLimitDuration.toString(),
+
+      // 自动错误恢复
+      autoRecoverErrors: autoRecoverErrors.toString(),
+      errorRecoveryDuration: errorRecoveryDuration.toString()
     }
 
     // 保存到 Redis
@@ -467,6 +473,23 @@ class GeminiApiAccountService {
     }
 
     return { success: true, message: 'Account status reset successfully' }
+  }
+
+  /**
+   * 检查并清除过期的 error 状态（自动恢复）
+   * @param {string} accountId - 账户ID
+   * @returns {boolean} - 是否已清除错误状态
+   */
+  async checkAndClearErrorStatus(accountId) {
+    const account = await this.getAccount(accountId)
+    const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+    if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'Gemini API')) {
+      await this.updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+      return true
+    }
+
+    return false
   }
 
   // API Key 不会过期

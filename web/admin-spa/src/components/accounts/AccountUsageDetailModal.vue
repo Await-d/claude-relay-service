@@ -234,7 +234,8 @@
                 <h4
                   class="mb-3 flex items-center text-sm font-semibold text-gray-700 dark:text-gray-300"
                 >
-                  <i class="fas fa-tachometer-alt mr-2 text-purple-500" /> 平均速率
+                  <i class="fas fa-tachometer-alt mr-2 text-purple-500" />
+                  平均速率
                 </h4>
                 <div class="space-y-2 text-sm text-gray-600 dark:text-gray-300">
                   <div class="flex items-center justify-between">
@@ -306,7 +307,8 @@
                 <h4
                   class="flex items-center text-sm font-semibold text-gray-700 dark:text-gray-300"
                 >
-                  <i class="fas fa-chart-line mr-2 text-blue-500" /> 30天费用与请求趋势
+                  <i class="fas fa-chart-line mr-2 text-blue-500" />
+                  30天费用与请求趋势
                 </h4>
                 <span class="text-xs text-gray-400 dark:text-gray-500">
                   最新更新时间：{{ formatDateTime(generatedAtDisplay) }}

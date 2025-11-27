@@ -96,7 +96,10 @@ class CcrAccountService {
       // 使用与统计一致的时区日期，避免边界问题
       lastResetDate: redis.getDateStringInTimezone(), // 最后重置日期（按配置时区）
       quotaResetTime, // 额度重置时间
-      quotaStoppedAt: '' // 因额度停用的时间
+      quotaStoppedAt: '', // 因额度停用的时间
+      // 自动错误恢复
+      autoRecoverErrors: (options.autoRecoverErrors || false).toString(),
+      errorRecoveryDuration: (options.errorRecoveryDuration || 5).toString()
     }
 
     const client = redis.getClientSafe()
@@ -951,6 +954,23 @@ class CcrAccountService {
     }
     const expiryDate = new Date(account.subscriptionExpiresAt)
     return expiryDate <= new Date()
+  }
+
+  /**
+   * 检查并清除过期的 error 状态（自动恢复）
+   * @param {string} accountId - 账户ID
+   * @returns {boolean} - 是否已清除错误状态
+   */
+  async checkAndClearErrorStatus(accountId) {
+    const account = await this.getAccount(accountId)
+    const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+    if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'CCR')) {
+      await this.updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+      return true
+    }
+
+    return false
   }
 }
 

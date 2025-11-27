@@ -177,6 +177,18 @@ async function handleAzureOpenAIRequest({
         ...errorDetails,
         suggestion: 'Check if proxy settings are correct or Azure service is accessible'
       })
+
+      // 使用 errorRecoveryHelper 处理网络错误
+      const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+      if (ErrorRecoveryHelper.isNetworkError(error.code) && account && account.id) {
+        const azureOpenaiAccountService = require('./azureOpenaiAccountService')
+        const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+          account,
+          error.code,
+          'Azure OpenAI'
+        )
+        await azureOpenaiAccountService.updateAccount(account.id, recoveryData)
+      }
     } else if (error.code === 'ECONNRESET' || error.message.includes('socket hang up')) {
       logger.error('🚨 Azure OpenAI Connection Reset / Socket Hang Up', {
         ...errorDetails,
@@ -190,6 +202,18 @@ async function handleAzureOpenAIRequest({
         suggestion:
           'Request exceeded 10-minute timeout. Consider reducing model complexity or check if Azure service is responding slowly.'
       })
+
+      // 使用 errorRecoveryHelper 处理网络错误
+      const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+      if (ErrorRecoveryHelper.isNetworkError(error.code) && account && account.id) {
+        const azureOpenaiAccountService = require('./azureOpenaiAccountService')
+        const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+          account,
+          error.code,
+          'Azure OpenAI'
+        )
+        await azureOpenaiAccountService.updateAccount(account.id, recoveryData)
+      }
     } else if (
       error.code === 'CERT_AUTHORITY_INVALID' ||
       error.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'

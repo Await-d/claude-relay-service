@@ -1094,10 +1094,32 @@ class ClaudeRelayService {
           errorMessage = 'Unable to resolve Claude API hostname'
         } else if (error.code === 'ECONNREFUSED') {
           errorMessage = 'Connection refused by Claude API server'
+
+          // 使用 errorRecoveryHelper 处理网络错误
+          const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+          if (ErrorRecoveryHelper.isNetworkError(error.code)) {
+            const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+              account,
+              error.code,
+              'Claude'
+            )
+            await claudeAccountService.updateAccount(accountId, recoveryData)
+          }
         } else if (error.code === 'ETIMEDOUT') {
           errorMessage = 'Connection timed out to Claude API server'
 
-          await this._handleServerError(accountId, 504, null, 'Network')
+          // 使用 errorRecoveryHelper 处理网络错误
+          const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+          if (ErrorRecoveryHelper.isNetworkError(error.code)) {
+            const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+              account,
+              error.code,
+              'Claude'
+            )
+            await claudeAccountService.updateAccount(accountId, recoveryData)
+          } else {
+            await this._handleServerError(accountId, 504, null, 'Network')
+          }
         }
 
         reject(new Error(errorMessage))
@@ -1875,9 +1897,31 @@ class ClaudeRelayService {
         } else if (error.code === 'ECONNREFUSED') {
           errorMessage = 'Connection refused by Claude API server'
           statusCode = 502
+
+          // 使用 errorRecoveryHelper 处理网络错误
+          const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+          if (ErrorRecoveryHelper.isNetworkError(error.code)) {
+            const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+              account,
+              error.code,
+              'Claude'
+            )
+            await claudeAccountService.updateAccount(accountId, recoveryData)
+          }
         } else if (error.code === 'ETIMEDOUT') {
           errorMessage = 'Connection timed out to Claude API server'
           statusCode = 504
+
+          // 使用 errorRecoveryHelper 处理网络错误
+          const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+          if (ErrorRecoveryHelper.isNetworkError(error.code)) {
+            const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+              account,
+              error.code,
+              'Claude'
+            )
+            await claudeAccountService.updateAccount(accountId, recoveryData)
+          }
         }
 
         if (!responseStream.headersSent) {

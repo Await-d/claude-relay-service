@@ -17,10 +17,22 @@ export const useDashboardStore = defineStore('dashboard', () => {
     rateLimitedAccounts: 0,
     accountsByPlatform: {
       claude: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
-      'claude-console': { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
+      'claude-console': {
+        total: 0,
+        normal: 0,
+        abnormal: 0,
+        paused: 0,
+        rateLimited: 0
+      },
       gemini: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
       openai: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
-      azure_openai: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
+      azure_openai: {
+        total: 0,
+        normal: 0,
+        abnormal: 0,
+        paused: 0,
+        rateLimited: 0
+      },
       bedrock: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 }
     },
     todayRequests: 0,
@@ -181,12 +193,48 @@ export const useDashboardStore = defineStore('dashboard', () => {
             overview.rateLimitedAccounts || overview.rateLimitedClaudeAccounts || 0,
           // 各平台详细统计
           accountsByPlatform: overview.accountsByPlatform || {
-            claude: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
-            'claude-console': { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
-            gemini: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
-            openai: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
-            azure_openai: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 },
-            bedrock: { total: 0, normal: 0, abnormal: 0, paused: 0, rateLimited: 0 }
+            claude: {
+              total: 0,
+              normal: 0,
+              abnormal: 0,
+              paused: 0,
+              rateLimited: 0
+            },
+            'claude-console': {
+              total: 0,
+              normal: 0,
+              abnormal: 0,
+              paused: 0,
+              rateLimited: 0
+            },
+            gemini: {
+              total: 0,
+              normal: 0,
+              abnormal: 0,
+              paused: 0,
+              rateLimited: 0
+            },
+            openai: {
+              total: 0,
+              normal: 0,
+              abnormal: 0,
+              paused: 0,
+              rateLimited: 0
+            },
+            azure_openai: {
+              total: 0,
+              normal: 0,
+              abnormal: 0,
+              paused: 0,
+              rateLimited: 0
+            },
+            bedrock: {
+              total: 0,
+              normal: 0,
+              abnormal: 0,
+              paused: 0,
+              rateLimited: 0
+            }
           },
           todayRequests: recentActivity.requestsToday || 0,
           totalRequests: overview.totalRequestsUsed || 0,

@@ -227,6 +227,27 @@ class CcrRelayService {
         throw new Error('Client disconnected')
       }
 
+      // 🔧 集成自动错误恢复（网络错误）
+      if (account && accountId) {
+        const networkErrorCodes = ['ECONNREFUSED', 'ETIMEDOUT', 'ECONNABORTED']
+        if (error.code && networkErrorCodes.includes(error.code)) {
+          try {
+            const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+            if (ErrorRecoveryHelper.isNetworkError(error.code)) {
+              const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+                account,
+                error.code,
+                'CCR'
+              )
+              await ccrAccountService.updateAccount(accountId, recoveryData)
+              logger.info(`🔧 CCR account ${accountId} marked with auto-recovery for ${error.code}`)
+            }
+          } catch (recoveryError) {
+            logger.error(`Failed to apply error recovery for ${error.code}:`, recoveryError)
+          }
+        }
+      }
+
       logger.error(
         `❌ CCR relay request failed (Account: ${account?.name || accountId}):`,
         error.message

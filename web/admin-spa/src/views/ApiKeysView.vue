@@ -1329,7 +1329,8 @@
                       </template>
                       <template v-else-if="getCachedStats(key.id)">
                         <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {{ formatNumber(getCachedStats(key.id).requests || 0) }} 次
+                          {{ formatNumber(getCachedStats(key.id).requests || 0) }}
+                          次
                         </p>
                       </template>
                       <template v-else>
@@ -2597,7 +2598,9 @@ const loadPageLastUsage = async () => {
   keyIds.forEach((id) => lastUsageLoading.value.add(id))
 
   try {
-    const response = await apiClient.post('/admin/api-keys/batch-last-usage', { keyIds })
+    const response = await apiClient.post('/admin/api-keys/batch-last-usage', {
+      keyIds
+    })
 
     if (response.success && response.data) {
       // 更新缓存
@@ -4377,16 +4380,28 @@ const exportToExcel = () => {
         } else if (header === '标签') {
           cellStyle.alignment = { horizontal: 'left', vertical: 'center' }
           if (value === '无') {
-            cellStyle.font = { ...cellStyle.font, color: { rgb: '999999' }, italic: true }
+            cellStyle.font = {
+              ...cellStyle.font,
+              color: { rgb: '999999' },
+              italic: true
+            }
           }
         } else if (header === '最后使用时间') {
           cellStyle.alignment = { horizontal: 'right', vertical: 'center' }
           if (value === '从未使用') {
-            cellStyle.font = { ...cellStyle.font, color: { rgb: '999999' }, italic: true }
+            cellStyle.font = {
+              ...cellStyle.font,
+              color: { rgb: '999999' },
+              italic: true
+            }
           }
         } else if (header && header.includes('费用')) {
           cellStyle.alignment = { horizontal: 'right', vertical: 'center' }
-          cellStyle.font = { ...cellStyle.font, color: { rgb: '0066CC' }, bold: true }
+          cellStyle.font = {
+            ...cellStyle.font,
+            color: { rgb: '0066CC' },
+            bold: true
+          }
         } else if (header && (header.includes('Token') || header.includes('请求'))) {
           cellStyle.alignment = { horizontal: 'right', vertical: 'center' }
         }

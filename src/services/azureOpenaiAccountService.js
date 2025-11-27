@@ -139,7 +139,10 @@ async function createAccount(accountData) {
     status: 'active',
     schedulable: accountData.schedulable !== false ? 'true' : 'false',
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    // 自动错误恢复
+    autoRecoverErrors: (accountData.autoRecoverErrors || false).toString(),
+    errorRecoveryDuration: (accountData.errorRecoveryDuration || 5).toString()
   }
 
   // 代理配置
@@ -379,6 +382,22 @@ async function selectAvailableAccount(sessionId = null) {
   // 获取所有共享账户
   const sharedAccounts = await getSharedAccounts()
 
+  // 自动恢复检查：遍历错误状态的账户
+  for (const account of sharedAccounts) {
+    if (account.status === 'error') {
+      const isErrorCleared = await checkAndClearErrorStatus(account.id)
+      if (isErrorCleared) {
+        // 更新账户对象状态
+        account.status = 'active'
+        account.schedulable = 'true'
+        account.errorMessage = ''
+        logger.info(
+          `✅ Azure OpenAI account ${account.name} (${account.id}) auto-recovered from error state`
+        )
+      }
+    }
+  }
+
   // 过滤出可用的账户
   const availableAccounts = sharedAccounts.filter((acc) => {
     // ✅ 检查账户订阅是否过期
@@ -505,6 +524,23 @@ async function migrateApiKeysForAzureSupport() {
   return migratedCount
 }
 
+/**
+ * 检查并清除过期的 error 状态（自动恢复）
+ * @param {string} accountId - 账户ID
+ * @returns {boolean} - 是否已清除错误状态
+ */
+async function checkAndClearErrorStatus(accountId) {
+  const account = await getAccount(accountId)
+  const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+  if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'Azure OpenAI')) {
+    await updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+    return true
+  }
+
+  return false
+}
+
 module.exports = {
   createAccount,
   getAccount,
@@ -518,6 +554,7 @@ module.exports = {
   performHealthChecks,
   toggleSchedulable,
   migrateApiKeysForAzureSupport,
+  checkAndClearErrorStatus,
   encrypt,
   decrypt
 }

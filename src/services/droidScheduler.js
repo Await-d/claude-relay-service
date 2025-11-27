@@ -151,6 +151,19 @@ class DroidScheduler {
       } else {
         const account = await droidAccountService.getAccount(binding)
         if (account) {
+          // 🔧 自动恢复检查
+          if (account.status === 'error') {
+            const isErrorCleared = await droidAccountService.checkAndClearErrorStatus(binding)
+            if (isErrorCleared) {
+              const refreshedAccount = await droidAccountService.getAccount(binding)
+              if (refreshedAccount) {
+                account = refreshedAccount
+                logger.info(
+                  `✅ Dedicated Droid account ${account.name || binding} auto-recovered from error state`
+                )
+              }
+            }
+          }
           candidates = [account]
           isDedicatedBinding = true
         }

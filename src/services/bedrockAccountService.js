@@ -61,6 +61,12 @@ class BedrockAccountService {
       // 注意：Bedrock 使用 AWS 凭证，没有 OAuth token，因此没有 expiresAt
       subscriptionExpiresAt: options.subscriptionExpiresAt || null,
 
+      // 自动错误恢复配置
+      autoRecoverErrors:
+        options.autoRecoverErrors !== undefined ? options.autoRecoverErrors : false,
+      errorRecoveryDuration:
+        options.errorRecoveryDuration !== undefined ? options.errorRecoveryDuration : 5,
+
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       type: 'bedrock' // 标识这是Bedrock账户
@@ -241,6 +247,28 @@ class BedrockAccountService {
         account.subscriptionExpiresAt = updates.subscriptionExpiresAt
       }
 
+      // 自动错误恢复配置
+      if (updates.autoRecoverErrors !== undefined) {
+        account.autoRecoverErrors = updates.autoRecoverErrors
+      }
+      if (updates.errorRecoveryDuration !== undefined) {
+        account.errorRecoveryDuration = updates.errorRecoveryDuration
+      }
+
+      // 错误状态字段（用于自动恢复）
+      if (updates.status !== undefined) {
+        account.status = updates.status
+      }
+      if (updates.errorMessage !== undefined) {
+        account.errorMessage = updates.errorMessage
+      }
+      if (updates.errorTimestamp !== undefined) {
+        account.errorTimestamp = updates.errorTimestamp
+      }
+      if (updates.errorType !== undefined) {
+        account.errorType = updates.errorType
+      }
+
       account.updatedAt = new Date().toISOString()
 
       await client.set(`bedrock_account:${accountId}`, JSON.stringify(account))
@@ -387,6 +415,33 @@ class BedrockAccountService {
     }
     const expiryDate = new Date(account.subscriptionExpiresAt)
     return expiryDate <= new Date()
+  }
+
+  /**
+   * 检查并清除过期的 error 状态（自动恢复）
+   * @param {string} accountId - 账户ID
+   * @returns {Promise<boolean>} - 是否已清除错误状态
+   */
+  async checkAndClearErrorStatus(accountId) {
+    try {
+      const accountResult = await this.getAccount(accountId)
+      if (!accountResult.success) {
+        return false
+      }
+
+      const account = accountResult.data
+      const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+      if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'AWS Bedrock')) {
+        await this.updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+        return true
+      }
+
+      return false
+    } catch (error) {
+      logger.error(`❌ Failed to check/clear error status for Bedrock account ${accountId}:`, error)
+      return false
+    }
   }
 
   // 🔑 生成加密密钥（缓存优化）

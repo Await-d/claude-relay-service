@@ -347,6 +347,27 @@ class DroidRelayService {
         }
       }
 
+      // 🔧 集成自动错误恢复（网络错误）
+      if (account && account.id) {
+        const networkErrorCodes = ['ECONNREFUSED', 'ETIMEDOUT', 'ECONNABORTED']
+        if (error.code && networkErrorCodes.includes(error.code)) {
+          try {
+            const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+            if (ErrorRecoveryHelper.isNetworkError(error.code)) {
+              const recoveryData = ErrorRecoveryHelper.createErrorRecoveryData(
+                account,
+                error.code,
+                'Droid'
+              )
+              await droidAccountService.updateAccount(account.id, recoveryData)
+              logger.info(`🔧 Droid account ${account.id} marked with auto-recovery for ${error.code}`)
+            }
+          } catch (recoveryError) {
+            logger.error(`Failed to apply error recovery for ${error.code}:`, recoveryError)
+          }
+        }
+      }
+
       if (error.response) {
         // HTTP 错误响应
         return {

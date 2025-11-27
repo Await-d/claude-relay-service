@@ -416,6 +416,10 @@ async function createAccount(accountData) {
     // 支持的模型列表（可选）
     supportedModels: accountData.supportedModels || [], // 空数组表示支持所有模型
 
+    // 自动错误恢复
+    autoRecoverErrors: (accountData.autoRecoverErrors || false).toString(),
+    errorRecoveryDuration: (accountData.errorRecoveryDuration || 5).toString(),
+
     // 时间戳
     createdAt: now,
     updatedAt: now,
@@ -1660,6 +1664,23 @@ async function resetAccountStatus(accountId) {
   }
 }
 
+/**
+ * 检查并清除过期的 error 状态（自动恢复）
+ * @param {string} accountId - 账户ID
+ * @returns {boolean} - 是否已清除错误状态
+ */
+async function checkAndClearErrorStatus(accountId) {
+  const account = await getAccount(accountId)
+  const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
+
+  if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'Gemini')) {
+    await updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
+    return true
+  }
+
+  return false
+}
+
 module.exports = {
   generateAuthUrl,
   pollAuthorizationStatus,
@@ -1691,6 +1712,7 @@ module.exports = {
   generateContentStream,
   updateTempProjectId,
   resetAccountStatus,
+  checkAndClearErrorStatus,
   OAUTH_CLIENT_ID,
   OAUTH_SCOPES
 }
