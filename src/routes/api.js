@@ -825,6 +825,19 @@ async function handleMessagesRequest(req, res) {
       }
     }
 
+    // 客户端主动断开：不再按服务器错误处理，直接结束以减少噪声
+    if (
+      handledError.message === 'Client disconnected' ||
+      handledError.code === 'ERR_CANCELED' ||
+      handledError.code === 'ECONNABORTED'
+    ) {
+      logger.info('🔌 Client disconnected, upstream relay aborted')
+      if (!res.destroyed && !res.writableEnded) {
+        res.end()
+      }
+      return undefined
+    }
+
     logger.error('❌ Claude relay error:', handledError.message, {
       code: handledError.code,
       stack: handledError.stack
