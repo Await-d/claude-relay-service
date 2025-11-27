@@ -4720,7 +4720,7 @@ const form = ref({
     ? props.account.autoRecoverErrors === 'true' || props.account.autoRecoverErrors === true
     : false,
   errorRecoveryDuration: props.account?.errorRecoveryDuration
-    ? parseInt(props.account.errorRecoveryDuration)
+    ? parseFloat(props.account.errorRecoveryDuration)
     : 5,
   supportedModels: (() => {
     const models = props.account?.supportedModels
@@ -6621,6 +6621,13 @@ watch(
         deploymentName: newAccount.deploymentName || '',
         // OpenAI-Responses 特定字段
         baseApi: newAccount.baseApi || '',
+        // 自动错误恢复配置
+        autoRecoverErrors: newAccount
+          ? newAccount.autoRecoverErrors === 'true' || newAccount.autoRecoverErrors === true
+          : false,
+        errorRecoveryDuration: newAccount?.errorRecoveryDuration
+          ? parseFloat(newAccount.errorRecoveryDuration)
+          : 5,
         // 额度管理字段
         dailyQuota: newAccount.dailyQuota || 0,
         dailyUsage: newAccount.dailyUsage || 0,
