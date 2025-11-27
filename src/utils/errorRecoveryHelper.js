@@ -24,7 +24,7 @@ class ErrorRecoveryHelper {
    */
   static getRecoveryDuration(account, defaultDuration = 5) {
     if (!account) return defaultDuration
-    const duration = parseInt(account.errorRecoveryDuration)
+    const duration = parseFloat(account.errorRecoveryDuration)
     return Number.isFinite(duration) && duration > 0 ? duration : defaultDuration
   }
 
