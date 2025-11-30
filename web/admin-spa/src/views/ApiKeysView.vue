@@ -253,12 +253,15 @@
           <!-- 桌面端表格视图 -->
           <div v-else class="table-wrapper hidden md:block">
             <div class="table-container">
-              <table class="w-full table-fixed">
+              <table class="w-full">
                 <thead
                   class="sticky top-0 z-10 bg-gradient-to-b from-gray-50 to-gray-100/90 backdrop-blur-sm dark:from-gray-700 dark:to-gray-800/90"
                 >
                   <tr>
-                    <th v-if="shouldShowCheckboxes" class="w-[50px] px-3 py-4 text-left">
+                    <th
+                      v-if="shouldShowCheckboxes"
+                      class="checkbox-column sticky left-0 z-20 min-w-[50px] px-3 py-4 text-left"
+                    >
                       <div class="flex items-center">
                         <input
                           v-model="selectAllChecked"
@@ -270,7 +273,8 @@
                       </div>
                     </th>
                     <th
-                      class="w-[14%] min-w-[120px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                      class="name-column sticky z-20 min-w-[140px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                      :class="shouldShowCheckboxes ? 'left-[50px]' : 'left-0'"
                       @click="sortApiKeys('name')"
                     >
                       名称
@@ -285,17 +289,17 @@
                       <i v-else class="fas fa-sort ml-1 text-gray-400" />
                     </th>
                     <th
-                      class="w-[15%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      class="min-w-[140px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                     >
                       所属账号
                     </th>
                     <th
-                      class="w-[10%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      class="min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                     >
                       标签
                     </th>
                     <th
-                      class="w-[6%] min-w-[60px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                      class="min-w-[80px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                       @click="sortApiKeys('status')"
                     >
                       状态
@@ -310,27 +314,43 @@
                       <i v-else class="fas fa-sort ml-1 text-gray-400" />
                     </th>
                     <th
-                      class="w-[4%] min-w-[40px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      class="min-w-[70px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      :class="{
+                        'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600': canSortByCost,
+                        'cursor-not-allowed opacity-60': !canSortByCost
+                      }"
+                      :title="costSortTooltip"
+                      @click="sortApiKeys('cost')"
                     >
                       费用
+                      <i
+                        v-if="apiKeysSortBy === 'cost'"
+                        :class="[
+                          'fas',
+                          apiKeysSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                          'ml-1'
+                        ]"
+                      />
+                      <i v-else-if="canSortByCost" class="fas fa-sort ml-1 text-gray-400" />
+                      <i v-else class="fas fa-clock ml-1 text-gray-400" title="索引更新中" />
                     </th>
                     <th
-                      class="w-[14%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      class="min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                     >
                       限制
                     </th>
                     <th
-                      class="w-[5%] min-w-[45px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      class="min-w-[80px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                     >
                       Token
                     </th>
                     <th
-                      class="w-[5%] min-w-[45px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      class="min-w-[80px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                     >
                       请求数
                     </th>
                     <th
-                      class="w-[8%] min-w-[70px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                      class="min-w-[100px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                       @click="sortApiKeys('lastUsedAt')"
                     >
                       最后使用
@@ -345,7 +365,7 @@
                       <i v-else class="fas fa-sort ml-1 text-gray-400" />
                     </th>
                     <th
-                      class="w-[8%] min-w-[70px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                      class="min-w-[100px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                       @click="sortApiKeys('createdAt')"
                     >
                       创建时间
@@ -360,7 +380,7 @@
                       <i v-else class="fas fa-sort ml-1 text-gray-400" />
                     </th>
                     <th
-                      class="w-[8%] min-w-[70px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                      class="min-w-[100px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                       @click="sortApiKeys('expiresAt')"
                     >
                       过期时间
@@ -375,7 +395,7 @@
                       <i v-else class="fas fa-sort ml-1 text-gray-400" />
                     </th>
                     <th
-                      class="operations-column sticky right-0 w-[23%] min-w-[200px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                      class="operations-column sticky right-0 min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                     >
                       操作
                     </th>
@@ -394,7 +414,10 @@
                         'hover:bg-blue-50/60 hover:shadow-sm dark:hover:bg-blue-900/20'
                       ]"
                     >
-                      <td v-if="shouldShowCheckboxes" class="px-3 py-3">
+                      <td
+                        v-if="shouldShowCheckboxes"
+                        class="checkbox-column sticky left-0 z-10 px-3 py-3"
+                      >
                         <div class="flex items-center">
                           <input
                             v-model="selectedApiKeys"
@@ -405,7 +428,10 @@
                           />
                         </div>
                       </td>
-                      <td class="px-3 py-3">
+                      <td
+                        class="name-column sticky z-10 px-3 py-3"
+                        :class="shouldShowCheckboxes ? 'left-[50px]' : 'left-0'"
+                      >
                         <div class="min-w-0">
                           <!-- 名称 -->
                           <div
@@ -838,14 +864,15 @@
                         class="operations-column operations-cell whitespace-nowrap px-3 py-3"
                         style="font-size: 13px"
                       >
-                        <div class="flex gap-1">
+                        <!-- 大屏幕：展开所有按钮 -->
+                        <div class="hidden gap-1 2xl:flex">
                           <button
                             class="rounded px-2 py-1 text-xs font-medium text-purple-600 transition-colors hover:bg-purple-50 hover:text-purple-900 dark:hover:bg-purple-900/20"
                             title="查看详细统计"
                             @click="showUsageDetails(key)"
                           >
                             <i class="fas fa-chart-line" />
-                            <span class="ml-1 hidden xl:inline">详情</span>
+                            <span class="ml-1">详情</span>
                           </button>
                           <button
                             v-if="key && key.id"
@@ -859,7 +886,7 @@
                                 expandedApiKeys[key.id] ? 'fa-chevron-up' : 'fa-chevron-down'
                               ]"
                             />
-                            <span class="ml-1 hidden xl:inline">模型</span>
+                            <span class="ml-1">模型</span>
                           </button>
                           <button
                             class="rounded px-2 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-900 dark:hover:bg-blue-900/20"
@@ -867,7 +894,7 @@
                             @click="openEditApiKeyModal(key)"
                           >
                             <i class="fas fa-edit" />
-                            <span class="ml-1 hidden xl:inline">编辑</span>
+                            <span class="ml-1">编辑</span>
                           </button>
                           <button
                             v-if="
@@ -880,7 +907,7 @@
                             @click="openRenewApiKeyModal(key)"
                           >
                             <i class="fas fa-clock" />
-                            <span class="ml-1 hidden xl:inline">续期</span>
+                            <span class="ml-1">续期</span>
                           </button>
                           <button
                             :class="[
@@ -893,9 +920,7 @@
                             @click="toggleApiKeyStatus(key)"
                           >
                             <i :class="['fas', key.isActive ? 'fa-ban' : 'fa-check-circle']" />
-                            <span class="ml-1 hidden xl:inline">{{
-                              key.isActive ? '禁用' : '激活'
-                            }}</span>
+                            <span class="ml-1">{{ key.isActive ? '禁用' : '激活' }}</span>
                           </button>
                           <button
                             class="rounded px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-900 dark:hover:bg-red-900/20"
@@ -903,8 +928,34 @@
                             @click="deleteApiKey(key.id)"
                           >
                             <i class="fas fa-trash" />
-                            <span class="ml-1 hidden xl:inline">删除</span>
+                            <span class="ml-1">删除</span>
                           </button>
+                        </div>
+                        <!-- 小屏幕：常用按钮 + 下拉菜单 -->
+                        <div class="flex items-center gap-1 2xl:hidden">
+                          <!-- 始终显示的快捷按钮 -->
+                          <button
+                            class="rounded px-2 py-1 text-xs font-medium text-purple-600 transition-colors hover:bg-purple-50 hover:text-purple-900 dark:hover:bg-purple-900/20"
+                            title="查看详细统计"
+                            @click="showUsageDetails(key)"
+                          >
+                            <i class="fas fa-chart-line" />
+                          </button>
+                          <button
+                            v-if="key && key.id"
+                            class="rounded px-2 py-1 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-900 dark:hover:bg-indigo-900/20"
+                            title="模型使用分布"
+                            @click="toggleApiKeyModelStats(key.id)"
+                          >
+                            <i
+                              :class="[
+                                'fas',
+                                expandedApiKeys[key.id] ? 'fa-chevron-up' : 'fa-chevron-down'
+                              ]"
+                            />
+                          </button>
+                          <!-- 更多操作下拉菜单 -->
+                          <ActionDropdown :actions="getApiKeyActions(key)" />
                         </div>
                       </td>
                     </tr>
@@ -1707,62 +1758,64 @@
 
             <div class="table-wrapper">
               <div class="table-container">
-                <table class="w-full table-fixed">
-                  <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
+                <table class="w-full">
+                  <thead
+                    class="sticky top-0 z-10 bg-gradient-to-b from-gray-50 to-gray-100/90 backdrop-blur-sm dark:from-gray-700 dark:to-gray-800/90"
+                  >
                     <tr>
                       <th
-                        class="w-[14%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="name-column sticky left-0 z-20 min-w-[140px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         名称
                       </th>
                       <th
-                        class="w-[15%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[140px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         所属账号
                       </th>
                       <th
                         v-if="isLdapEnabled"
-                        class="w-[15%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         创建者
                       </th>
                       <th
-                        class="w-[15%] min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[120px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         创建时间
                       </th>
                       <th
-                        class="w-[10%] min-w-[90px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         删除者
                       </th>
                       <th
-                        class="w-[10%] min-w-[90px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         删除时间
                       </th>
                       <th
-                        class="w-[8%] min-w-[60px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[70px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         费用
                       </th>
                       <th
-                        class="w-[8%] min-w-[60px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[80px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         Token
                       </th>
                       <th
-                        class="w-[8%] min-w-[60px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[80px] px-3 py-4 text-right text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         请求数
                       </th>
                       <th
-                        class="w-[9%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         最后使用
                       </th>
                       <th
-                        class="operations-column sticky right-0 w-[15%] min-w-[160px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                        class="operations-column sticky right-0 min-w-[140px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                       >
                         操作
                       </th>
@@ -1770,7 +1823,7 @@
                   </thead>
                   <tbody class="divide-y divide-gray-200/50 dark:divide-gray-600/50">
                     <tr v-for="key in deletedApiKeys" :key="key.id" class="table-row">
-                      <td class="px-3 py-3">
+                      <td class="name-column sticky left-0 z-10 px-3 py-3">
                         <div class="flex items-center">
                           <div
                             class="mr-2 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-red-500 to-red-600"
@@ -2043,7 +2096,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import { useClientsStore } from '@/stores/clients'
@@ -2059,6 +2112,7 @@ import ExpiryEditModal from '@/components/apikeys/ExpiryEditModal.vue'
 import UsageDetailModal from '@/components/apikeys/UsageDetailModal.vue'
 import LimitProgressBar from '@/components/apikeys/LimitProgressBar.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
+import ActionDropdown from '@/components/common/ActionDropdown.vue'
 
 // 响应式数据
 const clientsStore = useClientsStore()
@@ -2114,9 +2168,12 @@ const timeRangeDropdownOptions = computed(() => [
 const activeTab = ref('active')
 const deletedApiKeys = ref([])
 const deletedApiKeysLoading = ref(false)
-const apiKeysSortBy = ref('createdAt') // 修改默认排序为创建时间（移除费用排序支持）
+const apiKeysSortBy = ref('createdAt') // 默认排序为创建时间
 const apiKeysSortOrder = ref('desc')
 const expandedApiKeys = ref({})
+
+// 费用排序相关状态
+const costSortStatus = ref({}) // 各时间范围的索引状态
 
 // 后端分页相关状态
 const serverPagination = ref({
@@ -2140,6 +2197,7 @@ const defaultTime = ref([new Date(2000, 1, 1, 0, 0, 0), new Date(2000, 2, 1, 23,
 const accounts = ref({
   claude: [],
   gemini: [],
+  geminiApi: [], // 添加 Gemini-API 账号列表（用于传递给子组件初始化）
   openai: [],
   openaiResponses: [], // 添加 OpenAI-Responses 账号列表
   bedrock: [],
@@ -2354,12 +2412,15 @@ const loadAccounts = async (forceRefresh = false) => {
     }
 
     if (geminiApiData.success) {
-      ;(geminiApiData.data || []).forEach((account) => {
-        geminiAccounts.push({
-          ...account,
-          platform: 'gemini-api',
-          isDedicated: account.accountType === 'dedicated'
-        })
+      // 保存原始 Gemini-API 账号列表供子组件初始化使用
+      accounts.value.geminiApi = (geminiApiData.data || []).map((account) => ({
+        ...account,
+        platform: 'gemini-api',
+        isDedicated: account.accountType === 'dedicated'
+      }))
+      // 同时添加到合并列表
+      accounts.value.geminiApi.forEach((account) => {
+        geminiAccounts.push(account)
       })
     }
 
@@ -2440,13 +2501,37 @@ const loadApiKeys = async (clearStatsCache = true) => {
       params.set('tag', selectedTagFilter.value)
     }
 
-    // 排序参数（只支持非费用字段）
-    const validSortFields = ['name', 'createdAt', 'expiresAt', 'lastUsedAt', 'isActive', 'status']
+    // 排序参数（支持费用排序）
+    const validSortFields = [
+      'name',
+      'createdAt',
+      'expiresAt',
+      'lastUsedAt',
+      'isActive',
+      'status',
+      'cost'
+    ]
     const effectiveSortBy = validSortFields.includes(apiKeysSortBy.value)
       ? apiKeysSortBy.value
       : 'createdAt'
     params.set('sortBy', effectiveSortBy)
     params.set('sortOrder', apiKeysSortOrder.value)
+
+    // 如果是费用排序，添加费用相关参数
+    if (effectiveSortBy === 'cost') {
+      if (
+        globalDateFilter.type === 'custom' &&
+        globalDateFilter.customStart &&
+        globalDateFilter.customEnd
+      ) {
+        params.set('costTimeRange', 'custom')
+        params.set('costStartDate', globalDateFilter.customStart)
+        params.set('costEndDate', globalDateFilter.customEnd)
+      } else {
+        // 使用当前的时间范围预设
+        params.set('costTimeRange', globalDateFilter.preset || '7days')
+      }
+    }
 
     // 时间范围（用于标记，不用于费用计算）
     if (
@@ -2644,12 +2729,100 @@ const loadDeletedApiKeys = async () => {
 
 // 排序API Keys
 const sortApiKeys = (field) => {
+  // 费用排序特殊处理
+  if (field === 'cost') {
+    if (!canSortByCost.value) {
+      showToast('费用排序索引正在更新中，请稍后重试', 'warning')
+      return
+    }
+
+    // 如果是 custom 时间范围，提示可能需要等待
+    if (globalDateFilter.type === 'custom') {
+      showToast('正在计算费用排序，可能需要几秒钟...', 'info')
+    }
+  }
+
   if (apiKeysSortBy.value === field) {
     apiKeysSortOrder.value = apiKeysSortOrder.value === 'asc' ? 'desc' : 'asc'
   } else {
     apiKeysSortBy.value = field
-    apiKeysSortOrder.value = 'asc'
+    // 费用排序默认降序（高费用在前）
+    apiKeysSortOrder.value = field === 'cost' ? 'desc' : 'asc'
   }
+}
+
+// 计算是否可以进行费用排序
+const canSortByCost = computed(() => {
+  // custom 时间范围始终允许（实时计算）
+  if (globalDateFilter.type === 'custom') {
+    return true
+  }
+
+  // 检查对应时间范围的索引状态
+  const timeRange = globalDateFilter.preset
+  const status = costSortStatus.value[timeRange]
+  return status?.status === 'ready'
+})
+
+// 费用排序提示文字
+const costSortTooltip = computed(() => {
+  if (globalDateFilter.type === 'custom') {
+    return '点击按费用排序（实时计算，可能需要几秒钟）'
+  }
+
+  const timeRange = globalDateFilter.preset
+  const status = costSortStatus.value[timeRange]
+
+  if (!status) {
+    return '费用排序索引未初始化'
+  }
+
+  if (status.status === 'updating') {
+    return '费用排序索引正在更新中...'
+  }
+
+  if (status.status === 'ready') {
+    const lastUpdate = status.lastUpdate ? new Date(status.lastUpdate).toLocaleString() : '未知'
+    return `点击按费用排序（索引更新于: ${lastUpdate}）`
+  }
+
+  return '费用排序索引状态未知'
+})
+
+// 费用排序索引状态刷新定时器
+let costSortStatusTimer = null
+
+// 获取费用排序索引状态
+const fetchCostSortStatus = async () => {
+  try {
+    const data = await apiClient.get('/admin/api-keys/cost-sort-status')
+    if (data.success) {
+      costSortStatus.value = data.data || {}
+
+      // 根据索引状态动态调整刷新间隔
+      scheduleNextCostSortStatusRefresh()
+    }
+  } catch (error) {
+    console.error('Failed to fetch cost sort status:', error)
+  }
+}
+
+// 智能调度下次状态刷新
+const scheduleNextCostSortStatusRefresh = () => {
+  // 清除旧的定时器
+  if (costSortStatusTimer) {
+    clearTimeout(costSortStatusTimer)
+  }
+
+  // 检查是否有任何索引正在更新中
+  const hasUpdating = Object.values(costSortStatus.value).some(
+    (status) => status?.status === 'updating'
+  )
+
+  // 如果有索引正在更新，使用短间隔（10秒）；否则使用长间隔（60秒）
+  const interval = hasUpdating ? 10000 : 60000
+
+  costSortStatusTimer = setTimeout(fetchCostSortStatus, interval)
 }
 
 // 格式化数字
@@ -3271,6 +3444,23 @@ const calculatePeriodCost = (key) => {
 // 处理时间范围下拉框变化
 const handleTimeRangeChange = (value) => {
   setGlobalDateFilterPreset(value)
+
+  // 如果当前是费用排序，检查新时间范围的索引是否就绪
+  if (apiKeysSortBy.value === 'cost') {
+    // custom 时间范围始终允许（实时计算）
+    if (value === 'custom') {
+      return
+    }
+
+    // 检查新时间范围的索引状态
+    const status = costSortStatus.value[value]
+    if (!status || status.status !== 'ready') {
+      // 索引未就绪，回退到默认排序
+      apiKeysSortBy.value = 'createdAt'
+      apiKeysSortOrder.value = 'desc'
+      showToast('当前时间范围的费用排序索引未就绪，已切换到默认排序', 'info')
+    }
+  }
 }
 
 // 设置全局日期预设
@@ -3554,6 +3744,50 @@ const handleRenewSuccess = () => {
   showRenewApiKeyModal.value = false
   showToast('API Key 续期成功', 'success')
   loadApiKeys()
+}
+
+// 获取API Key的操作菜单项（用于ActionDropdown）
+const getApiKeyActions = (key) => {
+  const actions = [
+    {
+      key: 'edit',
+      label: '编辑',
+      icon: 'fa-edit',
+      color: 'blue',
+      handler: () => openEditApiKeyModal(key)
+    }
+  ]
+
+  // 如果需要续期
+  if (key.expiresAt && (isApiKeyExpired(key.expiresAt) || isApiKeyExpiringSoon(key.expiresAt))) {
+    actions.push({
+      key: 'renew',
+      label: '续期',
+      icon: 'fa-clock',
+      color: 'green',
+      handler: () => openRenewApiKeyModal(key)
+    })
+  }
+
+  // 激活/禁用
+  actions.push({
+    key: 'toggle',
+    label: key.isActive ? '禁用' : '激活',
+    icon: key.isActive ? 'fa-ban' : 'fa-check-circle',
+    color: key.isActive ? 'orange' : 'green',
+    handler: () => toggleApiKeyStatus(key)
+  })
+
+  // 删除
+  actions.push({
+    key: 'delete',
+    label: '删除',
+    icon: 'fa-trash',
+    color: 'red',
+    handler: () => deleteApiKey(key.id)
+  })
+
+  return actions
 }
 
 // 切换API Key状态（激活/禁用）
@@ -3972,6 +4206,8 @@ const showUsageDetails = (apiKey) => {
     dailyCost: cachedStats?.dailyCost ?? apiKey.dailyCost ?? 0,
     currentWindowCost: cachedStats?.currentWindowCost ?? apiKey.currentWindowCost ?? 0,
     windowRemainingSeconds: cachedStats?.windowRemainingSeconds ?? apiKey.windowRemainingSeconds,
+    windowStartTime: cachedStats?.windowStartTime ?? apiKey.windowStartTime ?? null,
+    windowEndTime: cachedStats?.windowEndTime ?? apiKey.windowEndTime ?? null,
     // 合并 usage 数据（用于详情弹窗中的统计卡片）
     usage: {
       ...apiKey.usage,
@@ -4515,6 +4751,9 @@ watch(apiKeys, () => {
 })
 
 onMounted(async () => {
+  // 获取费用排序索引状态（不阻塞，会自动调度后续刷新）
+  fetchCostSortStatus()
+
   // 先加载 API Keys（优先显示列表）
   await Promise.all([clientsStore.loadSupportedClients(), loadApiKeys()])
 
@@ -4523,6 +4762,14 @@ onMounted(async () => {
 
   // 异步加载账号数据（不阻塞页面显示）
   loadAccounts()
+})
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (costSortStatusTimer) {
+    clearTimeout(costSortStatusTimer)
+    costSortStatusTimer = null
+  }
 })
 </script>
 
@@ -4539,6 +4786,10 @@ onMounted(async () => {
   position: relative;
 }
 
+.dark .table-wrapper {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
 .table-container {
   overflow-x: auto;
   overflow-y: hidden;
@@ -4546,12 +4797,14 @@ onMounted(async () => {
   padding: 0;
   max-width: 100%;
   position: relative;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* 防止表格内容溢出，保证横向滚动 */
 .table-container table {
-  min-width: 1200px;
+  min-width: 1400px;
   border-collapse: collapse;
+  table-layout: auto;
 }
 
 .table-container::-webkit-scrollbar {
@@ -4572,6 +4825,18 @@ onMounted(async () => {
   background: #9ca3af;
 }
 
+.dark .table-container::-webkit-scrollbar-track {
+  background: #374151;
+}
+
+.dark .table-container::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+.dark .table-container::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
 .table-row {
   transition: background-color 0.2s ease;
 }
@@ -4588,13 +4853,43 @@ onMounted(async () => {
 .operations-column {
   position: sticky;
   right: 0;
-  background: inherit;
-  background-color: inherit;
   z-index: 12;
 }
 
+/* 确保操作列在浅色模式下有正确的背景 */
 .table-container thead .operations-column {
   z-index: 30;
+  background: linear-gradient(to bottom, #f9fafb, rgba(243, 244, 246, 0.9));
+}
+
+.dark .table-container thead .operations-column {
+  background: linear-gradient(to bottom, #374151, rgba(31, 41, 55, 0.9));
+}
+
+/* tbody 中的操作列背景处理 */
+.table-container tbody tr:nth-child(odd) .operations-column {
+  background-color: #ffffff;
+}
+
+.table-container tbody tr:nth-child(even) .operations-column {
+  background-color: rgba(249, 250, 251, 0.7);
+}
+
+.dark .table-container tbody tr:nth-child(odd) .operations-column {
+  background-color: rgba(31, 41, 55, 0.4);
+}
+
+.dark .table-container tbody tr:nth-child(even) .operations-column {
+  background-color: rgba(55, 65, 81, 0.3);
+}
+
+/* hover 状态下的操作列背景 */
+.table-container tbody tr:hover .operations-column {
+  background-color: rgba(239, 246, 255, 0.6);
+}
+
+.dark .table-container tbody tr:hover .operations-column {
+  background-color: rgba(30, 58, 138, 0.2);
 }
 
 .table-container tbody .operations-column {
@@ -4603,6 +4898,66 @@ onMounted(async () => {
 
 .dark .table-container tbody .operations-column {
   box-shadow: -8px 0 12px -8px rgba(30, 41, 59, 0.45);
+}
+
+/* 固定左侧列（复选框和名称列）*/
+.checkbox-column,
+.name-column {
+  position: sticky;
+  z-index: 12;
+}
+
+/* 表头左侧固定列背景 */
+.table-container thead .checkbox-column,
+.table-container thead .name-column {
+  z-index: 30;
+  background: linear-gradient(to bottom, #f9fafb, rgba(243, 244, 246, 0.9));
+}
+
+.dark .table-container thead .checkbox-column,
+.dark .table-container thead .name-column {
+  background: linear-gradient(to bottom, #374151, rgba(31, 41, 55, 0.9));
+}
+
+/* tbody 中的左侧固定列背景处理 */
+.table-container tbody tr:nth-child(odd) .checkbox-column,
+.table-container tbody tr:nth-child(odd) .name-column {
+  background-color: #ffffff;
+}
+
+.table-container tbody tr:nth-child(even) .checkbox-column,
+.table-container tbody tr:nth-child(even) .name-column {
+  background-color: rgba(249, 250, 251, 0.7);
+}
+
+.dark .table-container tbody tr:nth-child(odd) .checkbox-column,
+.dark .table-container tbody tr:nth-child(odd) .name-column {
+  background-color: rgba(31, 41, 55, 0.4);
+}
+
+.dark .table-container tbody tr:nth-child(even) .checkbox-column,
+.dark .table-container tbody tr:nth-child(even) .name-column {
+  background-color: rgba(55, 65, 81, 0.3);
+}
+
+/* hover 状态下的左侧固定列背景 */
+.table-container tbody tr:hover .checkbox-column,
+.table-container tbody tr:hover .name-column {
+  background-color: rgba(239, 246, 255, 0.6);
+}
+
+.dark .table-container tbody tr:hover .checkbox-column,
+.dark .table-container tbody tr:hover .name-column {
+  background-color: rgba(30, 58, 138, 0.2);
+}
+
+/* 名称列右侧阴影（分隔效果） */
+.table-container tbody .name-column {
+  box-shadow: 8px 0 12px -8px rgba(15, 23, 42, 0.16);
+}
+
+.dark .table-container tbody .name-column {
+  box-shadow: 8px 0 12px -8px rgba(30, 41, 59, 0.45);
 }
 
 .loading-spinner {

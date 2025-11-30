@@ -1702,24 +1702,32 @@
                 <input
                   v-model="form.baseUrl"
                   class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                  placeholder="https://generativelanguage.googleapis.com"
+                  :class="{ 'border-red-500 dark:border-red-400': errors.baseUrl }"
+                  placeholder="https://generativelanguage.googleapis.com/v1beta/models"
                   required
                   type="url"
                 />
+                <p v-if="errors.baseUrl" class="mt-1 text-xs text-red-500 dark:text-red-400">
+                  {{ errors.baseUrl }}
+                </p>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  填写 API 基础地址（可包含路径前缀），系统会自动拼接
+                  填写 API 基础地址，必须以
+                  <code class="rounded bg-gray-100 px-1 dark:bg-gray-600">/models</code>
+                  结尾。系统会自动拼接
                   <code class="rounded bg-gray-100 px-1 dark:bg-gray-600"
-                    >/v1beta/models/{model}:generateContent</code
+                    >/{model}:generateContent</code
                   >
                 </p>
                 <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
                   官方:
                   <code class="rounded bg-gray-100 px-1 dark:bg-gray-600"
-                    >https://generativelanguage.googleapis.com</code
+                    >https://generativelanguage.googleapis.com/v1beta/models</code
                   >
-                  | 上游为 CRS:
+                </p>
+                <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                  上游为 CRS:
                   <code class="rounded bg-gray-100 px-1 dark:bg-gray-600"
-                    >https://your-crs.com/gemini</code
+                    >https://your-crs.com/gemini/v1beta/models</code
                   >
                 </p>
               </div>
@@ -3759,23 +3767,31 @@
               <input
                 v-model="form.baseUrl"
                 class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
-                placeholder="https://generativelanguage.googleapis.com"
+                :class="{ 'border-red-500 dark:border-red-400': errors.baseUrl }"
+                placeholder="https://generativelanguage.googleapis.com/v1beta/models"
                 type="url"
               />
+              <p v-if="errors.baseUrl" class="mt-1 text-xs text-red-500 dark:text-red-400">
+                {{ errors.baseUrl }}
+              </p>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                填写 API 基础地址（可包含路径前缀），系统会自动拼接
+                填写 API 基础地址，必须以
+                <code class="rounded bg-gray-100 px-1 dark:bg-gray-600">/models</code>
+                结尾。系统会自动拼接
                 <code class="rounded bg-gray-100 px-1 dark:bg-gray-600"
-                  >/v1beta/models/{model}:generateContent</code
+                  >/{model}:generateContent</code
                 >
               </p>
               <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
                 官方:
                 <code class="rounded bg-gray-100 px-1 dark:bg-gray-600"
-                  >https://generativelanguage.googleapis.com</code
+                  >https://generativelanguage.googleapis.com/v1beta/models</code
                 >
-                | 上游为 CRS:
+              </p>
+              <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                上游为 CRS:
                 <code class="rounded bg-gray-100 px-1 dark:bg-gray-600"
-                  >https://your-crs.com/gemini</code
+                  >https://your-crs.com/gemini/v1beta/models</code
                 >
               </p>
             </div>
@@ -4715,6 +4731,8 @@ const form = ref({
   endpointType: props.account?.endpointType || 'anthropic',
   // OpenAI-Responses 特定字段
   baseApi: props.account?.baseApi || '',
+  // Gemini-API 特定字段
+  baseUrl: props.account?.baseUrl || 'https://generativelanguage.googleapis.com',
   rateLimitDuration: props.account?.rateLimitDuration || 60,
   autoRecoverErrors: props.account
     ? props.account.autoRecoverErrors === 'true' || props.account.autoRecoverErrors === true
@@ -5512,6 +5530,14 @@ const createAccount = async () => {
         errors.value.apiKey = '请填写 API Key'
         hasError = true
       }
+      // 验证 baseUrl 必须以 /models 结尾
+      if (!form.value.baseUrl || form.value.baseUrl.trim() === '') {
+        errors.value.baseUrl = '请填写 API 基础地址'
+        hasError = true
+      } else if (!form.value.baseUrl.trim().endsWith('/models')) {
+        errors.value.baseUrl = 'API 基础地址必须以 /models 结尾'
+        hasError = true
+      }
     } else {
       // 其他平台（如 Droid）使用多 API Key 输入
       const apiKeys = parseApiKeysInput(form.value.apiKeysInput)
@@ -5781,11 +5807,25 @@ const updateAccount = async () => {
   // 清除之前的错误
   errors.value.name = ''
   errors.value.apiKeys = ''
+  errors.value.baseUrl = ''
 
   // 验证账户名称
   if (!form.value.name || form.value.name.trim() === '') {
     errors.value.name = '请填写账户名称'
     return
+  }
+
+  // Gemini API 的 baseUrl 验证（必须以 /models 结尾）
+  if (form.value.platform === 'gemini-api') {
+    const baseUrl = form.value.baseUrl?.trim() || ''
+    if (!baseUrl) {
+      errors.value.baseUrl = '请填写 API 基础地址'
+      return
+    }
+    if (!baseUrl.endsWith('/models')) {
+      errors.value.baseUrl = 'API 基础地址必须以 /models 结尾'
+      return
+    }
   }
 
   // 分组类型验证 - 更新账户流程修复
@@ -6621,6 +6661,8 @@ watch(
         deploymentName: newAccount.deploymentName || '',
         // OpenAI-Responses 特定字段
         baseApi: newAccount.baseApi || '',
+        // Gemini-API 特定字段
+        baseUrl: newAccount.baseUrl || 'https://generativelanguage.googleapis.com',
         // 自动错误恢复配置
         autoRecoverErrors: newAccount
           ? newAccount.autoRecoverErrors === 'true' || newAccount.autoRecoverErrors === true
@@ -6647,12 +6689,27 @@ watch(
         loadGroups().then(async () => {
           const foundGroupIds = []
 
-          // 如果账户有 groupInfo，直接使用它的 groupId
-          if (newAccount.groupInfo && newAccount.groupInfo.id) {
+          // 优先使用 groupInfos 数组（后端返回的标准格式）
+          if (
+            newAccount.groupInfos &&
+            Array.isArray(newAccount.groupInfos) &&
+            newAccount.groupInfos.length > 0
+          ) {
+            // 从 groupInfos 数组中提取所有分组 ID
+            newAccount.groupInfos.forEach((group) => {
+              if (group && group.id) {
+                foundGroupIds.push(group.id)
+              }
+            })
+            if (foundGroupIds.length > 0) {
+              form.value.groupId = foundGroupIds[0]
+            }
+          } else if (newAccount.groupInfo && newAccount.groupInfo.id) {
+            // 兼容旧的 groupInfo 单对象格式
             form.value.groupId = newAccount.groupInfo.id
             foundGroupIds.push(newAccount.groupInfo.id)
           } else if (newAccount.groupId) {
-            // 如果账户有 groupId 字段，直接使用（OpenAI-Responses 等账户）
+            // 如果账户有 groupId 字段，直接使用
             form.value.groupId = newAccount.groupId
             foundGroupIds.push(newAccount.groupId)
           } else if (

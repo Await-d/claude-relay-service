@@ -23,6 +23,54 @@ const ProxyHelper = require('../utils/proxyHelper')
 // ============================================================================
 
 /**
+ * 构建 Gemini API URL
+ * 兼容新旧 baseUrl 格式：
+ * - 新格式（以 /models 结尾）: https://xxx.com/v1beta/models -> 直接拼接 /{model}:action
+ * - 旧格式（不以 /models 结尾）: https://xxx.com -> 拼接 /v1beta/models/{model}:action
+ *
+ * @param {string} baseUrl - 账户配置的基础地址
+ * @param {string} model - 模型名称
+ * @param {string} action - API 动作 (generateContent, streamGenerateContent, countTokens)
+ * @param {string} apiKey - API Key
+ * @param {object} options - 额外选项 { stream: boolean, listModels: boolean }
+ * @returns {string} 完整的 API URL
+ */
+function buildGeminiApiUrl(baseUrl, model, action, apiKey, options = {}) {
+  const { stream = false, listModels = false } = options
+
+  // 移除末尾的斜杠（如果有）
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '')
+
+  // 检查是否为新格式（以 /models 结尾）
+  const isNewFormat = normalizedBaseUrl.endsWith('/models')
+
+  let url
+  if (listModels) {
+    // 获取模型列表
+    if (isNewFormat) {
+      // 新格式: baseUrl 已包含 /v1beta/models，直接添加查询参数
+      url = `${normalizedBaseUrl}?key=${apiKey}`
+    } else {
+      // 旧格式: 需要拼接 /v1beta/models
+      url = `${normalizedBaseUrl}/v1beta/models?key=${apiKey}`
+    }
+  } else {
+    // 模型操作 (generateContent, streamGenerateContent, countTokens)
+    const streamParam = stream ? '&alt=sse' : ''
+
+    if (isNewFormat) {
+      // 新格式: baseUrl 已包含 /v1beta/models，直接拼接 /{model}:action
+      url = `${normalizedBaseUrl}/${model}:${action}?key=${apiKey}${streamParam}`
+    } else {
+      // 旧格式: 需要拼接 /v1beta/models/{model}:action
+      url = `${normalizedBaseUrl}/v1beta/models/${model}:${action}?key=${apiKey}${streamParam}`
+    }
+  }
+
+  return url
+}
+
+/**
  * 生成会话哈希
  */
 function generateSessionHash(req) {
@@ -107,6 +155,42 @@ async function applyRateLimitTracking(req, usageSummary, model, context = '') {
  */
 function isReadableStream(value) {
   return value && typeof value.on === 'function' && typeof value.pipe === 'function'
+}
+
+/**
+ * 清理 contents 中 functionResponse 不被标准 Gemini API 支持的字段
+ * 标准 Gemini API (generativelanguage.googleapis.com) 的 functionResponse 只支持 name 和 response 字段，不支持 id 字段
+ * 注意：此函数仅用于 API Key 账户，OAuth 账户使用的 Cloud Code Assist API 可能支持额外字段
+ */
+function sanitizeFunctionResponsesForApiKey(contents) {
+  if (!contents || !Array.isArray(contents)) {
+    return contents
+  }
+
+  return contents.map((content) => {
+    if (!content.parts || !Array.isArray(content.parts)) {
+      return content
+    }
+
+    const sanitizedParts = content.parts.map((part) => {
+      if (part.functionResponse) {
+        // 只保留标准 Gemini API 支持的字段：name 和 response
+        const { name, response } = part.functionResponse
+        return {
+          functionResponse: {
+            name,
+            response
+          }
+        }
+      }
+      return part
+    })
+
+    return {
+      ...content,
+      parts: sanitizedParts
+    }
+  })
 }
 
 /**
@@ -342,16 +426,22 @@ async function handleMessages(req, res) {
       // 解析代理配置
       const proxyConfig = parseProxyConfig(account)
 
-      const apiUrl = stream
-        ? `${account.baseUrl}/v1beta/models/${model}:streamGenerateContent?key=${account.apiKey}&alt=sse`
-        : `${account.baseUrl}/v1beta/models/${model}:generateContent?key=${account.apiKey}`
+      const apiUrl = buildGeminiApiUrl(
+        account.baseUrl,
+        model,
+        stream ? 'streamGenerateContent' : 'generateContent',
+        account.apiKey,
+        { stream }
+      )
 
       const axiosConfig = {
         method: 'POST',
         url: apiUrl,
         data: requestBody,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-api-key': account.apiKey,
+          'x-goog-api-key': account.apiKey
         },
         responseType: stream ? 'stream' : 'json',
         signal: abortController.signal
@@ -616,15 +706,22 @@ async function handleModels(req, res) {
       })
     }
 
-    // 选择账户获取模型列表
+    // 选择账户获取模型列表（允许 API 账户）
     let account = null
+    let isApiAccount = false
     try {
       const accountSelection = await unifiedGeminiScheduler.selectAccountForApiKey(
         apiKeyData,
         null,
-        null
+        null,
+        { allowApiAccounts: true }
       )
-      account = await geminiAccountService.getAccount(accountSelection.accountId)
+      isApiAccount = accountSelection.accountType === 'gemini-api'
+      if (isApiAccount) {
+        account = await geminiApiAccountService.getAccount(accountSelection.accountId)
+      } else {
+        account = await geminiAccountService.getAccount(accountSelection.accountId)
+      }
     } catch (error) {
       logger.warn('Failed to select Gemini account for models endpoint:', error)
     }
@@ -645,7 +742,47 @@ async function handleModels(req, res) {
     }
 
     // 获取模型列表
-    const models = await getAvailableModels(account.accessToken, account.proxy)
+    let models
+    if (isApiAccount) {
+      // API Key 账户：使用 API Key 获取模型列表
+      const proxyConfig = parseProxyConfig(account)
+      try {
+        const apiUrl = buildGeminiApiUrl(account.baseUrl, null, null, account.apiKey, {
+          listModels: true
+        })
+        const axiosConfig = {
+          method: 'GET',
+          url: apiUrl,
+          headers: { 'Content-Type': 'application/json' }
+        }
+        if (proxyConfig) {
+          const proxyHelper = new ProxyHelper()
+          axiosConfig.httpsAgent = proxyHelper.createProxyAgent(proxyConfig)
+          axiosConfig.httpAgent = proxyHelper.createProxyAgent(proxyConfig)
+        }
+        const response = await axios(axiosConfig)
+        models = (response.data.models || []).map((m) => ({
+          id: m.name?.replace('models/', '') || m.name,
+          object: 'model',
+          created: Date.now() / 1000,
+          owned_by: 'google'
+        }))
+      } catch (error) {
+        logger.warn('Failed to fetch models from Gemini API:', error.message)
+        // 返回默认模型列表
+        models = [
+          {
+            id: 'gemini-2.5-flash',
+            object: 'model',
+            created: Date.now() / 1000,
+            owned_by: 'google'
+          }
+        ]
+      }
+    } else {
+      // OAuth 账户：使用 OAuth token 获取模型列表
+      models = await getAvailableModels(account.accessToken, account.proxy)
+    }
 
     res.json({
       object: 'list',
@@ -772,12 +909,36 @@ function handleSimpleEndpoint(apiMethod) {
 
       // 从路径参数或请求体中获取模型名
       const requestedModel = req.body.model || req.params.modelName || 'gemini-2.5-flash'
-      const { accountId } = await unifiedGeminiScheduler.selectAccountForApiKey(
+      const schedulerResult = await unifiedGeminiScheduler.selectAccountForApiKey(
         req.apiKey,
         sessionHash,
         requestedModel
       )
+      const { accountId, accountType } = schedulerResult
+
+      // v1internal 路由只支持 OAuth 账户，不支持 API Key 账户
+      if (accountType === 'gemini-api') {
+        logger.error(
+          `❌ v1internal routes do not support Gemini API accounts. Account: ${accountId}`
+        )
+        return res.status(400).json({
+          error: {
+            message:
+              'This endpoint only supports Gemini OAuth accounts. Gemini API Key accounts are not compatible with v1internal format.',
+            type: 'invalid_account_type'
+          }
+        })
+      }
+
       const account = await geminiAccountService.getAccount(accountId)
+      if (!account) {
+        return res.status(404).json({
+          error: {
+            message: 'Gemini account not found',
+            type: 'account_not_found'
+          }
+        })
+      }
       const { accessToken, refreshToken } = account
 
       const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
@@ -828,12 +989,34 @@ async function handleLoadCodeAssist(req, res) {
 
     // 从路径参数或请求体中获取模型名
     const requestedModel = req.body.model || req.params.modelName || 'gemini-2.5-flash'
-    const { accountId } = await unifiedGeminiScheduler.selectAccountForApiKey(
+    const schedulerResult = await unifiedGeminiScheduler.selectAccountForApiKey(
       req.apiKey,
       sessionHash,
       requestedModel
     )
+    const { accountId, accountType } = schedulerResult
+
+    // v1internal 路由只支持 OAuth 账户，不支持 API Key 账户
+    if (accountType === 'gemini-api') {
+      logger.error(`❌ v1internal routes do not support Gemini API accounts. Account: ${accountId}`)
+      return res.status(400).json({
+        error: {
+          message:
+            'This endpoint only supports Gemini OAuth accounts. Gemini API Key accounts are not compatible with v1internal format.',
+          type: 'invalid_account_type'
+        }
+      })
+    }
+
     const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      return res.status(404).json({
+        error: {
+          message: 'Gemini account not found',
+          type: 'account_not_found'
+        }
+      })
+    }
     const { accessToken, refreshToken, projectId } = account
 
     const { metadata, cloudaicompanionProject } = req.body
@@ -905,12 +1088,34 @@ async function handleOnboardUser(req, res) {
 
     // 从路径参数或请求体中获取模型名
     const requestedModel = req.body.model || req.params.modelName || 'gemini-2.5-flash'
-    const { accountId } = await unifiedGeminiScheduler.selectAccountForApiKey(
+    const schedulerResult = await unifiedGeminiScheduler.selectAccountForApiKey(
       req.apiKey,
       sessionHash,
       requestedModel
     )
+    const { accountId, accountType } = schedulerResult
+
+    // v1internal 路由只支持 OAuth 账户，不支持 API Key 账户
+    if (accountType === 'gemini-api') {
+      logger.error(`❌ v1internal routes do not support Gemini API accounts. Account: ${accountId}`)
+      return res.status(400).json({
+        error: {
+          message:
+            'This endpoint only supports Gemini OAuth accounts. Gemini API Key accounts are not compatible with v1internal format.',
+          type: 'invalid_account_type'
+        }
+      })
+    }
+
     const account = await geminiAccountService.getAccount(accountId)
+    if (!account) {
+      return res.status(404).json({
+        error: {
+          message: 'Gemini account not found',
+          type: 'account_not_found'
+        }
+      })
+    }
     const { accessToken, refreshToken, projectId } = account
 
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
@@ -999,31 +1204,93 @@ async function handleCountTokens(req, res) {
       })
     }
 
-    // 使用统一调度选择账号
-    const { accountId } = await unifiedGeminiScheduler.selectAccountForApiKey(
+    // 使用统一调度选择账号（允许 API 账户）
+    const schedulerResult = await unifiedGeminiScheduler.selectAccountForApiKey(
       req.apiKey,
       sessionHash,
-      model
-    )
-    const account = await geminiAccountService.getAccount(accountId)
-    const { accessToken, refreshToken } = account
-
-    const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
-    logger.info(`CountTokens request (${version})`, {
       model,
-      contentsLength: contents.length,
-      apiKeyId: req.apiKey?.id || 'unknown'
-    })
+      { allowApiAccounts: true }
+    )
+    const { accountId, accountType } = schedulerResult
+    const isApiAccount = accountType === 'gemini-api'
+
+    let account
+    if (isApiAccount) {
+      account = await geminiApiAccountService.getAccount(accountId)
+    } else {
+      account = await geminiAccountService.getAccount(accountId)
+    }
+
+    if (!account) {
+      return res.status(404).json({
+        error: {
+          message: `${isApiAccount ? 'Gemini API' : 'Gemini'} account not found`,
+          type: 'account_not_found'
+        }
+      })
+    }
+
+    const version = req.path.includes('v1beta') ? 'v1beta' : 'v1'
+    logger.info(
+      `CountTokens request (${version}) - ${isApiAccount ? 'API Key' : 'OAuth'} Account`,
+      {
+        model,
+        contentsLength: contents.length,
+        accountId,
+        apiKeyId: req.apiKey?.id || 'unknown'
+      }
+    )
 
     // 解析账户的代理配置
     const proxyConfig = parseProxyConfig(account)
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
-    const response = await geminiAccountService.countTokens(client, contents, model, proxyConfig)
+    let response
+    if (isApiAccount) {
+      // API Key 账户：直接使用 API Key 请求
+      const modelName = model.startsWith('models/') ? model.replace('models/', '') : model
+      const apiUrl = buildGeminiApiUrl(account.baseUrl, modelName, 'countTokens', account.apiKey)
+
+      const axiosConfig = {
+        method: 'POST',
+        url: apiUrl,
+        data: { contents },
+        headers: { 'Content-Type': 'application/json' }
+      }
+
+      if (proxyConfig) {
+        const proxyHelper = new ProxyHelper()
+        axiosConfig.httpsAgent = proxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpAgent = proxyHelper.createProxyAgent(proxyConfig)
+      }
+
+      try {
+        const apiResponse = await axios(axiosConfig)
+        response = {
+          totalTokens: apiResponse.data.totalTokens || 0,
+          totalBillableCharacters: apiResponse.data.totalBillableCharacters || 0,
+          ...apiResponse.data
+        }
+      } catch (error) {
+        logger.error('Gemini API countTokens request failed:', {
+          status: error.response?.status,
+          data: error.response?.data
+        })
+        throw error
+      }
+    } else {
+      // OAuth 账户
+      const { accessToken, refreshToken } = account
+      const client = await geminiAccountService.getOauthClient(
+        accessToken,
+        refreshToken,
+        proxyConfig
+      )
+      response = await geminiAccountService.countTokens(client, contents, model, proxyConfig)
+    }
 
     res.json(response)
   } catch (error) {
-    const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
+    const version = req.path.includes('v1beta') ? 'v1beta' : 'v1'
     logger.error(`Error in countTokens endpoint (${version})`, { error: error.message })
     res.status(500).json({
       error: {
@@ -1683,6 +1950,9 @@ async function handleStandardGenerateContent(req, res) {
         })
       }
 
+      // API Key 账户：清理 functionResponse 中标准 Gemini API 不支持的字段（如 id）
+      actualRequestData.contents = sanitizeFunctionResponsesForApiKey(actualRequestData.contents)
+
       logger.info(`Standard Gemini API generateContent request (${version}) - API Key Account`, {
         model,
         accountId: actualAccountId,
@@ -1705,7 +1975,7 @@ async function handleStandardGenerateContent(req, res) {
 
     if (isApiAccount) {
       // Gemini API 账户：直接使用 API Key 请求
-      const apiUrl = `${account.baseUrl}/v1beta/models/${model}:generateContent?key=${account.apiKey}`
+      const apiUrl = buildGeminiApiUrl(account.baseUrl, model, 'generateContent', account.apiKey)
 
       const axiosConfig = {
         method: 'POST',
@@ -1934,6 +2204,9 @@ async function handleStandardStreamGenerateContent(req, res) {
         })
       }
 
+      // API Key 账户：清理 functionResponse 中标准 Gemini API 不支持的字段（如 id）
+      actualRequestData.contents = sanitizeFunctionResponsesForApiKey(actualRequestData.contents)
+
       logger.info(
         `Standard Gemini API streamGenerateContent request (${version}) - API Key Account`,
         {
@@ -1973,14 +2246,24 @@ async function handleStandardStreamGenerateContent(req, res) {
 
     if (isApiAccount) {
       // Gemini API 账户：直接使用 API Key 请求流式接口
-      const apiUrl = `${account.baseUrl}/v1beta/models/${model}:streamGenerateContent?key=${account.apiKey}&alt=sse`
+      const apiUrl = buildGeminiApiUrl(
+        account.baseUrl,
+        model,
+        'streamGenerateContent',
+        account.apiKey,
+        {
+          stream: true
+        }
+      )
 
       const axiosConfig = {
         method: 'POST',
         url: apiUrl,
         data: actualRequestData,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-api-key': account.apiKey,
+          'x-goog-api-key': account.apiKey
         },
         responseType: 'stream',
         signal: abortController.signal
