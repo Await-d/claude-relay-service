@@ -1569,7 +1569,9 @@ class ClaudeConsoleAccountService {
 
       await client.hdel(accountKey, 'countTokensUnavailable', 'countTokensUnavailableAt')
 
-      logger.info(`✅ Removed count_tokens unavailable mark for Claude Console account: ${accountId}`)
+      logger.info(
+        `✅ Removed count_tokens unavailable mark for Claude Console account: ${accountId}`
+      )
       return { success: true }
     } catch (error) {
       logger.error(
