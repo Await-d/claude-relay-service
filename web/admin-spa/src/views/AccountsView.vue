@@ -161,11 +161,15 @@
       </div>
 
       <!-- 桌面端表格视图 -->
-      <div v-else class="table-container hidden md:block">
-        <table class="w-full table-fixed">
+      <div v-else class="table-wrapper hidden md:block">
+        <div ref="tableContainerRef" class="table-container">
+          <table class="w-full">
           <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
             <tr>
-              <th v-if="shouldShowCheckboxes" class="w-[50px] px-3 py-4 text-left">
+              <th
+                v-if="shouldShowCheckboxes"
+                class="checkbox-column w-[50px] px-3 py-4 text-left"
+              >
                 <div class="flex items-center">
                   <input
                     v-model="selectAllChecked"
@@ -177,7 +181,7 @@
                 </div>
               </th>
               <th
-                class="w-[22%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="name-column w-[22%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                 @click="sortAccounts('name')"
               >
                 名称
@@ -207,22 +211,7 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
-                class="w-[12%] min-w-[110px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
-                @click="sortAccounts('expiresAt')"
-              >
-                到期时间
-                <i
-                  v-if="accountsSortBy === 'expiresAt'"
-                  :class="[
-                    'fas',
-                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
-                    'ml-1'
-                  ]"
-                />
-                <i v-else class="fas fa-sort ml-1 text-gray-400" />
-              </th>
-              <th
-                class="w-[12%] min-w-[100px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                class="w-[12%] min-w-[180px] max-w-[200px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                 @click="sortAccounts('status')"
               >
                 状态
@@ -235,26 +224,6 @@
                   ]"
                 />
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
-              </th>
-              <th
-                class="w-[8%] min-w-[80px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
-                @click="sortAccounts('priority')"
-              >
-                优先级
-                <i
-                  v-if="accountsSortBy === 'priority'"
-                  :class="[
-                    'fas',
-                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
-                    'ml-1'
-                  ]"
-                />
-                <i v-else class="fas fa-sort ml-1 text-gray-400" />
-              </th>
-              <th
-                class="w-[10%] min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
-              >
-                代理
               </th>
               <th
                 class="w-[10%] min-w-[90px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
@@ -331,7 +300,7 @@
                                 class="fas fa-info-circle mt-[2px] text-[10px] text-indigo-500"
                               ></i>
                               <span class="font-medium text-white dark:text-gray-900"
-                                >当“重置剩余”为 0 时，进度条与百分比会同步清零。</span
+                                >当"重置剩余"为 0 时，进度条与百分比会同步清零。</span
                               >
                             </div>
                           </div>
@@ -387,7 +356,43 @@
                 最后使用
               </th>
               <th
-                class="w-[15%] min-w-[180px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                class="min-w-[80px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="sortAccounts('priority')"
+              >
+                优先级
+                <i
+                  v-if="accountsSortBy === 'priority'"
+                  :class="[
+                    'fas',
+                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                    'ml-1'
+                  ]"
+                />
+                <i v-else class="fas fa-sort ml-1 text-gray-400" />
+              </th>
+              <th
+                class="min-w-[150px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+              >
+                代理
+              </th>
+              <th
+                class="min-w-[110px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="sortAccounts('expiresAt')"
+              >
+                到期时间
+                <i
+                  v-if="accountsSortBy === 'expiresAt'"
+                  :class="[
+                    'fas',
+                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                    'ml-1'
+                  ]"
+                />
+                <i v-else class="fas fa-sort ml-1 text-gray-400" />
+              </th>
+              <th
+                class="operations-column sticky right-0 z-20 px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                :class="needsHorizontalScroll ? 'min-w-[170px]' : 'min-w-[200px]'"
               >
                 操作
               </th>
@@ -395,7 +400,7 @@
           </thead>
           <tbody class="divide-y divide-gray-200/50 dark:divide-gray-600/50">
             <tr v-for="account in paginatedAccounts" :key="account.id" class="table-row">
-              <td v-if="shouldShowCheckboxes" class="px-3 py-3">
+              <td v-if="shouldShowCheckboxes" class="checkbox-column px-3 py-3">
                 <div class="flex items-center">
                   <input
                     v-model="selectedAccounts"
@@ -406,7 +411,7 @@
                   />
                 </div>
               </td>
-              <td class="px-3 py-4">
+              <td class="name-column px-3 py-4">
                 <div class="flex items-center">
                   <div
                     class="mr-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green-500 to-green-600"
@@ -596,49 +601,6 @@
               </td>
               <td class="whitespace-nowrap px-3 py-4">
                 <div class="flex flex-col gap-1">
-                  <!-- 已设置过期时间 -->
-                  <span v-if="account.expiresAt">
-                    <span
-                      v-if="isExpired(account.expiresAt)"
-                      class="inline-flex cursor-pointer items-center text-red-600 hover:underline"
-                      style="font-size: 13px"
-                      @click.stop="startEditAccountExpiry(account)"
-                    >
-                      <i class="fas fa-exclamation-circle mr-1 text-xs" />
-                      已过期
-                    </span>
-                    <span
-                      v-else-if="isExpiringSoon(account.expiresAt)"
-                      class="inline-flex cursor-pointer items-center text-orange-600 hover:underline"
-                      style="font-size: 13px"
-                      @click.stop="startEditAccountExpiry(account)"
-                    >
-                      <i class="fas fa-clock mr-1 text-xs" />
-                      {{ formatExpireDate(account.expiresAt) }}
-                    </span>
-                    <span
-                      v-else
-                      class="cursor-pointer text-gray-600 hover:underline dark:text-gray-400"
-                      style="font-size: 13px"
-                      @click.stop="startEditAccountExpiry(account)"
-                    >
-                      {{ formatExpireDate(account.expiresAt) }}
-                    </span>
-                  </span>
-                  <!-- 永不过期 -->
-                  <span
-                    v-else
-                    class="inline-flex cursor-pointer items-center text-gray-400 hover:underline dark:text-gray-500"
-                    style="font-size: 13px"
-                    @click.stop="startEditAccountExpiry(account)"
-                  >
-                    <i class="fas fa-infinity mr-1 text-xs" />
-                    永不过期
-                  </span>
-                </div>
-              </td>
-              <td class="whitespace-nowrap px-3 py-4">
-                <div class="flex flex-col gap-1">
                   <span
                     :class="[
                       'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
@@ -726,46 +688,6 @@
                     绑定: {{ account.boundApiKeysCount || 0 }} 个API Key
                   </span>
                 </div>
-              </td>
-              <td class="whitespace-nowrap px-3 py-4">
-                <div
-                  v-if="
-                    account.platform === 'claude' ||
-                    account.platform === 'claude-console' ||
-                    account.platform === 'bedrock' ||
-                    account.platform === 'gemini' ||
-                    account.platform === 'openai' ||
-                    account.platform === 'openai-responses' ||
-                    account.platform === 'azure_openai' ||
-                    account.platform === 'ccr' ||
-                    account.platform === 'droid' ||
-                    account.platform === 'gemini-api'
-                  "
-                  class="flex items-center gap-2"
-                >
-                  <div class="h-2 w-16 rounded-full bg-gray-200">
-                    <div
-                      class="h-2 rounded-full bg-gradient-to-r from-green-500 to-blue-600 transition-all duration-300"
-                      :style="{ width: 101 - (account.priority || 50) + '%' }"
-                    />
-                  </div>
-                  <span class="min-w-[20px] text-xs font-medium text-gray-700 dark:text-gray-200">
-                    {{ account.priority || 50 }}
-                  </span>
-                </div>
-                <div v-else class="text-sm text-gray-400">
-                  <span class="text-xs">N/A</span>
-                </div>
-              </td>
-              <td class="px-3 py-4 text-sm text-gray-600">
-                <div
-                  v-if="formatProxyDisplay(account.proxy)"
-                  class="break-all rounded bg-blue-50 px-2 py-1 font-mono text-xs"
-                  :title="formatProxyDisplay(account.proxy)"
-                >
-                  {{ formatProxyDisplay(account.proxy) }}
-                </div>
-                <div v-else class="text-gray-400">无代理</div>
               </td>
               <td class="whitespace-nowrap px-3 py-4 text-sm">
                 <div v-if="account.usage && account.usage.daily" class="space-y-1">
@@ -1142,23 +1064,96 @@
               <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-600 dark:text-gray-300">
                 {{ formatLastUsed(account.lastUsedAt) }}
               </td>
-              <td class="whitespace-nowrap px-3 py-4 text-sm font-medium">
-                <div class="flex flex-wrap items-center gap-1">
+              <td class="whitespace-nowrap px-3 py-4">
+                <div
+                  v-if="
+                    account.platform === 'claude' ||
+                    account.platform === 'claude-console' ||
+                    account.platform === 'bedrock' ||
+                    account.platform === 'gemini' ||
+                    account.platform === 'openai' ||
+                    account.platform === 'openai-responses' ||
+                    account.platform === 'azure_openai' ||
+                    account.platform === 'ccr' ||
+                    account.platform === 'droid' ||
+                    account.platform === 'gemini-api'
+                  "
+                  class="flex items-center gap-2"
+                >
+                  <div class="h-2 w-16 rounded-full bg-gray-200">
+                    <div
+                      class="h-2 rounded-full bg-gradient-to-r from-green-500 to-blue-600 transition-all duration-300"
+                      :style="{ width: 101 - (account.priority || 50) + '%' }"
+                    />
+                  </div>
+                  <span class="min-w-[20px] text-xs font-medium text-gray-700 dark:text-gray-200">
+                    {{ account.priority || 50 }}
+                  </span>
+                </div>
+                <div v-else class="text-sm text-gray-400">
+                  <span class="text-xs">N/A</span>
+                </div>
+              </td>
+              <td class="px-3 py-4 text-sm text-gray-600">
+                <div
+                  v-if="formatProxyDisplay(account.proxy)"
+                  class="break-all rounded bg-blue-50 px-2 py-1 font-mono text-xs"
+                  :title="formatProxyDisplay(account.proxy)"
+                >
+                  {{ formatProxyDisplay(account.proxy) }}
+                </div>
+                <div v-else class="text-gray-400">无代理</div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4">
+                <div class="flex flex-col gap-1">
+                  <!-- 已设置过期时间 -->
+                  <span v-if="account.expiresAt">
+                    <span
+                      v-if="isExpired(account.expiresAt)"
+                      class="inline-flex cursor-pointer items-center text-red-600 hover:underline"
+                      style="font-size: 13px"
+                      @click.stop="startEditAccountExpiry(account)"
+                    >
+                      <i class="fas fa-exclamation-circle mr-1 text-xs" />
+                      已过期
+                    </span>
+                    <span
+                      v-else-if="isExpiringSoon(account.expiresAt)"
+                      class="inline-flex cursor-pointer items-center text-orange-600 hover:underline"
+                      style="font-size: 13px"
+                      @click.stop="startEditAccountExpiry(account)"
+                    >
+                      <i class="fas fa-clock mr-1 text-xs" />
+                      {{ formatExpireDate(account.expiresAt) }}
+                    </span>
+                    <span
+                      v-else
+                      class="cursor-pointer text-gray-600 hover:underline dark:text-gray-400"
+                      style="font-size: 13px"
+                      @click.stop="startEditAccountExpiry(account)"
+                    >
+                      {{ formatExpireDate(account.expiresAt) }}
+                    </span>
+                  </span>
+                  <!-- 永不过期 -->
+                  <span
+                    v-else
+                    class="inline-flex cursor-pointer items-center text-gray-400 hover:underline dark:text-gray-500"
+                    style="font-size: 13px"
+                    @click.stop="startEditAccountExpiry(account)"
+                  >
+                    <i class="fas fa-infinity mr-1 text-xs" />
+                    永不过期
+                  </span>
+                </div>
+              </td>
+              <td
+                class="operations-column sticky right-0 z-10 whitespace-nowrap px-3 py-4 text-sm font-medium"
+              >
+                <!-- 宽度足够时显示所有按钮 -->
+                <div v-if="!needsHorizontalScroll" class="flex items-center gap-1">
                   <button
-                    v-if="
-                      (account.platform === 'claude' ||
-                        account.platform === 'claude-console' ||
-                        account.platform === 'openai' ||
-                        account.platform === 'openai-responses' ||
-                        account.platform === 'gemini' ||
-                        account.platform === 'gemini-api' ||
-                        account.platform === 'ccr') &&
-                      (account.status === 'unauthorized' ||
-                        account.status !== 'active' ||
-                        account.rateLimitStatus?.isRateLimited ||
-                        account.rateLimitStatus === 'limited' ||
-                        !account.isActive)
-                    "
+                    v-if="showResetButton(account)"
                     :class="[
                       'rounded px-2.5 py-1 text-xs font-medium transition-colors',
                       account.isResetting
@@ -1191,15 +1186,24 @@
                   <button
                     v-if="canViewUsage(account)"
                     class="rounded bg-indigo-100 px-2.5 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-200"
-                    :title="'查看使用详情'"
+                    title="查看使用详情"
                     @click="openAccountUsageModal(account)"
                   >
                     <i class="fas fa-chart-line" />
                     <span class="ml-1">详情</span>
                   </button>
                   <button
+                    v-if="canTestAccount(account)"
+                    class="rounded bg-cyan-100 px-2.5 py-1 text-xs font-medium text-cyan-700 transition-colors hover:bg-cyan-200 dark:bg-cyan-900/40 dark:text-cyan-300 dark:hover:bg-cyan-800/50"
+                    title="测试账户连通性"
+                    @click="openAccountTestModal(account)"
+                  >
+                    <i class="fas fa-vial" />
+                    <span class="ml-1">测试</span>
+                  </button>
+                  <button
                     class="rounded bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-200"
-                    :title="'编辑账户'"
+                    title="编辑账户"
                     @click="editAccount(account)"
                   >
                     <i class="fas fa-edit" />
@@ -1207,17 +1211,46 @@
                   </button>
                   <button
                     class="rounded bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-200"
-                    :title="'删除账户'"
+                    title="删除账户"
                     @click="deleteAccount(account)"
                   >
                     <i class="fas fa-trash" />
                     <span class="ml-1">删除</span>
                   </button>
                 </div>
+                <!-- 需要横向滚动时使用缩减形式：2个快捷按钮 + 下拉菜单 -->
+                <div v-else class="flex items-center gap-1">
+                  <button
+                    :class="[
+                      'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+                      account.isTogglingSchedulable
+                        ? 'cursor-not-allowed bg-gray-100 text-gray-400'
+                        : account.schedulable
+                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ]"
+                    :disabled="account.isTogglingSchedulable"
+                    :title="account.schedulable ? '点击禁用调度' : '点击启用调度'"
+                    @click="toggleSchedulable(account)"
+                  >
+                    <i :class="['fas', account.schedulable ? 'fa-toggle-on' : 'fa-toggle-off']" />
+                    <span class="ml-1">{{ account.schedulable ? '调度' : '停用' }}</span>
+                  </button>
+                  <button
+                    class="rounded bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-200"
+                    title="编辑账户"
+                    @click="editAccount(account)"
+                  >
+                    <i class="fas fa-edit" />
+                    <span class="ml-1">编辑</span>
+                  </button>
+                  <ActionDropdown :actions="getAccountActions(account)" />
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
       </div>
 
       <!-- 移动端卡片视图 -->
@@ -1804,7 +1837,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import { useConfirm } from '@/composables/useConfirm'
@@ -1872,6 +1905,10 @@ const supportedUsagePlatforms = [
 // 过期时间编辑弹窗状态
 const editingExpiryAccount = ref(null)
 const expiryEditModalRef = ref(null)
+
+// 表格横向滚动检测
+const tableContainerRef = ref(null)
+const needsHorizontalScroll = ref(false)
 
 // 缓存状态标志
 const apiKeysLoaded = ref(false) // 用于其他功能
@@ -3882,6 +3919,9 @@ watch(currentPage, () => {
 
 watch(paginatedAccounts, () => {
   updateSelectAllState()
+  nextTick(() => {
+    checkHorizontalScroll()
+  })
 })
 
 watch(accounts, () => {
@@ -3995,9 +4035,41 @@ const handleSaveAccountExpiry = async ({ accountId, expiresAt }) => {
   }
 }
 
+// 检测表格是否需要横向滚动
+const checkHorizontalScroll = () => {
+  if (tableContainerRef.value) {
+    needsHorizontalScroll.value =
+      tableContainerRef.value.scrollWidth > tableContainerRef.value.clientWidth
+  }
+}
+
+// 窗口大小变化时重新检测
+let resizeObserver = null
+
 onMounted(() => {
   // 首次加载时强制刷新所有数据
   loadAccounts(true)
+
+  // 设置ResizeObserver监听表格容器大小变化
+  nextTick(() => {
+    if (tableContainerRef.value) {
+      resizeObserver = new ResizeObserver(() => {
+        checkHorizontalScroll()
+      })
+      resizeObserver.observe(tableContainerRef.value)
+      checkHorizontalScroll()
+    }
+  })
+
+  // 监听窗口大小变化
+  window.addEventListener('resize', checkHorizontalScroll)
+})
+
+onUnmounted(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+  }
+  window.removeEventListener('resize', checkHorizontalScroll)
 })
 </script>
 
@@ -4013,6 +4085,86 @@ onMounted(() => {
 
 .table-row:hover {
   background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* 表头左侧固定列背景 - 使用纯色避免滚动时重叠 */
+.table-container thead .checkbox-column,
+.table-container thead .name-column {
+  z-index: 30;
+  background: linear-gradient(to bottom, #f9fafb, #f3f4f6);
+}
+
+.dark .table-container thead .checkbox-column,
+.dark .table-container thead .name-column {
+  background: linear-gradient(to bottom, #374151, #1f2937);
+}
+
+/* 表头右侧操作列背景 - 使用纯色避免滚动时重叠 */
+.table-container thead .operations-column {
+  z-index: 30;
+  background: linear-gradient(to bottom, #f9fafb, #f3f4f6);
+}
+
+.dark .table-container thead .operations-column {
+  background: linear-gradient(to bottom, #374151, #1f2937);
+}
+
+/* tbody 中的左侧固定列背景处理 - 使用纯色避免滚动时重叠 */
+.table-container tbody tr:nth-child(odd) .checkbox-column,
+.table-container tbody tr:nth-child(odd) .name-column {
+  background-color: #ffffff;
+}
+
+.table-container tbody tr:nth-child(even) .checkbox-column,
+.table-container tbody tr:nth-child(even) .name-column {
+  background-color: #f9fafb;
+}
+
+.dark .table-container tbody tr:nth-child(odd) .checkbox-column,
+.dark .table-container tbody tr:nth-child(odd) .name-column {
+  background-color: #1f2937;
+}
+
+.dark .table-container tbody tr:nth-child(even) .checkbox-column,
+.dark .table-container tbody tr:nth-child(even) .name-column {
+  background-color: #374151;
+}
+
+/* hover 状态下的左侧固定列背景 */
+.table-container tbody tr:hover .checkbox-column,
+.table-container tbody tr:hover .name-column {
+  background-color: #eff6ff;
+}
+
+.dark .table-container tbody tr:hover .checkbox-column,
+.dark .table-container tbody tr:hover .name-column {
+  background-color: #1e3a5f;
+}
+
+/* tbody 中的操作列背景处理 - 使用纯色避免滚动时重叠 */
+.table-container tbody tr:nth-child(odd) .operations-column {
+  background-color: #ffffff;
+}
+
+.table-container tbody tr:nth-child(even) .operations-column {
+  background-color: #f9fafb;
+}
+
+.dark .table-container tbody tr:nth-child(odd) .operations-column {
+  background-color: #1f2937;
+}
+
+.dark .table-container tbody tr:nth-child(even) .operations-column {
+  background-color: #374151;
+}
+
+/* hover 状态下的操作列背景 */
+.table-container tbody tr:hover .operations-column {
+  background-color: #eff6ff;
+}
+
+.dark .table-container tbody tr:hover .operations-column {
+  background-color: #1e3a5f;
 }
 
 .loading-spinner {
