@@ -211,7 +211,7 @@
                   <i v-else class="fas fa-sort ml-1 text-gray-400" />
                 </th>
                 <th
-                  class="w-[12%] min-w-[180px] max-w-[200px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                  class="w-[120px] min-w-[180px] max-w-[200px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                   @click="sortAccounts('status')"
                 >
                   状态
@@ -226,7 +226,7 @@
                   <i v-else class="fas fa-sort ml-1 text-gray-400" />
                 </th>
                 <th
-                  class="w-[10%] min-w-[90px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                  class="min-w-[150px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                 >
                   今日使用
                 </th>
@@ -607,7 +607,7 @@
                     </div>
                   </div>
                 </td>
-                <td class="whitespace-nowrap px-3 py-4">
+                <td class="w-[100px] min-w-[100px] max-w-[100px] whitespace-nowrap px-3 py-4">
                   <div class="flex flex-col gap-1">
                     <span
                       :class="[
@@ -1924,6 +1924,10 @@ const supportedUsagePlatforms = [
 // 过期时间编辑弹窗状态
 const editingExpiryAccount = ref(null)
 const expiryEditModalRef = ref(null)
+
+// 表格横向滚动检测
+const tableContainerRef = ref(null)
+const needsHorizontalScroll = ref(false)
 
 // 表格横向滚动检测
 const tableContainerRef = ref(null)
@@ -4038,6 +4042,7 @@ watch(currentPage, () => {
 
 watch(paginatedAccounts, () => {
   updateSelectAllState()
+  // 数据变化后重新检测是否需要横向滚动
   nextTick(() => {
     checkHorizontalScroll()
   })
@@ -4313,5 +4318,107 @@ onUnmounted(() => {
 
 .table-row:hover {
   background-color: rgba(0, 0, 0, 0.02);
+}
+
+.dark .table-row:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* 表头左侧固定列背景 - 使用纯色避免滚动时重叠 */
+.table-container thead .checkbox-column,
+.table-container thead .name-column {
+  z-index: 30;
+  background: linear-gradient(to bottom, #f9fafb, #f3f4f6);
+}
+
+.dark .table-container thead .checkbox-column,
+.dark .table-container thead .name-column {
+  background: linear-gradient(to bottom, #374151, #1f2937);
+}
+
+/* 表头右侧操作列背景 - 使用纯色避免滚动时重叠 */
+.table-container thead .operations-column {
+  z-index: 30;
+  background: linear-gradient(to bottom, #f9fafb, #f3f4f6);
+}
+
+.dark .table-container thead .operations-column {
+  background: linear-gradient(to bottom, #374151, #1f2937);
+}
+
+/* tbody 中的左侧固定列背景处理 - 使用纯色避免滚动时重叠 */
+.table-container tbody tr:nth-child(odd) .checkbox-column,
+.table-container tbody tr:nth-child(odd) .name-column {
+  background-color: #ffffff;
+}
+
+.table-container tbody tr:nth-child(even) .checkbox-column,
+.table-container tbody tr:nth-child(even) .name-column {
+  background-color: #f9fafb;
+}
+
+.dark .table-container tbody tr:nth-child(odd) .checkbox-column,
+.dark .table-container tbody tr:nth-child(odd) .name-column {
+  background-color: #1f2937;
+}
+
+.dark .table-container tbody tr:nth-child(even) .checkbox-column,
+.dark .table-container tbody tr:nth-child(even) .name-column {
+  background-color: #374151;
+}
+
+/* hover 状态下的左侧固定列背景 */
+.table-container tbody tr:hover .checkbox-column,
+.table-container tbody tr:hover .name-column {
+  background-color: #eff6ff;
+}
+
+.dark .table-container tbody tr:hover .checkbox-column,
+.dark .table-container tbody tr:hover .name-column {
+  background-color: #1e3a5f;
+}
+
+/* 名称列右侧阴影（分隔效果） */
+.table-container tbody .name-column {
+  box-shadow: 8px 0 12px -8px rgba(15, 23, 42, 0.16);
+}
+
+.dark .table-container tbody .name-column {
+  box-shadow: 8px 0 12px -8px rgba(30, 41, 59, 0.45);
+}
+
+/* tbody 中的操作列背景处理 - 使用纯色避免滚动时重叠 */
+.table-container tbody tr:nth-child(odd) .operations-column {
+  background-color: #ffffff;
+}
+
+.table-container tbody tr:nth-child(even) .operations-column {
+  background-color: #f9fafb;
+}
+
+.dark .table-container tbody tr:nth-child(odd) .operations-column {
+  background-color: #1f2937;
+}
+
+.dark .table-container tbody tr:nth-child(even) .operations-column {
+  background-color: #374151;
+}
+
+/* hover 状态下的操作列背景 */
+.table-container tbody tr:hover .operations-column {
+  background-color: #eff6ff;
+}
+
+.dark .table-container tbody tr:hover .operations-column {
+  background-color: #1e3a5f;
+}
+
+/* 操作列左侧阴影 */
+.table-container tbody .operations-column {
+  box-shadow: -8px 0 12px -8px rgba(15, 23, 42, 0.16);
+}
+
+.dark .table-container tbody .operations-column {
+  box-shadow: -8px 0 12px -8px rgba(30, 41, 59, 0.45);
 }
 </style>
