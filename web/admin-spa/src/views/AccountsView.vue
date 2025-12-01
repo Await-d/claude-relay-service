@@ -2081,6 +2081,10 @@ const showAccountStatsModal = ref(false)
 const tableContainerRef = ref(null)
 const needsHorizontalScroll = ref(false)
 
+// 表格横向滚动检测
+const tableContainerRef = ref(null)
+const needsHorizontalScroll = ref(false)
+
 // 缓存状态标志
 const apiKeysLoaded = ref(false) // 用于其他功能
 const bindingCountsLoaded = ref(false) // 轻量级绑定计数缓存
