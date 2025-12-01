@@ -295,11 +295,12 @@ class OpenAIResponsesRelayService {
 
       // 检查是否是网络错误 - 根据账户配置决定是否自动恢复
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-        const autoRecover = fullAccount.autoRecoverErrors === 'true' || fullAccount.autoRecoverErrors === true
+        const autoRecover =
+          account.autoRecoverErrors === 'true' || account.autoRecoverErrors === true
 
         if (autoRecover) {
           // 启用自动恢复：设置恢复时间
-          const recoveryMinutes = parseInt(fullAccount.errorRecoveryDuration) || 5
+          const recoveryMinutes = parseInt(account.errorRecoveryDuration) || 5
           const errorOccurredAt = new Date()
           const errorRecoveryAt = new Date(errorOccurredAt.getTime() + recoveryMinutes * 60000)
 

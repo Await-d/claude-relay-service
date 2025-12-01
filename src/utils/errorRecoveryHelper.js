@@ -12,7 +12,9 @@ class ErrorRecoveryHelper {
    * @returns {boolean}
    */
   static isAutoRecoveryEnabled(account) {
-    if (!account) return false
+    if (!account) {
+      return false
+    }
     return account.autoRecoverErrors === 'true' || account.autoRecoverErrors === true
   }
 
@@ -23,7 +25,9 @@ class ErrorRecoveryHelper {
    * @returns {number}
    */
   static getRecoveryDuration(account, defaultDuration = 5) {
-    if (!account) return defaultDuration
+    if (!account) {
+      return defaultDuration
+    }
     const duration = parseFloat(account.errorRecoveryDuration)
     return Number.isFinite(duration) && duration > 0 ? duration : defaultDuration
   }
@@ -88,7 +92,9 @@ class ErrorRecoveryHelper {
     const recoveryAt = new Date(account.errorRecoveryAt)
 
     if (now >= recoveryAt) {
-      logger.info(`✅ Auto-recovering error status for ${platform} account ${account.name || accountId}`)
+      logger.info(
+        `✅ Auto-recovering error status for ${platform} account ${account.name || accountId}`
+      )
       return true
     }
 

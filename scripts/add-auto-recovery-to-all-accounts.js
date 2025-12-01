@@ -16,11 +16,19 @@ const logger = require('../src/utils/logger')
 
 const ACCOUNT_TYPES = [
   { prefix: 'claude_account:', name: 'Claude Official', pattern: 'claude_account:*' },
-  { prefix: 'claude_console_account:', name: 'Claude Console', pattern: 'claude_console_account:*' },
+  {
+    prefix: 'claude_console_account:',
+    name: 'Claude Console',
+    pattern: 'claude_console_account:*'
+  },
   { prefix: 'gemini_account:', name: 'Gemini OAuth', pattern: 'gemini_account:*' },
   { prefix: 'gemini_api_account:', name: 'Gemini API', pattern: 'gemini_api_account:*' },
   { prefix: 'openai_account:', name: 'OpenAI', pattern: 'openai_account:*' },
-  { prefix: 'openai_responses_account:', name: 'OpenAI-Responses', pattern: 'openai_responses_account:*' },
+  {
+    prefix: 'openai_responses_account:',
+    name: 'OpenAI-Responses',
+    pattern: 'openai_responses_account:*'
+  },
   { prefix: 'bedrock_account:', name: 'AWS Bedrock', pattern: 'bedrock_account:*' },
   { prefix: 'azure_openai_account:', name: 'Azure OpenAI', pattern: 'azure_openai_account:*' },
   { prefix: 'droid_account:', name: 'Droid', pattern: 'droid_account:*' },
@@ -70,7 +78,7 @@ async function addAutoRecoveryFields(dryRun = false) {
         if (!dryRun) {
           await client.hset(key, {
             autoRecoverErrors: 'false', // 默认禁用，需用户主动启用
-            errorRecoveryDuration: '5'  // 默认5分钟
+            errorRecoveryDuration: '5' // 默认5分钟
           })
           logger.info(`   ✅ 已更新 ${key}`)
         } else {
@@ -86,7 +94,7 @@ async function addAutoRecoveryFields(dryRun = false) {
   }
 
   // 输出统计信息
-  logger.info('\n' + '='.repeat(60))
+  logger.info(`\n${'='.repeat(60)}`)
   logger.info('📊 执行统计:')
   logger.info(`   总账户数: ${stats.total}`)
   logger.info(`   已更新: ${stats.updated}`)

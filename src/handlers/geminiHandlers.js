@@ -641,7 +641,9 @@ async function handleMessages(req, res) {
                 'Gemini API'
               )
               await geminiApiAccountService.updateAccount(accountId, recoveryData)
-              logger.info(`🔧 Gemini API account ${accountId} marked with auto-recovery for ${error.code}`)
+              logger.info(
+                `🔧 Gemini API account ${accountId} marked with auto-recovery for ${error.code}`
+              )
             }
           }
         } catch (recoveryError) {

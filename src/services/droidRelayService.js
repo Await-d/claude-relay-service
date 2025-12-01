@@ -365,7 +365,9 @@ class DroidRelayService {
                 'Droid'
               )
               await droidAccountService.updateAccount(account.id, recoveryData)
-              logger.info(`🔧 Droid account ${account.id} marked with auto-recovery for ${error.code}`)
+              logger.info(
+                `🔧 Droid account ${account.id} marked with auto-recovery for ${error.code}`
+              )
             }
           } catch (recoveryError) {
             logger.error(`Failed to apply error recovery for ${error.code}:`, recoveryError)

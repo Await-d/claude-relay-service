@@ -20,9 +20,7 @@ class AccountGroupService {
       return 'claude'
     }
     // OpenAI 系列账户统一归类为 openai 平台
-    if (
-      ['openai', 'openai-responses', 'azure-openai', 'azure_openai'].includes(accountPlatform)
-    ) {
+    if (['openai', 'openai-responses', 'azure-openai', 'azure_openai'].includes(accountPlatform)) {
       return 'openai'
     }
     // Gemini 系列账户统一归类为 gemini 平台

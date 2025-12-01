@@ -160,21 +160,17 @@ async function main() {
   }
 
   // 输出表格
-  console.log('┌─' + '─'.repeat(78) + '─┐')
+  console.log(`┌─${'─'.repeat(78)}─┐`)
   console.log('│ 账户类型           │ 总数 │ 已配置 │ 已启用 │ Service │ Relay │ 状态      │')
-  console.log('├─' + '─'.repeat(78) + '─┤')
+  console.log(`├─${'─'.repeat(78)}─┤`)
 
   for (const row of table) {
     console.log(
-      `│ ${row.name.padEnd(17)} │ ${String(row.total).padStart(4)} │ ` +
-        `${String(row.configured).padStart(6)} │ ${String(row.enabled).padStart(6)} │ ` +
-        `${row.serviceImpl ? '   ✅   ' : '   ❌   '} │ ` +
-        `${row.relayImpl ? '  ✅  ' : '  ❌  '} │ ` +
-        `${row.status.padEnd(9)} │`
+      `│ ${row.name.padEnd(17)} │ ${String(row.total).padStart(4)} │ ${String(row.configured).padStart(6)} │ ${String(row.enabled).padStart(6)} │ ${row.serviceImpl ? '   ✅   ' : '   ❌   '} │ ${row.relayImpl ? '  ✅  ' : '  ❌  '} │ ${row.status.padEnd(9)} │`
     )
   }
 
-  console.log('└─' + '─'.repeat(78) + '─┘')
+  console.log(`└─${'─'.repeat(78)}─┘`)
 
   // 汇总统计
   const totalAccounts = table.reduce((sum, row) => sum + row.total, 0)

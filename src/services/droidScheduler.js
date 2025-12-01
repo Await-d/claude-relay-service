@@ -160,7 +160,7 @@ class DroidScheduler {
         )
         candidates = await this._loadGroupAccounts(groupId, normalizedEndpoint)
       } else {
-        const account = await droidAccountService.getAccount(binding)
+        let account = await droidAccountService.getAccount(binding)
         if (account) {
           // 🔧 自动恢复检查
           if (account.status === 'error') {
@@ -168,10 +168,10 @@ class DroidScheduler {
             if (isErrorCleared) {
               const refreshedAccount = await droidAccountService.getAccount(binding)
               if (refreshedAccount) {
-                account = refreshedAccount
                 logger.info(
                   `✅ Dedicated Droid account ${account.name || binding} auto-recovered from error state`
                 )
+                account = refreshedAccount
               }
             }
           }
