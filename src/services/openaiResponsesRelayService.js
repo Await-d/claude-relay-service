@@ -294,40 +294,12 @@ class OpenAIResponsesRelayService {
       }
       logger.error('OpenAI-Responses relay error:', errorInfo)
 
-      // 检查是否是网络错误 - 根据账户配置决定是否自动恢复
+      // 以前会在网络错误时将账号置为 error（若关闭自动恢复则需人工重置）。
+      // 按需求改为：任何错误都不下线/不需人工重置，仅记录日志。
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-        const autoRecover =
-          account.autoRecoverErrors === 'true' || account.autoRecoverErrors === true
-
-        if (autoRecover) {
-          // 启用自动恢复：设置恢复时间
-          const recoveryMinutes = parseInt(account.errorRecoveryDuration) || 5
-          const errorOccurredAt = new Date()
-          const errorRecoveryAt = new Date(errorOccurredAt.getTime() + recoveryMinutes * 60000)
-
-          await openaiResponsesAccountService.updateAccount(account.id, {
-            status: 'error',
-            errorMessage: `Connection error: ${error.code} (auto-recover in ${recoveryMinutes} min at ${errorRecoveryAt.toISOString()})`,
-            errorOccurredAt: errorOccurredAt.toISOString(),
-            errorRecoveryAt: errorRecoveryAt.toISOString(),
-            schedulable: 'false' // 暂时禁用调度
-          })
-
-          logger.warn(
-            `⏳ OpenAI-Responses account ${account.name} marked as temporary error, will auto-recover in ${recoveryMinutes} minutes (auto-recover enabled)`
-          )
-        } else {
-          // 禁用自动恢复：保持永久 error 状态
-          await openaiResponsesAccountService.updateAccount(account.id, {
-            status: 'error',
-            errorMessage: `Connection error: ${error.code}`,
-            schedulable: 'false'
-          })
-
-          logger.warn(
-            `🚫 OpenAI-Responses account ${account.name} marked as error (auto-recover disabled, manual reset required)`
-          )
-        }
+        logger.warn(
+          `⚠️ OpenAI-Responses connection error for ${account.name}, code=${error.code}, skip status update to avoid manual reset`
+        )
       }
 
       // 如果已经发送了响应头，直接结束
