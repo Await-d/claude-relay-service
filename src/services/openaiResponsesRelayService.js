@@ -362,35 +362,7 @@ class OpenAIResponsesRelayService {
         }
 
         if (status === 401) {
-          let reason = 'OpenAI Responses账号认证失败（401错误）'
-          if (errorData) {
-            if (typeof errorData === 'string' && errorData.trim()) {
-              reason = `OpenAI Responses账号认证失败（401错误）：${errorData.trim()}`
-            } else if (
-              errorData.error &&
-              typeof errorData.error.message === 'string' &&
-              errorData.error.message.trim()
-            ) {
-              reason = `OpenAI Responses账号认证失败（401错误）：${errorData.error.message.trim()}`
-            } else if (typeof errorData.message === 'string' && errorData.message.trim()) {
-              reason = `OpenAI Responses账号认证失败（401错误）：${errorData.message.trim()}`
-            }
-          }
-
-          try {
-            await unifiedOpenAIScheduler.markAccountUnauthorized(
-              account.id,
-              'openai-responses',
-              sessionHash,
-              reason
-            )
-          } catch (markError) {
-            logger.error(
-              '❌ Failed to mark OpenAI-Responses account unauthorized in catch handler:',
-              markError
-            )
-          }
-
+          // 不标记未授权，直接透传/返回错误信息
           let unauthorizedResponse = errorData
           if (
             !unauthorizedResponse ||
@@ -599,21 +571,9 @@ class OpenAIResponsesRelayService {
 
       // 如果在流式响应中检测到限流
       if (rateLimitDetected) {
-        // 使用统一调度器处理限流（与非流式响应保持一致）
-        const sessionId = req.headers['session_id'] || req.body?.session_id
-        const sessionHash = sessionId
-          ? crypto.createHash('sha256').update(sessionId).digest('hex')
-          : null
-
-        await unifiedOpenAIScheduler.markAccountRateLimited(
-          account.id,
-          'openai-responses',
-          sessionHash,
-          rateLimitResetsInSeconds
-        )
-
+        // 不标记限流，保持可调度
         logger.warn(
-          `🚫 Processing rate limit for OpenAI-Responses account ${account.id} from stream`
+          `🚫 Rate limit detected for OpenAI-Responses account ${account.id} from stream (not marking)`
         )
       }
 
@@ -819,15 +779,8 @@ class OpenAIResponsesRelayService {
       logger.error('⚠️ Failed to parse rate limit error:', e)
     }
 
-    // 使用统一调度器标记账户为限流状态（与普通OpenAI账号保持一致）
-    await unifiedOpenAIScheduler.markAccountRateLimited(
-      account.id,
-      'openai-responses',
-      sessionHash,
-      resetsInSeconds
-    )
-
-    logger.warn('OpenAI-Responses account rate limited', {
+    // 不标记限流，保持可调度
+    logger.warn('OpenAI-Responses account rate limited (not marking, continue scheduling)', {
       accountId: account.id,
       accountName: account.name,
       resetsInSeconds: resetsInSeconds || 'unknown',
