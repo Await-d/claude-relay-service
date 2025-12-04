@@ -1,9 +1,7 @@
 const logger = require('./logger')
 
 function parseList(envValue) {
-  if (!envValue) {
-    return []
-  }
+  if (!envValue) return []
   return envValue
     .split(',')
     .map((s) => s.trim().toLowerCase())
@@ -15,9 +13,7 @@ const unstableKeywords = parseList(process.env.UNSTABLE_ERROR_KEYWORDS)
 const unstableStatusCodes = new Set([408, 499, 502, 503, 504, 522])
 
 function normalizeErrorPayload(payload) {
-  if (!payload) {
-    return {}
-  }
+  if (!payload) return {}
 
   if (typeof payload === 'string') {
     try {

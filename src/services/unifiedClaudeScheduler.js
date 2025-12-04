@@ -217,7 +217,6 @@ class UnifiedClaudeScheduler {
 
         // 普通专属账户
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId)
-
         // 自动恢复检查
         if (boundAccount && boundAccount.status === 'error') {
           const isErrorCleared = await claudeAccountService.checkAndClearErrorStatus(
