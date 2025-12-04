@@ -888,7 +888,7 @@ class ClaudeAccountService {
               const info = JSON.parse(account.subscriptionInfo)
 
               // Free 账号不支持任何 Opus 模型
-              if (info.accountType === 'claude_free' || info.accountType === 'free') {
+              if (info.accountType === 'free') {
                 return false
               }
 
@@ -1017,7 +1017,7 @@ class ClaudeAccountService {
               const info = JSON.parse(account.subscriptionInfo)
 
               // Free 账号不支持任何 Opus 模型
-              if (info.accountType === 'claude_free' || info.accountType === 'free') {
+              if (info.accountType === 'free') {
                 return false
               }
 
