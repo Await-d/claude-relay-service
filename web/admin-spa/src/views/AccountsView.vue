@@ -1833,6 +1833,12 @@
       @close="closeAccountUsageModal"
     />
 
+    <AccountTestModal
+      :account="testingAccount || {}"
+      :show="showAccountTestModal"
+      @close="closeAccountTestModal"
+    />
+
     <!-- 账户过期时间编辑弹窗 -->
     <AccountExpiryEditModal
       ref="expiryEditModalRef"
@@ -1852,6 +1858,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import AccountForm from '@/components/accounts/AccountForm.vue'
 import CcrAccountForm from '@/components/accounts/CcrAccountForm.vue'
 import AccountUsageDetailModal from '@/components/accounts/AccountUsageDetailModal.vue'
+import AccountTestModal from '@/components/accounts/AccountTestModal.vue'
 import AccountExpiryEditModal from '@/components/accounts/AccountExpiryEditModal.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
@@ -1899,6 +1906,10 @@ const accountUsageHistory = ref([])
 const accountUsageSummary = ref({})
 const accountUsageOverview = ref({})
 const accountUsageGeneratedAt = ref('')
+
+// 测试弹窗状态
+const showAccountTestModal = ref(false)
+const testingAccount = ref(null)
 
 const supportedUsagePlatforms = [
   'claude',
@@ -2040,6 +2051,85 @@ const accountMatchesKeyword = (account, normalizedKeyword) => {
 
 const canViewUsage = (account) => !!account && supportedUsagePlatforms.includes(account.platform)
 
+// 判断是否显示重置状态按钮
+const showResetButton = (account) => {
+  const supportedPlatforms = [
+    'claude',
+    'claude-console',
+    'openai',
+    'openai-responses',
+    'gemini',
+    'gemini-api',
+    'ccr'
+  ]
+  return (
+    supportedPlatforms.includes(account.platform) &&
+    (account.status === 'unauthorized' ||
+      account.status !== 'active' ||
+      account.rateLimitStatus?.isRateLimited ||
+      account.rateLimitStatus === 'limited' ||
+      !account.isActive)
+  )
+}
+
+// 获取账户操作菜单项（用于小屏下拉菜单）
+const getAccountActions = (account) => {
+  const actions = []
+
+  // 重置状态（仅在需要时显示）
+  if (showResetButton(account)) {
+    actions.push({
+      key: 'reset',
+      label: '重置状态',
+      icon: 'fa-redo',
+      color: 'orange',
+      handler: () => resetAccountStatus(account)
+    })
+  }
+
+  // 查看详情
+  if (canViewUsage(account)) {
+    actions.push({
+      key: 'viewUsage',
+      label: '查看详情',
+      icon: 'fa-chart-line',
+      color: 'indigo',
+      handler: () => openAccountUsageModal(account)
+    })
+  }
+
+  // 测试账户连通性
+  if (canTestAccount(account)) {
+    actions.push({
+      key: 'test',
+      label: '测试账户',
+      icon: 'fa-vial',
+      color: 'cyan',
+      handler: () => openAccountTestModal(account)
+    })
+  }
+
+  // 编辑
+  actions.push({
+    key: 'edit',
+    label: '编辑账户',
+    icon: 'fa-edit',
+    color: 'blue',
+    handler: () => editAccount(account)
+  })
+
+  // 删除
+  actions.push({
+    key: 'delete',
+    label: '删除账户',
+    icon: 'fa-trash',
+    color: 'red',
+    handler: () => deleteAccount(account)
+  })
+
+  return actions
+}
+
 const openAccountUsageModal = async (account) => {
   if (!canViewUsage(account)) {
     showToast('该账户类型暂不支持查看详情', 'warning')
@@ -2079,6 +2169,27 @@ const closeAccountUsageModal = () => {
   showAccountUsageModal.value = false
   accountUsageLoading.value = false
   selectedAccountForUsage.value = null
+}
+
+// 测试账户连通性相关函数
+const supportedTestPlatforms = ['claude', 'claude-console']
+
+const canTestAccount = (account) => {
+  return !!account && supportedTestPlatforms.includes(account.platform)
+}
+
+const openAccountTestModal = (account) => {
+  if (!canTestAccount(account)) {
+    showToast('该账户类型暂不支持测试', 'warning')
+    return
+  }
+  testingAccount.value = account
+  showAccountTestModal.value = true
+}
+
+const closeAccountTestModal = () => {
+  showAccountTestModal.value = false
+  testingAccount.value = null
 }
 
 // 计算排序后的账户列表
