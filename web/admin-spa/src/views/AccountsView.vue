@@ -72,6 +72,20 @@
               />
             </div>
 
+            <!-- 限流时间筛选器 -->
+            <div class="group relative min-w-[140px]">
+              <div
+                class="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-orange-500 to-red-500 opacity-0 blur transition duration-300 group-hover:opacity-20"
+              ></div>
+              <CustomDropdown
+                v-model="rateLimitFilter"
+                icon="fa-clock"
+                icon-color="text-orange-500"
+                :options="rateLimitOptions"
+                placeholder="限流时间"
+              />
+            </div>
+
             <!-- 搜索框 -->
             <div class="group relative min-w-[200px]">
               <div
@@ -194,11 +208,13 @@
       <div v-else class="table-wrapper hidden md:block">
         <div ref="tableContainerRef" class="table-container">
           <table class="w-full">
-            <thead class="bg-gray-50/80 backdrop-blur-sm dark:bg-gray-700/80">
+            <thead
+              class="sticky top-0 z-10 bg-gradient-to-b from-gray-50 to-gray-100/90 backdrop-blur-sm dark:from-gray-700 dark:to-gray-800/90"
+            >
               <tr>
                 <th
                   v-if="shouldShowCheckboxes"
-                  class="checkbox-column w-[50px] px-3 py-4 text-left"
+                  class="checkbox-column sticky left-0 z-20 min-w-[50px] px-3 py-4 text-left"
                 >
                   <div class="flex items-center">
                     <input
@@ -211,7 +227,8 @@
                   </div>
                 </th>
                 <th
-                  class="name-column w-[22%] min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                  class="name-column sticky z-20 min-w-[180px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                  :class="shouldShowCheckboxes ? 'left-[50px]' : 'left-0'"
                   @click="sortAccounts('name')"
                 >
                   名称
@@ -226,7 +243,7 @@
                   <i v-else class="fas fa-sort ml-1 text-gray-400" />
                 </th>
                 <th
-                  class="w-[15%] min-w-[120px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                  class="min-w-[220px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                   @click="sortAccounts('platform')"
                 >
                   平台/类型
@@ -261,7 +278,7 @@
                   今日使用
                 </th>
                 <th
-                  class="w-[10%] min-w-[100px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                  class="min-w-[210px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                 >
                   <div class="flex items-center gap-2">
                     <span>会话窗口</span>
@@ -361,7 +378,7 @@
                               <div class="flex items-start gap-2">
                                 <i class="fas fa-gem mt-[2px] text-[10px] text-purple-500"></i>
                                 <span class="font-medium text-white dark:text-gray-900"
-                                  >Opus 窗口：7天Opus模型专用限额。</span
+                                  >Sonnet窗口：7天Sonnet模型专用限额。</span
                                 >
                               </div>
                               <div class="flex items-start gap-2">
@@ -381,7 +398,7 @@
                   </div>
                 </th>
                 <th
-                  class="w-[8%] min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
+                  class="min-w-[80px] px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300"
                 >
                   最后使用
                 </th>
@@ -430,7 +447,10 @@
             </thead>
             <tbody class="divide-y divide-gray-200/50 dark:divide-gray-600/50">
               <tr v-for="account in paginatedAccounts" :key="account.id" class="table-row">
-                <td v-if="shouldShowCheckboxes" class="checkbox-column px-3 py-3">
+                <td
+                  v-if="shouldShowCheckboxes"
+                  class="checkbox-column sticky left-0 z-10 px-3 py-3"
+                >
                   <div class="flex items-center">
                     <input
                       v-model="selectedAccounts"
@@ -441,7 +461,10 @@
                     />
                   </div>
                 </td>
-                <td class="name-column px-3 py-4">
+                <td
+                  class="name-column sticky z-10 px-3 py-4"
+                  :class="shouldShowCheckboxes ? 'left-[50px]' : 'left-0'"
+                >
                   <div class="flex items-center">
                     <div
                       class="mr-2 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green-500 to-green-600"
@@ -560,7 +583,7 @@
                     >
                       <i class="fas fa-server text-xs text-teal-700 dark:text-teal-400" />
                       <span class="text-xs font-semibold text-teal-800 dark:text-teal-300"
-                        >OpenAI-Responses</span
+                        >OpenAI-Api</span
                       >
                       <span class="mx-1 h-4 w-px bg-teal-300 dark:bg-teal-600" />
                       <span class="text-xs font-medium text-teal-700 dark:text-teal-400"
@@ -642,13 +665,42 @@
                     <span
                       :class="[
                         'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
-                        getAccountStatusClass(account)
+                        account.status === 'blocked'
+                          ? 'bg-orange-100 text-orange-800'
+                          : account.status === 'unauthorized'
+                            ? 'bg-red-100 text-red-800'
+                            : account.status === 'temp_error'
+                              ? 'bg-orange-100 text-orange-800'
+                              : account.isActive
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-red-100 text-red-800'
                       ]"
                     >
                       <div
-                        :class="['mr-2 h-2 w-2 rounded-full', getAccountStatusDotClass(account)]"
+                        :class="[
+                          'mr-2 h-2 w-2 rounded-full',
+                          account.status === 'blocked'
+                            ? 'bg-orange-500'
+                            : account.status === 'unauthorized'
+                              ? 'bg-red-500'
+                              : account.status === 'temp_error'
+                                ? 'bg-orange-500'
+                                : account.isActive
+                                  ? 'bg-green-500'
+                                  : 'bg-red-500'
+                        ]"
                       />
-                      {{ getAccountStatusText(account) }}
+                      {{
+                        account.status === 'blocked'
+                          ? '已封锁'
+                          : account.status === 'unauthorized'
+                            ? '异常'
+                            : account.status === 'temp_error'
+                              ? '临时异常'
+                              : account.isActive
+                                ? '正常'
+                                : '异常'
+                      }}
                     </span>
                     <span
                       v-if="
@@ -761,8 +813,7 @@
                           </div>
                         </div>
                         <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                          重置剩余
-                          {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
+                          重置剩余 {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
                         </div>
                       </div>
                       <!-- 7天窗口 -->
@@ -795,8 +846,7 @@
                           </div>
                         </div>
                         <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                          重置剩余
-                          {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
+                          重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
                         </div>
                       </div>
                       <!-- 7天Opus窗口 -->
@@ -829,8 +879,7 @@
                           </div>
                         </div>
                         <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                          重置剩余
-                          {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                          重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
                         </div>
                       </div>
                     </div>
@@ -873,9 +922,7 @@
                                 account
                               )
                             ]"
-                            :style="{
-                              width: account.sessionWindow.progress + '%'
-                            }"
+                            :style="{ width: account.sessionWindow.progress + '%' }"
                           />
                         </div>
                         <span
@@ -899,8 +946,7 @@
                           v-if="account.sessionWindow.remainingTime > 0"
                           class="font-medium text-indigo-600 dark:text-indigo-400"
                         >
-                          剩余
-                          {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
+                          剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
                         </div>
                       </div>
                     </div>
@@ -923,9 +969,7 @@
                                 'h-2 rounded-full transition-all duration-300',
                                 getQuotaBarClass(getQuotaUsagePercent(account))
                               ]"
-                              :style="{
-                                width: Math.min(100, getQuotaUsagePercent(account)) + '%'
-                              }"
+                              :style="{ width: Math.min(100, getQuotaUsagePercent(account)) + '%' }"
                             />
                           </div>
                           <span
@@ -1024,8 +1068,7 @@
                           </div>
                         </div>
                         <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                          重置剩余
-                          {{ formatCodexRemaining(account.codexUsage.primary) }}
+                          重置剩余 {{ formatCodexRemaining(account.codexUsage.primary) }}
                         </div>
                       </div>
                       <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
@@ -1057,8 +1100,7 @@
                           </div>
                         </div>
                         <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                          重置剩余
-                          {{ formatCodexRemaining(account.codexUsage.secondary) }}
+                          重置剩余 {{ formatCodexRemaining(account.codexUsage.secondary) }}
                         </div>
                       </div>
                     </div>
@@ -1424,8 +1466,7 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余
-                    {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
+                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.fiveHour) }}
                   </div>
                 </div>
                 <!-- 7天窗口 -->
@@ -1458,8 +1499,7 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余
-                    {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
+                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
                   </div>
                 </div>
                 <!-- 7天Opus窗口 -->
@@ -1492,8 +1532,7 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余
-                    {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
                   </div>
                 </div>
               </div>
@@ -1544,8 +1583,7 @@
                     v-if="account.sessionWindow.remainingTime > 0"
                     class="font-medium text-indigo-600"
                   >
-                    剩余
-                    {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
+                    剩余 {{ formatRemainingTime(account.sessionWindow.remainingTime) }}
                   </span>
                   <span v-else class="text-gray-500"> 已结束 </span>
                 </div>
@@ -1583,8 +1621,7 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余
-                    {{ formatCodexRemaining(account.codexUsage.primary) }}
+                    重置剩余 {{ formatCodexRemaining(account.codexUsage.primary) }}
                   </div>
                 </div>
                 <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700">
@@ -1616,8 +1653,7 @@
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余
-                    {{ formatCodexRemaining(account.codexUsage.secondary) }}
+                    重置剩余 {{ formatCodexRemaining(account.codexUsage.secondary) }}
                   </div>
                 </div>
               </div>
@@ -1672,15 +1708,17 @@
               v-if="canViewUsage(account)"
               class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-600 transition-colors hover:bg-indigo-100"
               @click="openAccountUsageModal(account)"
-          >
-            <i class="fas fa-chart-line" />
-            详情
-          </button>
-          v-if="canTestAccount(account)"
-          class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-cyan-50 px-3 py-2 text-xs text-cyan-600 transition-colors hover:bg-cyan-100 dark:bg-cyan-900/40 dark:text-cyan-300 dark:hover:bg-cyan-800/50"
-          @click="openAccountTestModal(account)"
-        >
-          <i class="fas fa-vial" />
+            >
+              <i class="fas fa-chart-line" />
+              详情
+            </button>
+
+            <button
+              v-if="canTestAccount(account)"
+              class="flex flex-1 items-center justify-center gap-1 rounded-lg bg-cyan-50 px-3 py-2 text-xs text-cyan-600 transition-colors hover:bg-cyan-100 dark:bg-cyan-900/40 dark:text-cyan-300 dark:hover:bg-cyan-800/50"
+              @click="openAccountTestModal(account)"
+            >
+              <i class="fas fa-vial" />
               测试
             </button>
 
@@ -1841,12 +1879,6 @@
       @close="closeAccountUsageModal"
     />
 
-    <AccountTestModal
-      :account="testingAccount || {}"
-      :show="showAccountTestModal"
-      @close="closeAccountTestModal"
-    />
-
     <!-- 账户过期时间编辑弹窗 -->
     <AccountExpiryEditModal
       ref="expiryEditModalRef"
@@ -1855,16 +1887,24 @@
       @close="closeAccountExpiryEdit"
       @save="handleSaveAccountExpiry"
     />
+
+    <!-- 账户测试弹窗 -->
+    <AccountTestModal
+      :account="testingAccount"
+      :show="showAccountTestModal"
+      @close="closeAccountTestModal"
+    />
+
     <!-- 账户统计弹窗 -->
     <el-dialog
       v-model="showAccountStatsModal"
-      :style="{ maxWidth: '1200px' }"
       title="账户统计汇总"
       width="90%"
+      :style="{ maxWidth: '1200px' }"
     >
       <div class="space-y-4">
         <div class="overflow-x-auto">
-          <table class="w-full border-collapse text-sm" style="min-width: 1000px">
+          <table class="w-full border-collapse text-sm" style="min-width: 800px">
             <thead class="bg-gray-100 dark:bg-gray-700">
               <tr>
                 <th class="border border-gray-300 px-4 py-2 text-left dark:border-gray-600">
@@ -1874,25 +1914,19 @@
                   正常
                 </th>
                 <th class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  不可调度
+                  限流≤1h
                 </th>
                 <th class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  限流0-1h
+                  限流≤5h
                 </th>
                 <th class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  限流1-5h
+                  限流≤12h
                 </th>
                 <th class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  限流5-12h
+                  限流≤1d
                 </th>
                 <th class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  限流12-24h
-                </th>
-                <th class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  限流>24h
-                </th>
-                <th class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  其他
+                  异常
                 </th>
                 <th
                   class="border border-gray-300 bg-blue-50 px-4 py-2 text-center font-bold dark:border-gray-600 dark:bg-blue-900/30"
@@ -1910,31 +1944,19 @@
                   <span class="text-green-600 dark:text-green-400">{{ stat.normal }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-yellow-600 dark:text-yellow-400">{{ stat.unschedulable }}</span>
+                  <span class="text-orange-600 dark:text-orange-400">{{ stat.rateLimit1h }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-orange-600 dark:text-orange-400">{{ stat.rateLimit0_1h }}</span>
+                  <span class="text-orange-600 dark:text-orange-400">{{ stat.rateLimit5h }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-orange-600 dark:text-orange-400">{{ stat.rateLimit1_5h }}</span>
+                  <span class="text-orange-600 dark:text-orange-400">{{ stat.rateLimit12h }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-orange-600 dark:text-orange-400">{{
-                    stat.rateLimit5_12h
-                  }}</span>
+                  <span class="text-orange-600 dark:text-orange-400">{{ stat.rateLimit1d }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-orange-600 dark:text-orange-400">{{
-                    stat.rateLimit12_24h
-                  }}</span>
-                </td>
-                <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-orange-600 dark:text-orange-400">{{
-                    stat.rateLimitOver24h
-                  }}</span>
-                </td>
-                <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-red-600 dark:text-red-400">{{ stat.other }}</span>
+                  <span class="text-red-600 dark:text-red-400">{{ stat.abnormal }}</span>
                 </td>
                 <td
                   class="border border-gray-300 bg-blue-50 px-4 py-2 text-center font-bold dark:border-gray-600 dark:bg-blue-900/30"
@@ -1950,37 +1972,29 @@
                   }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-yellow-600 dark:text-yellow-400">{{
-                    accountStatsTotal.unschedulable
+                  <span class="text-orange-600 dark:text-orange-400">{{
+                    accountStatsTotal.rateLimit1h
                   }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
                   <span class="text-orange-600 dark:text-orange-400">{{
-                    accountStatsTotal.rateLimit0_1h
+                    accountStatsTotal.rateLimit5h
                   }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
                   <span class="text-orange-600 dark:text-orange-400">{{
-                    accountStatsTotal.rateLimit1_5h
+                    accountStatsTotal.rateLimit12h
                   }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
                   <span class="text-orange-600 dark:text-orange-400">{{
-                    accountStatsTotal.rateLimit5_12h
+                    accountStatsTotal.rateLimit1d
                   }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-orange-600 dark:text-orange-400">{{
-                    accountStatsTotal.rateLimit12_24h
+                  <span class="text-red-600 dark:text-red-400">{{
+                    accountStatsTotal.abnormal
                   }}</span>
-                </td>
-                <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-orange-600 dark:text-orange-400">{{
-                    accountStatsTotal.rateLimitOver24h
-                  }}</span>
-                </td>
-                <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
-                  <span class="text-red-600 dark:text-red-400">{{ accountStatsTotal.other }}</span>
                 </td>
                 <td class="border border-gray-300 px-4 py-2 text-center dark:border-gray-600">
                   {{ accountStatsTotal.total }}
@@ -2005,10 +2019,11 @@ import { useConfirm } from '@/composables/useConfirm'
 import AccountForm from '@/components/accounts/AccountForm.vue'
 import CcrAccountForm from '@/components/accounts/CcrAccountForm.vue'
 import AccountUsageDetailModal from '@/components/accounts/AccountUsageDetailModal.vue'
-import AccountTestModal from '@/components/accounts/AccountTestModal.vue'
 import AccountExpiryEditModal from '@/components/accounts/AccountExpiryEditModal.vue'
+import AccountTestModal from '@/components/accounts/AccountTestModal.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
+import ActionDropdown from '@/components/common/ActionDropdown.vue'
 
 // 使用确认弹窗
 const { showConfirmModal, confirmOptions, showConfirm, handleConfirm, handleCancel } = useConfirm()
@@ -2023,7 +2038,8 @@ const bindingCounts = ref({}) // 轻量级绑定计数，用于显示"绑定: X 
 const accountGroups = ref([])
 const groupFilter = ref('all')
 const platformFilter = ref('all')
-const statusFilter = ref('normal') // 状态过滤 (normal/rateLimited/other/all)
+const statusFilter = ref('normal') // 新增：状态过滤 (normal/abnormal/all)
+const rateLimitFilter = ref('all') // 新增：限流时间过滤 (all/1h/5h/12h/1d)
 const searchKeyword = ref('')
 const PAGE_SIZE_STORAGE_KEY = 'accountsPageSize'
 const getInitialPageSize = () => {
@@ -2055,10 +2071,6 @@ const accountUsageSummary = ref({})
 const accountUsageOverview = ref({})
 const accountUsageGeneratedAt = ref('')
 
-// 测试弹窗状态
-const showAccountTestModal = ref(false)
-const testingAccount = ref(null)
-
 const supportedUsagePlatforms = [
   'claude',
   'claude-console',
@@ -2073,12 +2085,12 @@ const supportedUsagePlatforms = [
 const editingExpiryAccount = ref(null)
 const expiryEditModalRef = ref(null)
 
+// 测试弹窗状态
+const showAccountTestModal = ref(false)
+const testingAccount = ref(null)
+
 // 账户统计弹窗状态
 const showAccountStatsModal = ref(false)
-
-// 表格横向滚动检测
-const tableContainerRef = ref(null)
-const needsHorizontalScroll = ref(false)
 
 // 表格横向滚动检测
 const tableContainerRef = ref(null)
@@ -2097,102 +2109,35 @@ const sortOptions = ref([
   { value: 'dailyTokens', label: '按今日Token排序', icon: 'fa-coins' },
   { value: 'dailyRequests', label: '按今日请求数排序', icon: 'fa-chart-line' },
   { value: 'totalTokens', label: '按总Token排序', icon: 'fa-database' },
-  { value: 'lastUsed', label: '按最后使用排序', icon: 'fa-clock' },
-  { value: 'rateLimitTime', label: '按限流时间排序', icon: 'fa-hourglass' }
+  { value: 'lastUsed', label: '按最后使用排序', icon: 'fa-clock' }
 ])
 
-// 平台层级结构定义
-const platformHierarchy = [
-  {
-    value: 'group-claude',
-    label: 'Claude（全部）',
-    icon: 'fa-brain',
-    children: [
-      { value: 'claude', label: 'Claude 官方/OAuth', icon: 'fa-brain' },
-      { value: 'claude-console', label: 'Claude Console', icon: 'fa-terminal' },
-      { value: 'bedrock', label: 'Bedrock', icon: 'fab fa-aws' },
-      { value: 'ccr', label: 'CCR Relay', icon: 'fa-code-branch' }
-    ]
-  },
-  {
-    value: 'group-openai',
-    label: 'Codex / OpenAI（全部）',
-    icon: 'fa-openai',
-    children: [
-      { value: 'openai', label: 'OpenAI 官方', icon: 'fa-openai' },
-      { value: 'openai-responses', label: 'OpenAI-Responses (Codex)', icon: 'fa-server' },
-      { value: 'azure_openai', label: 'Azure OpenAI', icon: 'fab fa-microsoft' }
-    ]
-  },
-  {
-    value: 'group-gemini',
-    label: 'Gemini（全部）',
-    icon: 'fab fa-google',
-    children: [
-      { value: 'gemini', label: 'Gemini OAuth', icon: 'fab fa-google' },
-      { value: 'gemini-api', label: 'Gemini API', icon: 'fa-key' }
-    ]
-  },
-  {
-    value: 'group-droid',
-    label: 'Droid（全部）',
-    icon: 'fa-robot',
-    children: [{ value: 'droid', label: 'Droid', icon: 'fa-robot' }]
-  }
-]
-
-// 平台分组映射
-const platformGroupMap = {
-  'group-claude': ['claude', 'claude-console', 'bedrock', 'ccr'],
-  'group-openai': ['openai', 'openai-responses', 'azure_openai'],
-  'group-gemini': ['gemini', 'gemini-api'],
-  'group-droid': ['droid']
-}
-
-// 平台请求处理器
-const platformRequestHandlers = {
-  claude: (params) => apiClient.get('/admin/claude-accounts', { params }),
-  'claude-console': (params) => apiClient.get('/admin/claude-console-accounts', { params }),
-  bedrock: (params) => apiClient.get('/admin/bedrock-accounts', { params }),
-  gemini: (params) => apiClient.get('/admin/gemini-accounts', { params }),
-  openai: (params) => apiClient.get('/admin/openai-accounts', { params }),
-  azure_openai: (params) => apiClient.get('/admin/azure-openai-accounts', { params }),
-  'openai-responses': (params) => apiClient.get('/admin/openai-responses-accounts', { params }),
-  ccr: (params) => apiClient.get('/admin/ccr-accounts', { params }),
-  droid: (params) => apiClient.get('/admin/droid-accounts', { params }),
-  'gemini-api': (params) => apiClient.get('/admin/gemini-api-accounts', { params })
-}
-
-const allPlatformKeys = Object.keys(platformRequestHandlers)
-
-// 根据过滤器获取需要加载的平台列表
-const getPlatformsForFilter = (filter) => {
-  if (filter === 'all') return allPlatformKeys
-  if (platformGroupMap[filter]) return platformGroupMap[filter]
-  if (allPlatformKeys.includes(filter)) return [filter]
-  return allPlatformKeys
-}
-
-// 平台选项（两级结构）
-const platformOptions = computed(() => {
-  const options = [{ value: 'all', label: '所有平台', icon: 'fa-globe', indent: 0 }]
-
-  platformHierarchy.forEach((group) => {
-    options.push({ ...group, indent: 0, isGroup: true })
-    group.children?.forEach((child) => {
-      options.push({ ...child, indent: 1, parent: group.value })
-    })
-  })
-
-  return options
-})
+const platformOptions = ref([
+  { value: 'all', label: '所有平台', icon: 'fa-globe' },
+  { value: 'claude', label: 'Claude', icon: 'fa-brain' },
+  { value: 'claude-console', label: 'Claude Console', icon: 'fa-terminal' },
+  { value: 'gemini', label: 'Gemini', icon: 'fab fa-google' },
+  { value: 'gemini-api', label: 'Gemini API', icon: 'fa-key' },
+  { value: 'openai', label: 'OpenAi', icon: 'fa-openai' },
+  { value: 'azure_openai', label: 'Azure OpenAI', icon: 'fab fa-microsoft' },
+  { value: 'bedrock', label: 'Bedrock', icon: 'fab fa-aws' },
+  { value: 'openai-responses', label: 'OpenAI-Responses', icon: 'fa-server' },
+  { value: 'ccr', label: 'CCR', icon: 'fa-code-branch' },
+  { value: 'droid', label: 'Droid', icon: 'fa-robot' }
+])
 
 const statusOptions = ref([
   { value: 'normal', label: '正常', icon: 'fa-check-circle' },
-  { value: 'unschedulable', label: '不可调度', icon: 'fa-ban' },
-  { value: 'rateLimited', label: '限流', icon: 'fa-hourglass-half' },
-  { value: 'other', label: '其他', icon: 'fa-exclamation-triangle' },
+  { value: 'abnormal', label: '异常', icon: 'fa-exclamation-triangle' },
   { value: 'all', label: '全部状态', icon: 'fa-list' }
+])
+
+const rateLimitOptions = ref([
+  { value: 'all', label: '全部限流', icon: 'fa-infinity' },
+  { value: '1h', label: '限流≤1小时', icon: 'fa-hourglass-start' },
+  { value: '5h', label: '限流≤5小时', icon: 'fa-hourglass-half' },
+  { value: '12h', label: '限流≤12小时', icon: 'fa-hourglass-end' },
+  { value: '1d', label: '限流≤1天', icon: 'fa-calendar-day' }
 ])
 
 const groupOptions = computed(() => {
@@ -2326,38 +2271,29 @@ const getAccountActions = (account) => {
   // 查看详情
   if (canViewUsage(account)) {
     actions.push({
-      key: 'viewUsage',
-      label: '查看详情',
+      key: 'usage',
+      label: '详情',
       icon: 'fa-chart-line',
       color: 'indigo',
       handler: () => openAccountUsageModal(account)
     })
   }
 
-  // 测试账户连通性
+  // 测试账户
   if (canTestAccount(account)) {
     actions.push({
       key: 'test',
-      label: '测试账户',
+      label: '测试',
       icon: 'fa-vial',
-      color: 'cyan',
+      color: 'blue',
       handler: () => openAccountTestModal(account)
     })
   }
 
-  // 编辑
-  actions.push({
-    key: 'edit',
-    label: '编辑账户',
-    icon: 'fa-edit',
-    color: 'blue',
-    handler: () => editAccount(account)
-  })
-
   // 删除
   actions.push({
     key: 'delete',
-    label: '删除账户',
+    label: '删除',
     icon: 'fa-trash',
     color: 'red',
     handler: () => deleteAccount(account)
@@ -2440,30 +2376,44 @@ const sortedAccounts = computed(() => {
     )
   }
 
-  // 状态过滤 (normal/unschedulable/rateLimited/other/all)
-  // 限流: isActive && rate-limited (最高优先级)
-  // 正常: isActive && !rate-limited && !blocked && schedulable
-  // 不可调度: isActive && !rate-limited && !blocked && schedulable === false
-  // 其他: 非限流的（未激活 || 被阻止）
+  // 状态过滤 (normal/abnormal/all)
   if (statusFilter.value !== 'all') {
     sourceAccounts = sourceAccounts.filter((account) => {
-      const isRateLimited = isAccountRateLimited(account)
-      const isBlocked = account.status === 'blocked' || account.status === 'unauthorized'
+      const isNormal =
+        account.isActive &&
+        account.status !== 'blocked' &&
+        account.status !== 'unauthorized' &&
+        account.schedulable !== false &&
+        !isAccountRateLimited(account)
 
-      if (statusFilter.value === 'rateLimited') {
-        // 限流: 激活且限流中（优先判断）
-        return account.isActive && isRateLimited
-      } else if (statusFilter.value === 'normal') {
-        // 正常: 激活且非限流且非阻止且可调度
-        return account.isActive && !isRateLimited && !isBlocked && account.schedulable !== false
-      } else if (statusFilter.value === 'unschedulable') {
-        // 不可调度: 激活且非限流且非阻止但不可调度
-        return account.isActive && !isRateLimited && !isBlocked && account.schedulable === false
-      } else if (statusFilter.value === 'other') {
-        // 其他: 非限流的异常账户（未激活或被阻止）
-        return !isRateLimited && (!account.isActive || isBlocked)
+      if (statusFilter.value === 'normal') {
+        return isNormal
+      } else if (statusFilter.value === 'abnormal') {
+        return !isNormal
       }
       return true
+    })
+  }
+
+  // 限流时间过滤 (all/1h/5h/12h/1d)
+  if (rateLimitFilter.value !== 'all') {
+    sourceAccounts = sourceAccounts.filter((account) => {
+      const rateLimitMinutes = getRateLimitRemainingMinutes(account)
+      if (!rateLimitMinutes || rateLimitMinutes <= 0) return false
+
+      const minutes = Math.floor(rateLimitMinutes)
+      switch (rateLimitFilter.value) {
+        case '1h':
+          return minutes <= 60
+        case '5h':
+          return minutes <= 300
+        case '12h':
+          return minutes <= 720
+        case '1d':
+          return minutes <= 1440
+        default:
+          return true
+      }
     })
   }
 
@@ -2495,23 +2445,6 @@ const sortedAccounts = computed(() => {
     if (accountsSortBy.value === 'status') {
       aVal = a.isActive ? 1 : 0
       bVal = b.isActive ? 1 : 0
-    }
-
-    // 处理限流时间排序: 未限流优先，然后按剩余时间从小到大
-    if (accountsSortBy.value === 'rateLimitTime') {
-      const aIsRateLimited = isAccountRateLimited(a)
-      const bIsRateLimited = isAccountRateLimited(b)
-      const aMinutes = aIsRateLimited ? getRateLimitRemainingMinutes(a) : 0
-      const bMinutes = bIsRateLimited ? getRateLimitRemainingMinutes(b) : 0
-
-      // 未限流的排在前面
-      if (!aIsRateLimited && bIsRateLimited) return -1
-      if (aIsRateLimited && !bIsRateLimited) return 1
-
-      // 都未限流或都限流时，按剩余时间升序
-      if (aMinutes < bMinutes) return -1
-      if (aMinutes > bMinutes) return 1
-      return 0
     }
 
     if (aVal < bVal) return accountsSortOrder.value === 'asc' ? -1 : 1
@@ -2546,66 +2479,51 @@ const accountStats = computed(() => {
     .map((p) => {
       const platformAccounts = accounts.value.filter((acc) => acc.platform === p.value)
 
-      // 先筛选限流账户（优先级最高）
+      const normal = platformAccounts.filter((acc) => {
+        return (
+          acc.isActive &&
+          acc.status !== 'blocked' &&
+          acc.status !== 'unauthorized' &&
+          acc.schedulable !== false &&
+          !isAccountRateLimited(acc)
+        )
+      }).length
+
+      const abnormal = platformAccounts.filter((acc) => {
+        return !acc.isActive || acc.status === 'blocked' || acc.status === 'unauthorized'
+      }).length
+
       const rateLimitedAccounts = platformAccounts.filter((acc) => isAccountRateLimited(acc))
 
-      // 正常: 非限流 && 激活 && 非阻止 && 可调度
-      const normal = platformAccounts.filter((acc) => {
-        const isRateLimited = isAccountRateLimited(acc)
-        const isBlocked = acc.status === 'blocked' || acc.status === 'unauthorized'
-        return !isRateLimited && acc.isActive && !isBlocked && acc.schedulable !== false
-      }).length
-
-      // 不可调度: 非限流 && 激活 && 非阻止 && 不可调度
-      const unschedulable = platformAccounts.filter((acc) => {
-        const isRateLimited = isAccountRateLimited(acc)
-        const isBlocked = acc.status === 'blocked' || acc.status === 'unauthorized'
-        return !isRateLimited && acc.isActive && !isBlocked && acc.schedulable === false
-      }).length
-
-      // 其他: 非限流的异常账户（未激活或被阻止）
-      const other = platformAccounts.filter((acc) => {
-        const isRateLimited = isAccountRateLimited(acc)
-        const isBlocked = acc.status === 'blocked' || acc.status === 'unauthorized'
-        return !isRateLimited && (!acc.isActive || isBlocked)
-      }).length
-
-      const rateLimit0_1h = rateLimitedAccounts.filter((acc) => {
+      const rateLimit1h = rateLimitedAccounts.filter((acc) => {
         const minutes = getRateLimitRemainingMinutes(acc)
         return minutes > 0 && minutes <= 60
       }).length
 
-      const rateLimit1_5h = rateLimitedAccounts.filter((acc) => {
+      const rateLimit5h = rateLimitedAccounts.filter((acc) => {
         const minutes = getRateLimitRemainingMinutes(acc)
-        return minutes > 60 && minutes <= 300
+        return minutes > 0 && minutes <= 300
       }).length
 
-      const rateLimit5_12h = rateLimitedAccounts.filter((acc) => {
+      const rateLimit12h = rateLimitedAccounts.filter((acc) => {
         const minutes = getRateLimitRemainingMinutes(acc)
-        return minutes > 300 && minutes <= 720
+        return minutes > 0 && minutes <= 720
       }).length
 
-      const rateLimit12_24h = rateLimitedAccounts.filter((acc) => {
+      const rateLimit1d = rateLimitedAccounts.filter((acc) => {
         const minutes = getRateLimitRemainingMinutes(acc)
-        return minutes > 720 && minutes <= 1440
-      }).length
-
-      const rateLimitOver24h = rateLimitedAccounts.filter((acc) => {
-        const minutes = getRateLimitRemainingMinutes(acc)
-        return minutes > 1440
+        return minutes > 0 && minutes <= 1440
       }).length
 
       return {
         platform: p.value,
         platformLabel: p.label,
         normal,
-        unschedulable,
-        rateLimit0_1h,
-        rateLimit1_5h,
-        rateLimit5_12h,
-        rateLimit12_24h,
-        rateLimitOver24h,
-        other,
+        rateLimit1h,
+        rateLimit5h,
+        rateLimit12h,
+        rateLimit1d,
+        abnormal,
         total: platformAccounts.length
       }
     })
@@ -2617,25 +2535,21 @@ const accountStatsTotal = computed(() => {
   return accountStats.value.reduce(
     (total, stat) => {
       total.normal += stat.normal
-      total.unschedulable += stat.unschedulable
-      total.rateLimit0_1h += stat.rateLimit0_1h
-      total.rateLimit1_5h += stat.rateLimit1_5h
-      total.rateLimit5_12h += stat.rateLimit5_12h
-      total.rateLimit12_24h += stat.rateLimit12_24h
-      total.rateLimitOver24h += stat.rateLimitOver24h
-      total.other += stat.other
+      total.rateLimit1h += stat.rateLimit1h
+      total.rateLimit5h += stat.rateLimit5h
+      total.rateLimit12h += stat.rateLimit12h
+      total.rateLimit1d += stat.rateLimit1d
+      total.abnormal += stat.abnormal
       total.total += stat.total
       return total
     },
     {
       normal: 0,
-      unschedulable: 0,
-      rateLimit0_1h: 0,
-      rateLimit1_5h: 0,
-      rateLimit5_12h: 0,
-      rateLimit12_24h: 0,
-      rateLimitOver24h: 0,
-      other: 0,
+      rateLimit1h: 0,
+      rateLimit5h: 0,
+      rateLimit12h: 0,
+      rateLimit1d: 0,
+      abnormal: 0,
       total: 0
     }
   )
@@ -2754,14 +2668,190 @@ const loadAccounts = async (forceReload = false) => {
   try {
     // 构建查询参数（用于其他筛选情况）
     const params = {}
-    if (platformFilter.value !== 'all' && !platformGroupMap[platformFilter.value]) {
+    if (platformFilter.value !== 'all') {
       params.platform = platformFilter.value
     }
     if (groupFilter.value !== 'all') {
       params.groupId = groupFilter.value
     }
 
-    const platformsToFetch = getPlatformsForFilter(platformFilter.value)
+    // 根据平台筛选决定需要请求哪些接口
+    const requests = []
+
+    if (platformFilter.value === 'all') {
+      // 请求所有平台
+      requests.push(
+        apiClient.get('/admin/claude-accounts', { params }),
+        apiClient.get('/admin/claude-console-accounts', { params }),
+        apiClient.get('/admin/bedrock-accounts', { params }),
+        apiClient.get('/admin/gemini-accounts', { params }),
+        apiClient.get('/admin/openai-accounts', { params }),
+        apiClient.get('/admin/azure-openai-accounts', { params }),
+        apiClient.get('/admin/openai-responses-accounts', { params }),
+        apiClient.get('/admin/ccr-accounts', { params }),
+        apiClient.get('/admin/droid-accounts', { params }),
+        apiClient.get('/admin/gemini-api-accounts', { params })
+      )
+    } else {
+      // 只请求指定平台，其他平台设为null占位
+      switch (platformFilter.value) {
+        case 'claude':
+          requests.push(
+            apiClient.get('/admin/claude-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'claude-console':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            apiClient.get('/admin/claude-console-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'bedrock':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            apiClient.get('/admin/bedrock-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'gemini':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            apiClient.get('/admin/gemini-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'openai':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            apiClient.get('/admin/openai-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'azure_openai':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            apiClient.get('/admin/azure-openai-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'openai-responses':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            apiClient.get('/admin/openai-responses-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'ccr':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            apiClient.get('/admin/ccr-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'droid':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            apiClient.get('/admin/droid-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }) // gemini-api 占位
+          )
+          break
+        case 'gemini-api':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }), // droid 占位
+            apiClient.get('/admin/gemini-api-accounts', { params })
+          )
+          break
+        default:
+          // 默认情况下返回空数组
+          requests.push(
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] })
+          )
+          break
+      }
+    }
 
     // 使用缓存机制加载绑定计数和分组数据（不再加载完整的 API Keys 数据）
     await Promise.all([loadBindingCounts(forceReload), loadAccountGroups(forceReload)])
@@ -2769,137 +2859,125 @@ const loadAccounts = async (forceReload = false) => {
     // 后端账户API已经包含分组信息，不需要单独加载分组成员关系
     // await loadGroupMembers(forceReload)
 
-    const platformResults = await Promise.all(
-      platformsToFetch.map(async (platform) => {
-        const handler = platformRequestHandlers[platform]
-        if (!handler) {
-          return { platform, success: true, data: [] }
-        }
-
-        try {
-          const res = await handler(params)
-          return { platform, success: res?.success, data: res?.data }
-        } catch (error) {
-          console.debug(`Failed to load ${platform} accounts:`, error)
-          return { platform, success: false, data: [] }
-        }
-      })
-    )
+    const [
+      claudeData,
+      claudeConsoleData,
+      bedrockData,
+      geminiData,
+      openaiData,
+      azureOpenaiData,
+      openaiResponsesData,
+      ccrData,
+      droidData,
+      geminiApiData
+    ] = await Promise.all(requests)
 
     const allAccounts = []
-    const counts = bindingCounts.value || {}
-    let openaiResponsesRaw = []
 
-    const appendAccounts = (platform, data) => {
-      if (!data || data.length === 0) return
+    // 获取绑定计数数据
+    const counts = bindingCounts.value
 
-      switch (platform) {
-        case 'claude': {
-          const items = data.map((acc) => {
-            const boundApiKeysCount = counts.claudeAccountId?.[acc.id] || 0
-            return { ...acc, platform: 'claude', boundApiKeysCount }
-          })
-          allAccounts.push(...items)
-          break
-        }
-        case 'claude-console': {
-          const items = data.map((acc) => {
-            const boundApiKeysCount = counts.claudeConsoleAccountId?.[acc.id] || 0
-            return { ...acc, platform: 'claude-console', boundApiKeysCount }
-          })
-          allAccounts.push(...items)
-          break
-        }
-        case 'bedrock': {
-          const items = data.map((acc) => ({ ...acc, platform: 'bedrock', boundApiKeysCount: 0 }))
-          allAccounts.push(...items)
-          break
-        }
-        case 'gemini': {
-          const items = data.map((acc) => {
-            const boundApiKeysCount = counts.geminiAccountId?.[acc.id] || 0
-            return { ...acc, platform: 'gemini', boundApiKeysCount }
-          })
-          allAccounts.push(...items)
-          break
-        }
-        case 'openai': {
-          const items = data.map((acc) => {
-            const boundApiKeysCount = counts.openaiAccountId?.[acc.id] || 0
-            return { ...acc, platform: 'openai', boundApiKeysCount }
-          })
-          allAccounts.push(...items)
-          break
-        }
-        case 'azure_openai': {
-          const items = data.map((acc) => {
-            const boundApiKeysCount = counts.azureOpenaiAccountId?.[acc.id] || 0
-            return { ...acc, platform: 'azure_openai', boundApiKeysCount }
-          })
-          allAccounts.push(...items)
-          break
-        }
-        case 'openai-responses': {
-          openaiResponsesRaw = data
-          break
-        }
-        case 'ccr': {
-          const items = data.map((acc) => ({ ...acc, platform: 'ccr', boundApiKeysCount: 0 }))
-          allAccounts.push(...items)
-          break
-        }
-        case 'droid': {
-          const items = data.map((acc) => {
-            const boundApiKeysCount = counts.droidAccountId?.[acc.id] || acc.boundApiKeysCount || 0
-            return { ...acc, platform: 'droid', boundApiKeysCount }
-          })
-          allAccounts.push(...items)
-          break
-        }
-        case 'gemini-api': {
-          const items = data.map((acc) => {
-            const boundApiKeysCount = counts.geminiAccountId?.[`api:${acc.id}`] || 0
-            return { ...acc, platform: 'gemini-api', boundApiKeysCount }
-          })
-          allAccounts.push(...items)
-          break
-        }
-        default:
-          break
-      }
+    if (claudeData.success) {
+      const claudeAccounts = (claudeData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        const boundApiKeysCount = counts.claudeAccountId?.[acc.id] || 0
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'claude', boundApiKeysCount }
+      })
+      allAccounts.push(...claudeAccounts)
     }
 
-    platformResults.forEach(({ platform, success, data }) => {
-      if (success) {
-        appendAccounts(platform, data || [])
-      }
-    })
-
-    if (openaiResponsesRaw.length > 0) {
-      let autoRecoveryConfigMap = {}
-      try {
-        const configsRes = await apiClient.get(
-          '/admin/openai-responses-accounts/auto-recovery-configs'
-        )
-        if (configsRes.success && Array.isArray(configsRes.data)) {
-          autoRecoveryConfigMap = configsRes.data.reduce((map, config) => {
-            if (config?.accountId) {
-              map[config.accountId] = config
-            }
-            return map
-          }, {})
-        }
-      } catch (error) {
-        console.debug('Failed to load auto-recovery configs:', error)
-      }
-
-      const responsesAccounts = openaiResponsesRaw.map((acc) => {
-        const boundApiKeysCount = counts.openaiAccountId?.[`responses:${acc.id}`] || 0
-        const autoRecoveryConfig = autoRecoveryConfigMap[acc.id] || acc.autoRecoveryConfig || null
-        return { ...acc, platform: 'openai-responses', boundApiKeysCount, autoRecoveryConfig }
+    if (claudeConsoleData.success) {
+      const claudeConsoleAccounts = (claudeConsoleData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        const boundApiKeysCount = counts.claudeConsoleAccountId?.[acc.id] || 0
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'claude-console', boundApiKeysCount }
       })
+      allAccounts.push(...claudeConsoleAccounts)
+    }
 
-      allAccounts.push(...responsesAccounts)
+    if (bedrockData.success) {
+      const bedrockAccounts = (bedrockData.data || []).map((acc) => {
+        // Bedrock账户暂时不支持直接绑定
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'bedrock', boundApiKeysCount: 0 }
+      })
+      allAccounts.push(...bedrockAccounts)
+    }
+
+    if (geminiData.success) {
+      const geminiAccounts = (geminiData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        const boundApiKeysCount = counts.geminiAccountId?.[acc.id] || 0
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'gemini', boundApiKeysCount }
+      })
+      allAccounts.push(...geminiAccounts)
+    }
+    if (openaiData.success) {
+      const openaiAccounts = (openaiData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        const boundApiKeysCount = counts.openaiAccountId?.[acc.id] || 0
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'openai', boundApiKeysCount }
+      })
+      allAccounts.push(...openaiAccounts)
+    }
+    if (azureOpenaiData && azureOpenaiData.success) {
+      const azureOpenaiAccounts = (azureOpenaiData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        const boundApiKeysCount = counts.azureOpenaiAccountId?.[acc.id] || 0
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'azure_openai', boundApiKeysCount }
+      })
+      allAccounts.push(...azureOpenaiAccounts)
+    }
+
+    if (openaiResponsesData && openaiResponsesData.success) {
+      const openaiResponsesAccounts = (openaiResponsesData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        // OpenAI-Responses账户使用 responses: 前缀
+        const boundApiKeysCount = counts.openaiAccountId?.[`responses:${acc.id}`] || 0
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'openai-responses', boundApiKeysCount }
+      })
+      allAccounts.push(...openaiResponsesAccounts)
+    }
+
+    // CCR 账户
+    if (ccrData && ccrData.success) {
+      const ccrAccounts = (ccrData.data || []).map((acc) => {
+        // CCR 不支持 API Key 绑定，固定为 0
+        return { ...acc, platform: 'ccr', boundApiKeysCount: 0 }
+      })
+      allAccounts.push(...ccrAccounts)
+    }
+
+    // Droid 账户
+    if (droidData && droidData.success) {
+      const droidAccounts = (droidData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        const boundApiKeysCount = counts.droidAccountId?.[acc.id] || acc.boundApiKeysCount || 0
+        return {
+          ...acc,
+          platform: 'droid',
+          boundApiKeysCount
+        }
+      })
+      allAccounts.push(...droidAccounts)
+    }
+
+    // Gemini API 账户
+    if (geminiApiData && geminiApiData.success) {
+      const geminiApiAccounts = (geminiApiData.data || []).map((acc) => {
+        // 从绑定计数缓存获取数量
+        // Gemini-API账户使用 api: 前缀
+        const boundApiKeysCount = counts.geminiAccountId?.[`api:${acc.id}`] || 0
+        // 后端已经包含了groupInfos，直接使用
+        return { ...acc, platform: 'gemini-api', boundApiKeysCount }
+      })
+      allAccounts.push(...geminiApiAccounts)
     }
 
     // 根据分组筛选器过滤账户
@@ -3273,21 +3351,8 @@ const isAccountRateLimited = (account) => {
 const getRateLimitRemainingMinutes = (account) => {
   if (!account || !account.rateLimitStatus) return 0
 
-  if (typeof account.rateLimitStatus === 'object') {
-    const status = account.rateLimitStatus
-    if (Number.isFinite(status.minutesRemaining)) {
-      return Math.max(0, Math.ceil(status.minutesRemaining))
-    }
-    if (Number.isFinite(status.remainingMinutes)) {
-      return Math.max(0, Math.ceil(status.remainingMinutes))
-    }
-    if (Number.isFinite(status.remainingSeconds)) {
-      return Math.max(0, Math.ceil(status.remainingSeconds / 60))
-    }
-    if (status.rateLimitResetAt) {
-      const diffMs = new Date(status.rateLimitResetAt).getTime() - Date.now()
-      return diffMs > 0 ? Math.ceil(diffMs / 60000) : 0
-    }
+  if (typeof account.rateLimitStatus === 'object' && account.rateLimitStatus.remainingMinutes) {
+    return account.rateLimitStatus.remainingMinutes
   }
 
   // 如果有 rateLimitUntil 字段，计算剩余时间
@@ -3441,10 +3506,7 @@ const batchDeleteAccounts = async () => {
 
   let confirmMessage = `确定要删除选中的 ${targets.length} 个账户吗？此操作不可恢复。`
   const boundInfo = targets
-    .map((account) => ({
-      account,
-      boundKeys: getBoundApiKeysForAccount(account)
-    }))
+    .map((account) => ({ account, boundKeys: getBoundApiKeysForAccount(account) }))
     .filter((item) => item.boundKeys.length > 0)
 
   if (boundInfo.length > 0) {
@@ -4476,99 +4538,11 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.table-container {
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+.accounts-container {
+  min-height: calc(100vh - 300px);
 }
 
-.table-row {
-  transition: all 0.2s ease;
-}
-
-.table-row:hover {
-  background-color: rgba(0, 0, 0, 0.02);
-}
-
-/* 表头左侧固定列背景 - 使用纯色避免滚动时重叠 */
-.table-container thead .checkbox-column,
-.table-container thead .name-column {
-  z-index: 30;
-  background: linear-gradient(to bottom, #f9fafb, #f3f4f6);
-}
-
-.dark .table-container thead .checkbox-column,
-.dark .table-container thead .name-column {
-  background: linear-gradient(to bottom, #374151, #1f2937);
-}
-
-/* 表头右侧操作列背景 - 使用纯色避免滚动时重叠 */
-.table-container thead .operations-column {
-  z-index: 30;
-  background: linear-gradient(to bottom, #f9fafb, #f3f4f6);
-}
-
-.dark .table-container thead .operations-column {
-  background: linear-gradient(to bottom, #374151, #1f2937);
-}
-
-/* tbody 中的左侧固定列背景处理 - 使用纯色避免滚动时重叠 */
-.table-container tbody tr:nth-child(odd) .checkbox-column,
-.table-container tbody tr:nth-child(odd) .name-column {
-  background-color: #ffffff;
-}
-
-.table-container tbody tr:nth-child(even) .checkbox-column,
-.table-container tbody tr:nth-child(even) .name-column {
-  background-color: #f9fafb;
-}
-
-.dark .table-container tbody tr:nth-child(odd) .checkbox-column,
-.dark .table-container tbody tr:nth-child(odd) .name-column {
-  background-color: #1f2937;
-}
-
-.dark .table-container tbody tr:nth-child(even) .checkbox-column,
-.dark .table-container tbody tr:nth-child(even) .name-column {
-  background-color: #374151;
-}
-
-/* hover 状态下的左侧固定列背景 */
-.table-container tbody tr:hover .checkbox-column,
-.table-container tbody tr:hover .name-column {
-  background-color: #eff6ff;
-}
-
-.dark .table-container tbody tr:hover .checkbox-column,
-.dark .table-container tbody tr:hover .name-column {
-  background-color: #1e3a5f;
-}
-
-/* tbody 中的操作列背景处理 - 使用纯色避免滚动时重叠 */
-.table-container tbody tr:nth-child(odd) .operations-column {
-  background-color: #ffffff;
-}
-
-.table-container tbody tr:nth-child(even) .operations-column {
-  background-color: #f9fafb;
-}
-
-.dark .table-container tbody tr:nth-child(odd) .operations-column {
-  background-color: #1f2937;
-}
-
-.dark .table-container tbody tr:nth-child(even) .operations-column {
-  background-color: #374151;
-}
-
-/* hover 状态下的操作列背景 */
-.table-container tbody tr:hover .operations-column {
-  background-color: #eff6ff;
-}
-
-.dark .table-container tbody tr:hover .operations-column {
-  background-color: #1e3a5f;
-}
-
+/* 加载动画 */
 .loading-spinner {
   width: 24px;
   height: 24px;
@@ -4586,10 +4560,68 @@ onUnmounted(() => {
     transform: rotate(360deg);
   }
 }
-.accounts-container {
-  min-height: calc(100vh - 300px);
+
+/* 表格外层包装器 - 圆角和边框 */
+.table-wrapper {
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
+.dark .table-wrapper {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 表格内层容器 - 横向滚动 */
+.table-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0;
+  padding: 0;
+  max-width: 100%;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 防止表格内容溢出，保证横向滚动 */
+.table-container table {
+  min-width: 1400px;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+/* 滚动条样式 */
+.table-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 4px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+.dark .table-container::-webkit-scrollbar-track {
+  background: #374151;
+}
+
+.dark .table-container::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+.dark .table-container::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* 表格行样式 */
 .table-row {
   transition: all 0.2s ease;
 }
