@@ -1561,6 +1561,26 @@
                   </p>
                 </div>
               </div>
+
+              <!-- 上游错误处理 -->
+              <div v-if="form.platform === 'claude-console'">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >上游错误处理</label
+                >
+                <label class="inline-flex cursor-pointer items-center">
+                  <input
+                    v-model="form.disableAutoProtection"
+                    class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                    type="checkbox"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300">
+                    上游错误不自动暂停调度
+                  </span>
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  勾选后遇到 401/400/429/529 等上游错误仅记录日志并透传，不自动禁用或限流
+                </p>
+              </div>
             </div>
 
             <!-- OpenAI-Responses 特定字段 -->
@@ -3736,6 +3756,26 @@
                 <p class="mt-1 text-xs text-gray-500">账号被限流后暂停调度的时间（分钟）</p>
               </div>
             </div>
+
+            <!-- 上游错误处理（编辑模式）-->
+            <div v-if="form.platform === 'claude-console'">
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                上游错误处理
+              </label>
+              <label class="inline-flex cursor-pointer items-center">
+                <input
+                  v-model="form.disableAutoProtection"
+                  class="mr-2 rounded border-gray-300 text-blue-600 focus:border-blue-500 focus:ring focus:ring-blue-200 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  上游错误不自动暂停调度
+                </span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                勾选后遇到 401/400/429/529 等上游错误仅记录日志并透传，不自动禁用或限流
+              </p>
+            </div>
           </div>
 
           <!-- OpenAI-Responses 特定字段（编辑模式）-->
@@ -4917,6 +4957,7 @@ const form = ref({
   })(),
   userAgent: props.account?.userAgent || '',
   enableRateLimit: props.account ? props.account.rateLimitDuration > 0 : true,
+  disableAutoProtection: props.account?.disableAutoProtection === true,
   // 额度管理字段
   dailyQuota: props.account?.dailyQuota || 0,
   dailyUsage: props.account?.dailyUsage || 0,
@@ -6044,6 +6085,10 @@ const createAccount = async () => {
       data.userAgent = form.value.userAgent || null
       // 如果不启用限流，传递 0 表示不限流
       data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
+      // 上游错误处理（仅 Claude Console）
+      if (form.value.platform === 'claude-console') {
+        data.disableAutoProtection = !!form.value.disableAutoProtection
+      }
       // 额度管理字段
       data.dailyQuota = form.value.dailyQuota || 0
       data.quotaResetTime = form.value.quotaResetTime || '00:00'
@@ -6387,6 +6432,8 @@ const updateAccount = async () => {
       data.userAgent = form.value.userAgent || null
       // 如果不启用限流，传递 0 表示不限流
       data.rateLimitDuration = form.value.enableRateLimit ? form.value.rateLimitDuration || 60 : 0
+      // 上游错误处理
+      data.disableAutoProtection = !!form.value.disableAutoProtection
       // 额度管理字段
       data.dailyQuota = form.value.dailyQuota || 0
       data.quotaResetTime = form.value.quotaResetTime || '00:00'
@@ -7025,7 +7072,9 @@ watch(
         dailyUsage: newAccount.dailyUsage || 0,
         quotaResetTime: newAccount.quotaResetTime || '00:00',
         // 并发控制字段
-        maxConcurrentTasks: newAccount.maxConcurrentTasks || 0
+        maxConcurrentTasks: newAccount.maxConcurrentTasks || 0,
+        // 上游错误处理
+        disableAutoProtection: newAccount.disableAutoProtection === true
       }
 
       // 如果是Claude Console账户，加载实时使用情况
