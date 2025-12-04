@@ -18,21 +18,6 @@ const LRUCache = require('../utils/lruCache')
 const { formatDateWithTimezone, getISOStringWithTimezone } = require('../utils/dateHelper')
 const { isOpus45OrNewer } = require('../utils/modelHelper')
 
-/**
- * Check if account is Pro (not Max)
- * Compatible with both API real-time data (hasClaudePro) and local config (accountType)
- * @param {Object} info - Subscription info object
- * @returns {boolean}
- */
-function isProAccount(info) {
-  // API real-time status takes priority
-  if (info.hasClaudePro === true && info.hasClaudeMax !== true) {
-    return true
-  }
-  // Local configured account type
-  return info.accountType === 'claude_pro'
-}
-
 class ClaudeAccountService {
   constructor() {
     this.claudeApiUrl = 'https://console.anthropic.com/v1/oauth/token'
@@ -91,9 +76,7 @@ class ClaudeAccountService {
       useUnifiedClientId = false, // 是否使用统一的客户端标识
       unifiedClientId = '', // 统一的客户端标识
       expiresAt = null, // 账户订阅到期时间
-      extInfo = null, // 额外扩展信息
-      autoRecoverErrors = false, // 自动错误恢复（默认禁用）
-      errorRecoveryDuration = 5 // 错误恢复时间（分钟，默认5分钟）
+      extInfo = null // 额外扩展信息
     } = options
 
     const accountId = uuidv4()
@@ -138,10 +121,7 @@ class ClaudeAccountService {
         // 账户订阅到期时间
         subscriptionExpiresAt: expiresAt || '',
         // 扩展信息
-        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : '',
-        // 自动错误恢复
-        autoRecoverErrors: autoRecoverErrors.toString(),
-        errorRecoveryDuration: errorRecoveryDuration.toString()
+        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : ''
       }
     } else {
       // 兼容旧格式
@@ -173,10 +153,7 @@ class ClaudeAccountService {
         // 账户订阅到期时间
         subscriptionExpiresAt: expiresAt || '',
         // 扩展信息
-        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : '',
-        // 自动错误恢复
-        autoRecoverErrors: autoRecoverErrors.toString(),
-        errorRecoveryDuration: errorRecoveryDuration.toString()
+        extInfo: normalizedExtInfo ? JSON.stringify(normalizedExtInfo) : ''
       }
     }
 
@@ -841,23 +818,6 @@ class ClaudeAccountService {
   }
 
   /**
-   * 检查并清除过期的 error 状态（自动恢复）
-   * @param {string} accountId - 账户ID
-   * @returns {boolean} - 是否已清除错误状态
-   */
-  async checkAndClearErrorStatus(accountId) {
-    const account = await this.getAccount(accountId)
-    const ErrorRecoveryHelper = require('../utils/errorRecoveryHelper')
-
-    if (ErrorRecoveryHelper.shouldClearErrorStatus(account, accountId, 'Claude')) {
-      await this.updateAccount(accountId, ErrorRecoveryHelper.createClearErrorData())
-      return true
-    }
-
-    return false
-  }
-
-  /**
    * 检查账户订阅是否过期
    * @param {Object} account - 账户对象
    * @returns {boolean} - true: 已过期, false: 未过期
@@ -893,7 +853,7 @@ class ClaudeAccountService {
           !this.isSubscriptionExpired(account)
       )
 
-      // Filter Opus models based on account type and model version
+      // 如果请求的是 Opus 模型，根据账号类型和模型版本过滤
       if (modelName && modelName.toLowerCase().includes('opus')) {
         const isNewOpus = isOpus45OrNewer(modelName)
 
@@ -902,24 +862,27 @@ class ClaudeAccountService {
             try {
               const info = JSON.parse(account.subscriptionInfo)
 
-              // Free account: does not support any Opus model
-              if (info.accountType === 'free') {
+              // Free 账号不支持任何 Opus 模型
+              if (info.accountType === 'claude_free' || info.accountType === 'free') {
                 return false
               }
 
-              // Pro account: only supports Opus 4.5+
-              if (isProAccount(info)) {
-                return isNewOpus
+              // Pro 账号：仅支持 Opus 4.5+
+              if (info.hasClaudePro === true && info.hasClaudeMax !== true) {
+                return isNewOpus // 仅新版 Opus 支持
+              }
+              if (info.accountType === 'claude_pro') {
+                return isNewOpus // 仅新版 Opus 支持
               }
 
-              // Max account: supports all Opus versions
+              // Max 账号支持所有 Opus 版本
               return true
             } catch (e) {
-              // Parse failed, assume legacy data (Max), default support
+              // 解析失败，假设为旧数据（Max），默认支持
               return true
             }
           }
-          // Account without subscription info, default to supported (legacy data compatibility)
+          // 没有订阅信息的账号，默认当作支持（兼容旧数据）
           return true
         })
 
@@ -1019,7 +982,7 @@ class ClaudeAccountService {
           !this.isSubscriptionExpired(account)
       )
 
-      // Filter Opus models based on account type and model version
+      // 如果请求的是 Opus 模型，根据账号类型和模型版本过滤
       if (modelName && modelName.toLowerCase().includes('opus')) {
         const isNewOpus = isOpus45OrNewer(modelName)
 
@@ -1028,24 +991,27 @@ class ClaudeAccountService {
             try {
               const info = JSON.parse(account.subscriptionInfo)
 
-              // Free account: does not support any Opus model
-              if (info.accountType === 'free') {
+              // Free 账号不支持任何 Opus 模型
+              if (info.accountType === 'claude_free' || info.accountType === 'free') {
                 return false
               }
 
-              // Pro account: only supports Opus 4.5+
-              if (isProAccount(info)) {
-                return isNewOpus
+              // Pro 账号：仅支持 Opus 4.5+
+              if (info.hasClaudePro === true && info.hasClaudeMax !== true) {
+                return isNewOpus // 仅新版 Opus 支持
+              }
+              if (info.accountType === 'claude_pro') {
+                return isNewOpus // 仅新版 Opus 支持
               }
 
-              // Max account: supports all Opus versions
+              // Max 账号支持所有 Opus 版本
               return true
             } catch (e) {
-              // Parse failed, assume legacy data (Max), default support
+              // 解析失败，假设为旧数据（Max），默认支持
               return true
             }
           }
-          // Account without subscription info, default to supported (legacy data compatibility)
+          // 没有订阅信息的账号，默认当作支持（兼容旧数据）
           return true
         })
 
