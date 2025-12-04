@@ -283,7 +283,6 @@ class UnifiedOpenAIScheduler {
             accountType
           }
         } else {
-          // 专属账户不可用时直接报错，不降级到共享池
           let errorMsg
           if (!boundAccount) {
             errorMsg = `Dedicated account ${apiKeyData.openaiAccountId} not found`
@@ -296,10 +295,17 @@ class UnifiedOpenAIScheduler {
           } else {
             errorMsg = `Dedicated account ${boundAccount.name} is not available (inactive or forbidden)`
           }
-          logger.warn(`⚠️ ${errorMsg}`)
-          const error = new Error(errorMsg)
-          error.statusCode = boundAccount ? 403 : 404 // Forbidden 或 Not Found
-          throw error
+
+          if (accountType === 'openai-responses') {
+            // 对 OpenAI-Responses：仅记录日志并继续共享池调度
+            logger.warn(`⚠️ ${errorMsg}, falling back to shared pool scheduling`)
+          } else {
+            // 默认 OpenAI 保持原行为：抛错，不调度
+            logger.warn(`⚠️ ${errorMsg}`)
+            const error = new Error(errorMsg)
+            error.statusCode = boundAccount ? 403 : 404
+            throw error
+          }
         }
       }
 
