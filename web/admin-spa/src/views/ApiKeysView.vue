@@ -1380,8 +1380,7 @@
                       </template>
                       <template v-else-if="getCachedStats(key.id)">
                         <p class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                          {{ formatNumber(getCachedStats(key.id).requests || 0) }}
-                          次
+                          {{ formatNumber(getCachedStats(key.id).requests || 0) }} 次
                         </p>
                       </template>
                       <template v-else>
@@ -2085,13 +2084,6 @@
       @close="closeExpiryEdit"
       @save="handleSaveExpiry"
     />
-
-    <UsageDetailModal
-      :api-key="selectedApiKeyForDetail || {}"
-      :show="showUsageDetailModal"
-      @close="showUsageDetailModal = false"
-      @open-timeline="openTimeline"
-    />
   </div>
 </template>
 
@@ -2110,7 +2102,6 @@ import NewApiKeyModal from '@/components/apikeys/NewApiKeyModal.vue'
 import BatchApiKeyModal from '@/components/apikeys/BatchApiKeyModal.vue'
 import BatchEditApiKeyModal from '@/components/apikeys/BatchEditApiKeyModal.vue'
 import ExpiryEditModal from '@/components/apikeys/ExpiryEditModal.vue'
-import UsageDetailModal from '@/components/apikeys/UsageDetailModal.vue'
 import LimitProgressBar from '@/components/apikeys/LimitProgressBar.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
 import ActionDropdown from '@/components/common/ActionDropdown.vue'
@@ -2214,8 +2205,6 @@ const accountsLoading = ref(false)
 const accountsLoaded = ref(false)
 const editingExpiryKey = ref(null)
 const expiryEditModalRef = ref(null)
-const showUsageDetailModal = ref(false)
-const selectedApiKeyForDetail = ref(null)
 
 // 标签相关
 const selectedTagFilter = ref('')
@@ -2685,9 +2674,7 @@ const loadPageLastUsage = async () => {
   keyIds.forEach((id) => lastUsageLoading.value.add(id))
 
   try {
-    const response = await apiClient.post('/admin/api-keys/batch-last-usage', {
-      keyIds
-    })
+    const response = await apiClient.post('/admin/api-keys/batch-last-usage', { keyIds })
 
     if (response.success && response.data) {
       // 更新缓存
@@ -4198,40 +4185,7 @@ const formatWindowTime = (seconds) => {
 
 // 显示使用详情
 const showUsageDetails = (apiKey) => {
-  const cachedStats = getCachedStats(apiKey.id)
-
-  const enrichedApiKey = {
-    ...apiKey,
-    dailyCost: cachedStats?.dailyCost ?? apiKey.dailyCost ?? 0,
-    currentWindowCost: cachedStats?.currentWindowCost ?? apiKey.currentWindowCost ?? 0,
-    windowRemainingSeconds: cachedStats?.windowRemainingSeconds ?? apiKey.windowRemainingSeconds,
-    windowStartTime: cachedStats?.windowStartTime ?? apiKey.windowStartTime ?? null,
-    windowEndTime: cachedStats?.windowEndTime ?? apiKey.windowEndTime ?? null,
-    usage: {
-      ...apiKey.usage,
-      total: {
-        ...apiKey.usage?.total,
-        requests: cachedStats?.requests ?? apiKey.usage?.total?.requests ?? 0,
-        tokens: cachedStats?.tokens ?? apiKey.usage?.total?.tokens ?? 0,
-        cost: cachedStats?.allTimeCost ?? apiKey.usage?.total?.cost ?? 0,
-        inputTokens: cachedStats?.inputTokens ?? apiKey.usage?.total?.inputTokens ?? 0,
-        outputTokens: cachedStats?.outputTokens ?? apiKey.usage?.total?.outputTokens ?? 0,
-        cacheCreateTokens:
-          cachedStats?.cacheCreateTokens ?? apiKey.usage?.total?.cacheCreateTokens ?? 0,
-        cacheReadTokens: cachedStats?.cacheReadTokens ?? apiKey.usage?.total?.cacheReadTokens ?? 0
-      }
-    }
-  }
-
-  selectedApiKeyForDetail.value = enrichedApiKey
-  showUsageDetailModal.value = true
-}
-
-const openTimeline = (keyId) => {
-  const id = keyId || selectedApiKeyForDetail.value?.id
-  if (!id) return
-  showUsageDetailModal.value = false
-  router.push(`/api-keys/${id}/usage-records`)
+  router.push(`/api-keys/${apiKey.id}/usage-records`)
 }
 
 // 格式化时间（秒转换为可读格式） - 已移到 WindowLimitBar 组件中
@@ -4621,28 +4575,16 @@ const exportToExcel = () => {
         } else if (header === '标签') {
           cellStyle.alignment = { horizontal: 'left', vertical: 'center' }
           if (value === '无') {
-            cellStyle.font = {
-              ...cellStyle.font,
-              color: { rgb: '999999' },
-              italic: true
-            }
+            cellStyle.font = { ...cellStyle.font, color: { rgb: '999999' }, italic: true }
           }
         } else if (header === '最后使用时间') {
           cellStyle.alignment = { horizontal: 'right', vertical: 'center' }
           if (value === '从未使用') {
-            cellStyle.font = {
-              ...cellStyle.font,
-              color: { rgb: '999999' },
-              italic: true
-            }
+            cellStyle.font = { ...cellStyle.font, color: { rgb: '999999' }, italic: true }
           }
         } else if (header && header.includes('费用')) {
           cellStyle.alignment = { horizontal: 'right', vertical: 'center' }
-          cellStyle.font = {
-            ...cellStyle.font,
-            color: { rgb: '0066CC' },
-            bold: true
-          }
+          cellStyle.font = { ...cellStyle.font, color: { rgb: '0066CC' }, bold: true }
         } else if (header && (header.includes('Token') || header.includes('请求'))) {
           cellStyle.alignment = { horizontal: 'right', vertical: 'center' }
         }
