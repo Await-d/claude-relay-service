@@ -449,9 +449,8 @@ async function handleMessages(req, res) {
 
       // 添加代理配置
       if (proxyConfig) {
-        const proxyHelper = new ProxyHelper()
-        axiosConfig.httpsAgent = proxyHelper.createProxyAgent(proxyConfig)
-        axiosConfig.httpAgent = proxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpsAgent = ProxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpAgent = ProxyHelper.createProxyAgent(proxyConfig)
       }
 
       try {
@@ -758,9 +757,8 @@ async function handleModels(req, res) {
           headers: { 'Content-Type': 'application/json' }
         }
         if (proxyConfig) {
-          const proxyHelper = new ProxyHelper()
-          axiosConfig.httpsAgent = proxyHelper.createProxyAgent(proxyConfig)
-          axiosConfig.httpAgent = proxyHelper.createProxyAgent(proxyConfig)
+          axiosConfig.httpsAgent = ProxyHelper.createProxyAgent(proxyConfig)
+          axiosConfig.httpAgent = ProxyHelper.createProxyAgent(proxyConfig)
         }
         const response = await axios(axiosConfig)
         models = (response.data.models || []).map((m) => ({
@@ -1260,9 +1258,8 @@ async function handleCountTokens(req, res) {
       }
 
       if (proxyConfig) {
-        const proxyHelper = new ProxyHelper()
-        axiosConfig.httpsAgent = proxyHelper.createProxyAgent(proxyConfig)
-        axiosConfig.httpAgent = proxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpsAgent = ProxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpAgent = ProxyHelper.createProxyAgent(proxyConfig)
       }
 
       try {
@@ -1989,9 +1986,8 @@ async function handleStandardGenerateContent(req, res) {
       }
 
       if (proxyConfig) {
-        const proxyHelper = new ProxyHelper()
-        axiosConfig.httpsAgent = proxyHelper.createProxyAgent(proxyConfig)
-        axiosConfig.httpAgent = proxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpsAgent = ProxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpAgent = ProxyHelper.createProxyAgent(proxyConfig)
       }
 
       try {
@@ -2272,9 +2268,8 @@ async function handleStandardStreamGenerateContent(req, res) {
       }
 
       if (proxyConfig) {
-        const proxyHelper = new ProxyHelper()
-        axiosConfig.httpsAgent = proxyHelper.createProxyAgent(proxyConfig)
-        axiosConfig.httpAgent = proxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpsAgent = ProxyHelper.createProxyAgent(proxyConfig)
+        axiosConfig.httpAgent = ProxyHelper.createProxyAgent(proxyConfig)
       }
 
       try {
