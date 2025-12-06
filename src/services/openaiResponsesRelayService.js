@@ -669,7 +669,7 @@ class OpenAIResponsesRelayService {
   }
 
   // 处理 429 限流错误
-  async _handle429Error(account, response, isStream = false, sessionHash = null) {
+  async _handle429Error(account, response, isStream = false, _sessionHash = null) {
     let resetsInSeconds = null
     let errorData = null
 
