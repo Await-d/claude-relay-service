@@ -68,7 +68,9 @@ class ClaudeConsoleAccountService {
       dailyQuota = 0, // 每日额度限制（美元），0表示不限制
       quotaResetTime = '00:00', // 额度重置时间（HH:mm格式）
       maxConcurrentTasks = 0, // 最大并发任务数，0表示无限制
-      disableAutoProtection = false // 是否关闭自动防护（429/401/400/529 不自动禁用）
+      disableAutoProtection = false, // 是否关闭自动防护（429/401/400/529 不自动禁用）
+      autoRecoverErrors = false, // 自动错误恢复（默认禁用）
+      errorRecoveryDuration = 5 // 错误恢复时间（分钟，默认5分钟）
     } = options
 
     // 验证必填字段
