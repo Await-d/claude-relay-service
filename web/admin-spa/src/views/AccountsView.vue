@@ -2103,10 +2103,6 @@ const supportedUsagePlatforms = [
 const editingExpiryAccount = ref(null)
 const expiryEditModalRef = ref(null)
 
-// 表格横向滚动检测
-const tableContainerRef = ref(null)
-const needsHorizontalScroll = ref(false)
-
 // 账户统计弹窗状态
 const showAccountStatsModal = ref(false)
 
