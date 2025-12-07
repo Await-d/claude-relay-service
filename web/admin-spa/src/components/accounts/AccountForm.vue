@@ -2270,6 +2270,22 @@
                   rows="4"
                 />
               </div>
+
+              <!-- Droid User-Agent 配置 (OAuth/Manual 模式) -->
+              <div v-if="form.platform === 'droid'">
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >自定义 User-Agent (可选)</label
+                >
+                <input
+                  v-model="form.userAgent"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  placeholder="factory-cli/0.32.1"
+                  type="text"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  留空使用默认值 factory-cli/0.32.1，可根据需要自定义
+                </p>
+              </div>
             </div>
 
             <!-- API Key 模式输入 -->
@@ -2312,6 +2328,22 @@
                 <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   <i class="fas fa-info-circle mr-1" />
                   建议为每条 Key 提供独立额度；系统会自动去重并忽略空白行。
+                </p>
+              </div>
+
+              <!-- Droid User-Agent 配置 -->
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >自定义 User-Agent (可选)</label
+                >
+                <input
+                  v-model="form.userAgent"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  placeholder="factory-cli/0.32.1"
+                  type="text"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  留空使用默认值 factory-cli/0.32.1，可根据需要自定义
                 </p>
               </div>
 
@@ -4685,11 +4717,13 @@
             <input
               v-model="form.userAgent"
               class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-              placeholder="例如：factory-cli/0.35.0"
+              placeholder="例如：factory-cli/0.32.1"
               type="text"
             />
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              留空则使用全局默认配置。如遇 403 错误，可尝试设置为最新的 factory-cli 版本号。
+              留空使用默认值 factory-cli/0.32.1，可根据需要自定义；
+              <br />
+              如遇 403 错误，可尝试更新到最新的 factory-cli 版本号
             </p>
           </div>
 

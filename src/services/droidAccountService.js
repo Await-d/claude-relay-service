@@ -937,6 +937,11 @@ class DroidAccountService {
       sanitizedUpdates.endpointType = this._sanitizeEndpointType(sanitizedUpdates.endpointType)
     }
 
+    // 处理 userAgent 字段
+    if (typeof sanitizedUpdates.userAgent === 'string') {
+      sanitizedUpdates.userAgent = sanitizedUpdates.userAgent.trim()
+    }
+
     const parseProxyConfig = (value) => {
       if (!value) {
         return null

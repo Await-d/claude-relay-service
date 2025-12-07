@@ -1039,25 +1039,30 @@ class DroidRelayService {
    */
   _buildHeaders(accessToken, requestBody, endpointType, clientHeaders = {}, account = null) {
     // 获取客户端原始 User-Agent
-    const clientUserAgent =
-      clientHeaders['user-agent'] || clientHeaders['User-Agent'] || clientHeaders.userAgent || ''
+    const {
+      userAgent: clientUserAgentRaw = '',
+      'user-agent': clientUserAgentLower = '',
+      'User-Agent': clientUserAgentUpper = ''
+    } = clientHeaders || {}
+    const clientUserAgent = clientUserAgentLower || clientUserAgentUpper || clientUserAgentRaw || ''
+    const { userAgent: accountUserAgent } = account || {}
+    const { userAgent: defaultUserAgent } = this
 
     // 确定最终使用的 User-Agent:
     // 1. 如果账户配置了自定义 userAgent，优先使用
     // 2. 如果客户端是官方 Factory CLI，透传
     // 3. 否则使用全局默认配置
     let userAgent
-    if (account?.userAgent) {
-      userAgent = account.userAgent
+    if (accountUserAgent) {
+      userAgent = accountUserAgent
     } else if (this._isOfficialFactoryUserAgent(clientUserAgent)) {
       userAgent = clientUserAgent
     } else {
-      userAgent = this.userAgent
+      userAgent = defaultUserAgent
       if (clientUserAgent && !this._isOfficialFactoryUserAgent(clientUserAgent)) {
         logger.debug(`🔄 Droid: 自动替换非官方 User-Agent "${clientUserAgent}" -> "${userAgent}"`)
       }
     }
-
     const headers = {
       'content-type': 'application/json',
       authorization: `Bearer ${accessToken}`,
@@ -1077,9 +1082,15 @@ class DroidRelayService {
       }
     }
 
-    // OpenAI 特定头
+    // OpenAI 特定头 - 根据模型动态选择 provider
     if (endpointType === 'openai') {
-      headers['x-api-provider'] = 'azure_openai'
+      const model = (requestBody?.model || '').toLowerCase()
+      // -max 模型使用 openai provider，其他使用 azure_openai
+      if (model.includes('-max')) {
+        headers['x-api-provider'] = 'openai'
+      } else {
+        headers['x-api-provider'] = 'azure_openai'
+      }
     }
 
     // Comm 端点根据模型动态设置 provider
