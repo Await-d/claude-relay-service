@@ -285,6 +285,28 @@ class DroidRelayService {
         }
       }
 
+      // 确保 system prompt 存在（防止扩展移除）
+      if (normalizedEndpoint === 'anthropic' && this.systemPrompt) {
+        const promptBlock = { type: 'text', text: this.systemPrompt }
+        if (!processedBody.system || !Array.isArray(processedBody.system)) {
+          processedBody.system = [promptBlock]
+          logger.debug('🔧 Droid: 重新注入 system prompt（扩展后丢失）')
+        } else {
+          const hasPrompt = processedBody.system.some(
+            (item) => item && item.type === 'text' && item.text === this.systemPrompt
+          )
+          if (!hasPrompt) {
+            processedBody.system = [promptBlock, ...processedBody.system]
+            logger.debug('🔧 Droid: 补充 system prompt（扩展后缺失）')
+          }
+        }
+      }
+
+      // 记录最终发送的请求体（用于调试）
+      logger.debug(
+        `📤 Droid 最终请求体 system: ${JSON.stringify(processedBody.system)?.slice(0, 300)}`
+      )
+
       // 发送请求
       const isStreaming = streamRequested
 

@@ -21,6 +21,59 @@ function hasDroidPermission(apiKeyData) {
  * - /droid/comm   - OpenAI Chat Completions API
  */
 
+// Claude (Anthropic) 端点 - /v1/messages/count_tokens
+router.post('/claude/v1/messages/count_tokens', authenticateApiKey, async (req, res) => {
+  try {
+    if (!hasDroidPermission(req.apiKey)) {
+      logger.security(
+        `🚫 API Key ${req.apiKey?.id || 'unknown'} 缺少 Droid 权限，拒绝访问 ${req.originalUrl}`
+      )
+      return res.status(403).json({
+        error: 'permission_denied',
+        message: '此 API Key 未启用 Droid 权限'
+      })
+    }
+
+    // 简单估算 token 数量（Factory.ai 可能不支持 count_tokens）
+    const messages = req.body?.messages || []
+    const system = req.body?.system || ''
+    let totalChars = 0
+
+    // 计算 system prompt 长度
+    if (typeof system === 'string') {
+      totalChars += system.length
+    } else if (Array.isArray(system)) {
+      system.forEach((s) => {
+        if (s?.text) totalChars += s.text.length
+      })
+    }
+
+    // 计算 messages 长度
+    messages.forEach((msg) => {
+      if (typeof msg.content === 'string') {
+        totalChars += msg.content.length
+      } else if (Array.isArray(msg.content)) {
+        msg.content.forEach((c) => {
+          if (c?.text) totalChars += c.text.length
+        })
+      }
+    })
+
+    // 估算 token 数量（约 4 字符 = 1 token）
+    const estimatedTokens = Math.ceil(totalChars / 4)
+
+    res.json({
+      input_tokens: estimatedTokens
+    })
+  } catch (error) {
+    logger.error('Droid count_tokens error:', error)
+    res.status(500).json({
+      error: 'internal_server_error',
+      message: error.message
+    })
+  }
+})
+
 // Claude (Anthropic) 端点 - /v1/messages
 router.post('/claude/v1/messages', authenticateApiKey, async (req, res) => {
   try {
