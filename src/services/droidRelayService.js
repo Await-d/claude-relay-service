@@ -62,17 +62,8 @@ class DroidRelayService {
     const normalizedBody = { ...requestBody }
 
     if (endpointType === 'anthropic' && typeof normalizedBody.model === 'string') {
-      const originalModel = normalizedBody.model
-      const trimmedModel = originalModel.trim()
-      const lowerModel = trimmedModel.toLowerCase()
-
-      if (lowerModel.includes('haiku')) {
-        const mappedModel = 'claude-sonnet-4-20250514'
-        if (originalModel !== mappedModel) {
-          logger.info(`🔄 将请求模型从 ${originalModel} 映射为 ${mappedModel}`)
-        }
-        normalizedBody.model = mappedModel
-      }
+      // 保留调用方指定的模型，仅做空白清理，避免意外映射导致上游 403
+      normalizedBody.model = normalizedBody.model.trim()
     }
 
     if (endpointType === 'openai' && typeof normalizedBody.model === 'string') {
@@ -239,6 +230,11 @@ class DroidRelayService {
         logger.info(`🌐 Using proxy: ${ProxyHelper.getProxyDescription(proxyConfig)}`)
       }
 
+      const clientUserAgent =
+        clientHeaders['user-agent'] || clientHeaders['User-Agent'] || clientHeaders.userAgent || ''
+      const isOfficialClient = this._isOfficialFactoryUserAgent(clientUserAgent)
+      const shouldInjectSystemPrompt = !!(this.systemPrompt && !isOfficialClient)
+
       // 构建请求头（传入账户以支持自定义 User-Agent）
       const headers = this._buildHeaders(
         accessToken,
@@ -259,7 +255,8 @@ class DroidRelayService {
 
       let processedBody = this._processRequestBody(normalizedRequestBody, normalizedEndpoint, {
         disableStreaming,
-        streamRequested
+        streamRequested,
+        injectSystemPrompt: shouldInjectSystemPrompt
       })
 
       const extensionPayload = {
@@ -285,8 +282,8 @@ class DroidRelayService {
         }
       }
 
-      // 确保 system prompt 存在（防止扩展移除）
-      if (normalizedEndpoint === 'anthropic' && this.systemPrompt) {
+      // 确保 system prompt 存在（防止扩展移除）——官方 Factory CLI 不强制注入
+      if (shouldInjectSystemPrompt && normalizedEndpoint === 'anthropic' && this.systemPrompt) {
         const promptBlock = { type: 'text', text: this.systemPrompt }
         if (!processedBody.system || !Array.isArray(processedBody.system)) {
           processedBody.system = [promptBlock]
@@ -302,10 +299,6 @@ class DroidRelayService {
         }
         logger.info(
           `📤 Droid system prompt 已注入: ${JSON.stringify(processedBody.system)?.slice(0, 200)}`
-        )
-      } else {
-        logger.warn(
-          `⚠️ Droid system prompt 未注入: endpoint=${normalizedEndpoint}, hasPrompt=${!!this.systemPrompt}`
         )
       }
 
@@ -1140,7 +1133,11 @@ class DroidRelayService {
    * 处理请求体（注入 system prompt 等）
    */
   _processRequestBody(requestBody, endpointType, options = {}) {
-    const { disableStreaming = false, streamRequested = false } = options
+    const {
+      disableStreaming = false,
+      streamRequested = false,
+      injectSystemPrompt = true // 官方 Factory CLI 请求可跳过注入
+    } = options
     const processedBody = { ...requestBody }
 
     const hasStreamField =
@@ -1160,8 +1157,8 @@ class DroidRelayService {
       processedBody.stream = true
     }
 
-    // Anthropic 端点：仅注入系统提示
-    if (endpointType === 'anthropic') {
+    // Anthropic 端点：仅注入系统提示（官方 Factory CLI 跳过）
+    if (injectSystemPrompt && endpointType === 'anthropic') {
       if (this.systemPrompt) {
         const promptBlock = { type: 'text', text: this.systemPrompt }
         const originalSystem = processedBody.system
@@ -1184,8 +1181,8 @@ class DroidRelayService {
       }
     }
 
-    // OpenAI 端点：仅前置系统提示
-    if (endpointType === 'openai') {
+    // OpenAI 端点：仅前置系统提示（官方 Factory CLI 跳过）
+    if (injectSystemPrompt && endpointType === 'openai') {
       if (this.systemPrompt) {
         if (processedBody.instructions) {
           if (!processedBody.instructions.startsWith(this.systemPrompt)) {
@@ -1197,8 +1194,8 @@ class DroidRelayService {
       }
     }
 
-    // Comm 端点：在 messages 数组前注入 system 消息
-    if (endpointType === 'comm') {
+    // Comm 端点：在 messages 数组前注入 system 消息（官方 Factory CLI 跳过）
+    if (injectSystemPrompt && endpointType === 'comm') {
       if (this.systemPrompt && Array.isArray(processedBody.messages)) {
         const hasSystemMessage = processedBody.messages.some((m) => m && m.role === 'system')
 
