@@ -8,8 +8,8 @@ const redis = require('../models/redis')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
 const logger = require('../utils/logger')
 const runtimeAddon = require('../utils/runtimeAddon')
+const config = require('../../config/config')
 
-const SYSTEM_PROMPT = 'You are Droid, an AI software engineering agent built by Factory.'
 const RUNTIME_EVENT_FMT_PAYLOAD = 'fmtPayload'
 
 /**
@@ -18,7 +18,7 @@ const RUNTIME_EVENT_FMT_PAYLOAD = 'fmtPayload'
 
 class DroidRelayService {
   constructor() {
-    this.factoryApiBaseUrl = 'https://api.factory.ai/api/llm'
+    this.factoryApiBaseUrl = config.droid?.apiBaseUrl || 'https://api.factory.ai/api/llm'
 
     this.endpoints = {
       anthropic: '/a/v1/messages',
@@ -26,8 +26,10 @@ class DroidRelayService {
       comm: '/o/v1/chat/completions'
     }
 
-    this.userAgent = 'factory-cli/0.32.1'
-    this.systemPrompt = SYSTEM_PROMPT
+    this.userAgent = config.droid?.userAgent || 'factory-cli/0.32.1'
+    this.systemPrompt =
+      config.droid?.systemPrompt ||
+      'You are Droid, an AI software engineering agent built by Factory.'
     this.API_KEY_STICKY_PREFIX = 'droid_api_key'
   }
 
@@ -237,12 +239,13 @@ class DroidRelayService {
         logger.info(`🌐 Using proxy: ${ProxyHelper.getProxyDescription(proxyConfig)}`)
       }
 
-      // 构建请求头
+      // 构建请求头（传入账户以支持自定义 User-Agent）
       const headers = this._buildHeaders(
         accessToken,
         normalizedRequestBody,
         normalizedEndpoint,
-        clientHeaders
+        clientHeaders,
+        account
       )
 
       if (selectedApiKey) {
@@ -990,11 +993,14 @@ class DroidRelayService {
   /**
    * 构建请求头
    */
-  _buildHeaders(accessToken, requestBody, endpointType, clientHeaders = {}) {
+  _buildHeaders(accessToken, requestBody, endpointType, clientHeaders = {}, account = null) {
+    // 优先使用账户级别的 userAgent，否则使用全局配置
+    const userAgent = account?.userAgent || this.userAgent
+
     const headers = {
       'content-type': 'application/json',
       authorization: `Bearer ${accessToken}`,
-      'user-agent': this.userAgent,
+      'user-agent': userAgent,
       'x-factory-client': 'cli',
       connection: 'keep-alive'
     }

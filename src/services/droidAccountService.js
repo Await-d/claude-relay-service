@@ -556,7 +556,8 @@ class DroidAccountService {
       tokenType = 'Bearer',
       authenticationMethod = '',
       expiresIn = null,
-      apiKeys = []
+      apiKeys = [],
+      userAgent = '' // 可选：自定义 User-Agent，空则使用全局配置
     } = options
 
     const accountId = uuidv4()
@@ -833,6 +834,7 @@ class DroidAccountService {
       apiKeys: hasApiKeys ? JSON.stringify(apiKeyEntries) : '',
       apiKeyCount: hasApiKeys ? String(apiKeyEntries.length) : '0',
       apiKeyStrategy: hasApiKeys ? 'random_sticky' : '',
+      userAgent: userAgent || '', // 自定义 User-Agent
 
       // 自动错误恢复
       autoRecoverErrors: (options.autoRecoverErrors || false).toString(),
