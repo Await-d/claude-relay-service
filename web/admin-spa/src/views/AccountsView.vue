@@ -642,42 +642,13 @@
                     <span
                       :class="[
                         'inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold',
-                        account.status === 'blocked'
-                          ? 'bg-orange-100 text-orange-800'
-                          : account.status === 'unauthorized'
-                            ? 'bg-red-100 text-red-800'
-                            : account.status === 'temp_error'
-                              ? 'bg-orange-100 text-orange-800'
-                              : account.isActive
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-red-100 text-red-800'
+                        getAccountStatusClass(account)
                       ]"
                     >
                       <div
-                        :class="[
-                          'mr-2 h-2 w-2 rounded-full',
-                          account.status === 'blocked'
-                            ? 'bg-orange-500'
-                            : account.status === 'unauthorized'
-                              ? 'bg-red-500'
-                              : account.status === 'temp_error'
-                                ? 'bg-orange-500'
-                                : account.isActive
-                                  ? 'bg-green-500'
-                                  : 'bg-red-500'
-                        ]"
+                        :class="['mr-2 h-2 w-2 rounded-full', getAccountStatusDotClass(account)]"
                       />
-                      {{
-                        account.status === 'blocked'
-                          ? '已封锁'
-                          : account.status === 'unauthorized'
-                            ? '异常'
-                            : account.status === 'temp_error'
-                              ? '临时异常'
-                              : account.isActive
-                                ? '正常'
-                                : '异常'
-                      }}
+                      {{ getAccountStatusText(account) }}
                     </span>
                     <span
                       v-if="

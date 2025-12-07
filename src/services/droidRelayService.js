@@ -225,8 +225,9 @@ class DroidRelayService {
       }
 
       const apiUrl = `${this.factoryApiBaseUrl}${endpointPath}`
+      const requestModel = normalizedRequestBody?.model || 'unknown'
 
-      logger.info(`🌐 Forwarding to Factory.ai: ${apiUrl}`)
+      logger.info(`🌐 Forwarding to Factory.ai: ${apiUrl} | Model: ${requestModel}`)
 
       // 获取代理配置
       const proxyConfig = account.proxy ? JSON.parse(account.proxy) : null
@@ -1280,6 +1281,13 @@ class DroidRelayService {
 
   /**
    * 处理上游 4xx 响应，移除问题 API Key 或停止账号调度
+   *
+   * 错误码处理策略：
+   * - 400: 客户端请求错误（如模型不支持），不影响 API Key 状态
+   * - 401: 认证失败，标记 API Key 为异常
+   * - 403: 权限不足，标记 API Key 为异常
+   * - 429: 限流，不影响 API Key 状态（临时限制）
+   * - 其他 4xx: 根据情况处理
    */
   async _handleUpstreamClientError(statusCode, context = {}) {
     if (!statusCode || statusCode < 400 || statusCode >= 500) {
@@ -1300,6 +1308,18 @@ class DroidRelayService {
       return
     }
 
+    // 定义需要标记 API Key 为异常的状态码（认证/授权相关错误）
+    const criticalErrorCodes = new Set([401, 403])
+    // 定义不需要影响 API Key 状态的状态码（客户端请求错误或临时限制）
+    const ignoredErrorCodes = new Set([400, 429])
+
+    if (ignoredErrorCodes.has(statusCode)) {
+      logger.warn(
+        `⚠️ 上游返回 ${statusCode}（客户端请求错误或限流），不影响 API Key 状态（Account: ${accountId}）`
+      )
+      return
+    }
+
     const normalizedEndpoint = this._normalizeEndpointType(
       endpointType || account?.endpointType || 'anthropic'
     )
@@ -1307,6 +1327,14 @@ class DroidRelayService {
       typeof account?.authenticationMethod === 'string'
         ? account.authenticationMethod.toLowerCase().trim()
         : ''
+
+    // 只有认证/授权相关错误才标记 API Key 为异常
+    if (!criticalErrorCodes.has(statusCode)) {
+      logger.warn(
+        `⚠️ 上游返回 ${statusCode}，非关键错误，不影响 API Key 状态（Account: ${accountId}）`
+      )
+      return
+    }
 
     if (authMethod === 'api_key') {
       if (selectedAccountApiKey?.id) {
