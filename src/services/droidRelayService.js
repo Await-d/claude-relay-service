@@ -1092,6 +1092,10 @@ class DroidRelayService {
     const { disableStreaming = false, streamRequested = false } = options
     const processedBody = { ...requestBody }
 
+    logger.debug(
+      `🔍 _processRequestBody called: endpointType=${endpointType}, systemPrompt=${this.systemPrompt ? 'SET' : 'EMPTY'}`
+    )
+
     const hasStreamField =
       requestBody && Object.prototype.hasOwnProperty.call(requestBody, 'stream')
 
@@ -1123,6 +1127,11 @@ class DroidRelayService {
         } else {
           processedBody.system = [promptBlock]
         }
+        logger.debug(
+          `🔍 Droid system prompt injected: ${JSON.stringify(processedBody.system).substring(0, 100)}...`
+        )
+      } else {
+        logger.warn(`⚠️ Droid systemPrompt is empty or undefined!`)
       }
     }
 
