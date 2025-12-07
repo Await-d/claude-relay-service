@@ -290,22 +290,24 @@ class DroidRelayService {
         const promptBlock = { type: 'text', text: this.systemPrompt }
         if (!processedBody.system || !Array.isArray(processedBody.system)) {
           processedBody.system = [promptBlock]
-          logger.debug('🔧 Droid: 重新注入 system prompt（扩展后丢失）')
+          logger.info('🔧 Droid: 重新注入 system prompt（扩展后丢失）')
         } else {
           const hasPrompt = processedBody.system.some(
             (item) => item && item.type === 'text' && item.text === this.systemPrompt
           )
           if (!hasPrompt) {
             processedBody.system = [promptBlock, ...processedBody.system]
-            logger.debug('🔧 Droid: 补充 system prompt（扩展后缺失）')
+            logger.info('🔧 Droid: 补充 system prompt（扩展后缺失）')
           }
         }
+        logger.info(
+          `📤 Droid system prompt 已注入: ${JSON.stringify(processedBody.system)?.slice(0, 200)}`
+        )
+      } else {
+        logger.warn(
+          `⚠️ Droid system prompt 未注入: endpoint=${normalizedEndpoint}, hasPrompt=${!!this.systemPrompt}`
+        )
       }
-
-      // 记录最终发送的请求体（用于调试）
-      logger.debug(
-        `📤 Droid 最终请求体 system: ${JSON.stringify(processedBody.system)?.slice(0, 300)}`
-      )
 
       // 发送请求
       const isStreaming = streamRequested
