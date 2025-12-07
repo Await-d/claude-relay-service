@@ -1280,123 +1280,24 @@ class DroidRelayService {
   }
 
   /**
-   * 处理上游 4xx 响应，移除问题 API Key 或停止账号调度
+   * 处理上游 4xx 响应
    *
-   * 错误码处理策略：
-   * - 400: 客户端请求错误（如模型不支持），不影响 API Key 状态
-   * - 401: 认证失败，标记 API Key 为异常
-   * - 403: 权限不足，标记 API Key 为异常
-   * - 429: 限流，不影响 API Key 状态（临时限制）
-   * - 其他 4xx: 根据情况处理
+   * 按照 OpenAI-Responses 模式：任何错误都不下线账户/不需人工重置，仅记录日志。
+   * 只有密钥真正被封（如多次 401/403）才需要人工处理。
    */
   async _handleUpstreamClientError(statusCode, context = {}) {
     if (!statusCode || statusCode < 400 || statusCode >= 500) {
       return
     }
 
-    const {
-      account,
-      selectedAccountApiKey = null,
-      endpointType = null,
-      sessionHash = null,
-      clientApiKeyId = null
-    } = context
-
+    const { account, selectedAccountApiKey = null } = context
     const accountId = this._extractAccountId(account)
-    if (!accountId) {
-      logger.warn('⚠️ 上游 4xx 处理被跳过：缺少有效的账户信息')
-      return
-    }
+    const apiKeyId = selectedAccountApiKey?.id || 'unknown'
 
-    // 定义需要标记 API Key 为异常的状态码（认证/授权相关错误）
-    const criticalErrorCodes = new Set([401, 403])
-    // 定义不需要影响 API Key 状态的状态码（客户端请求错误或临时限制）
-    const ignoredErrorCodes = new Set([400, 429])
-
-    if (ignoredErrorCodes.has(statusCode)) {
-      logger.warn(
-        `⚠️ 上游返回 ${statusCode}（客户端请求错误或限流），不影响 API Key 状态（Account: ${accountId}）`
-      )
-      return
-    }
-
-    const normalizedEndpoint = this._normalizeEndpointType(
-      endpointType || account?.endpointType || 'anthropic'
+    // 只记录日志，不修改账户或 API Key 状态
+    logger.warn(
+      `⚠️ Droid 上游返回 ${statusCode}（Account: ${accountId}, ApiKey: ${apiKeyId}），仅记录日志不影响状态`
     )
-    const authMethod =
-      typeof account?.authenticationMethod === 'string'
-        ? account.authenticationMethod.toLowerCase().trim()
-        : ''
-
-    // 只有认证/授权相关错误才标记 API Key 为异常
-    if (!criticalErrorCodes.has(statusCode)) {
-      logger.warn(
-        `⚠️ 上游返回 ${statusCode}，非关键错误，不影响 API Key 状态（Account: ${accountId}）`
-      )
-      return
-    }
-
-    if (authMethod === 'api_key') {
-      if (selectedAccountApiKey?.id) {
-        let markResult = null
-        const errorMessage = `${statusCode}`
-
-        try {
-          // 标记API Key为异常状态而不是删除
-          markResult = await droidAccountService.markApiKeyAsError(
-            accountId,
-            selectedAccountApiKey.id,
-            errorMessage
-          )
-        } catch (error) {
-          logger.error(
-            `❌ 标记 Droid API Key ${selectedAccountApiKey.id} 异常状态（Account: ${accountId}）失败：`,
-            error
-          )
-        }
-
-        await this._clearApiKeyStickyMapping(accountId, normalizedEndpoint, sessionHash)
-
-        if (markResult?.marked) {
-          logger.warn(
-            `⚠️ 上游返回 ${statusCode}，已标记 Droid API Key ${selectedAccountApiKey.id} 为异常状态（Account: ${accountId}）`
-          )
-        } else {
-          logger.warn(
-            `⚠️ 上游返回 ${statusCode}，但未能标记 Droid API Key ${selectedAccountApiKey.id} 异常状态（Account: ${accountId}）：${markResult?.error || '未知错误'}`
-          )
-        }
-
-        // 检查是否还有可用的API Key
-        try {
-          const availableEntries = await droidAccountService.getDecryptedApiKeyEntries(accountId)
-          const activeEntries = availableEntries.filter((entry) => entry.status !== 'error')
-
-          if (activeEntries.length === 0) {
-            await this._stopDroidAccountScheduling(accountId, statusCode, '所有API Key均已异常')
-            await this._clearAccountStickyMapping(normalizedEndpoint, sessionHash, clientApiKeyId)
-          } else {
-            logger.info(`ℹ️ Droid 账号 ${accountId} 仍有 ${activeEntries.length} 个可用 API Key`)
-          }
-        } catch (error) {
-          logger.error(`❌ 检查可用API Key失败（Account: ${accountId}）：`, error)
-          await this._stopDroidAccountScheduling(accountId, statusCode, 'API Key检查失败')
-          await this._clearAccountStickyMapping(normalizedEndpoint, sessionHash, clientApiKeyId)
-        }
-
-        return
-      }
-
-      logger.warn(
-        `⚠️ 上游返回 ${statusCode}，但未获取到对应的 Droid API Key（Account: ${accountId}）`
-      )
-      await this._stopDroidAccountScheduling(accountId, statusCode, '缺少可用 API Key')
-      await this._clearAccountStickyMapping(normalizedEndpoint, sessionHash, clientApiKeyId)
-      return
-    }
-
-    await this._stopDroidAccountScheduling(accountId, statusCode, '凭证不可用')
-    await this._clearAccountStickyMapping(normalizedEndpoint, sessionHash, clientApiKeyId)
   }
 
   /**
