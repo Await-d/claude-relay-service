@@ -1140,6 +1140,7 @@ class DroidRelayService {
     if (endpointType === 'anthropic') {
       if (this.systemPrompt) {
         const promptBlock = { type: 'text', text: this.systemPrompt }
+        const originalSystem = processedBody.system
         if (Array.isArray(processedBody.system)) {
           const hasPrompt = processedBody.system.some(
             (item) => item && item.type === 'text' && item.text === this.systemPrompt
@@ -1147,9 +1148,15 @@ class DroidRelayService {
           if (!hasPrompt) {
             processedBody.system = [promptBlock, ...processedBody.system]
           }
+        } else if (typeof processedBody.system === 'string' && processedBody.system.trim()) {
+          // 如果 system 是字符串，转换为数组并保留原有内容
+          processedBody.system = [promptBlock, { type: 'text', text: processedBody.system }]
         } else {
           processedBody.system = [promptBlock]
         }
+        logger.debug(
+          `🔧 Droid system prompt 注入: 原始=${JSON.stringify(originalSystem)?.slice(0, 100)}, 结果=${JSON.stringify(processedBody.system)?.slice(0, 200)}`
+        )
       }
     }
 
