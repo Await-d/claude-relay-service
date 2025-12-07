@@ -26,7 +26,7 @@ class DroidRelayService {
       comm: '/o/v1/chat/completions'
     }
 
-    this.userAgent = 'factory-cli/0.19.12'
+    this.userAgent = 'factory-cli/0.32.1'
     this.systemPrompt = SYSTEM_PROMPT
     this.API_KEY_STICKY_PREFIX = 'droid_api_key'
   }
