@@ -2328,6 +2328,22 @@
                   </li>
                 </ul>
               </div>
+
+              <!-- Droid API Key 模式 User-Agent 配置 -->
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >自定义 User-Agent (可选)</label
+                >
+                <input
+                  v-model="form.userAgent"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  placeholder="例如：factory-cli/0.35.0"
+                  type="text"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  留空则使用全局默认配置。如遇 403 错误，可尝试设置为最新的 factory-cli 版本号。
+                </p>
+              </div>
             </div>
 
             <!-- OpenAI 和 Droid 限流机制配置 -->
@@ -2414,6 +2430,29 @@
                   账号出现网络错误后自动恢复的等待时间（分钟）
                 </p>
               </div>
+            </div>
+
+            <!-- Droid OAuth/手动模式 User-Agent 配置 -->
+            <div
+              v-if="
+                form.platform === 'droid' &&
+                (form.addType === 'oauth' ||
+                  form.addType === 'setup-token' ||
+                  form.addType === 'manual')
+              "
+            >
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >自定义 User-Agent (可选)</label
+              >
+              <input
+                v-model="form.userAgent"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                placeholder="例如：factory-cli/0.35.0"
+                type="text"
+              />
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                留空则使用全局默认配置。如遇 403 错误，可尝试设置为最新的 factory-cli 版本号。
+              </p>
             </div>
 
             <!-- 代理设置 -->
@@ -4638,6 +4677,22 @@
             </div>
           </div>
 
+          <!-- Droid User-Agent 配置（编辑模式）-->
+          <div v-if="form.platform === 'droid'">
+            <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >自定义 User-Agent (可选)</label
+            >
+            <input
+              v-model="form.userAgent"
+              class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+              placeholder="例如：factory-cli/0.35.0"
+              type="text"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              留空则使用全局默认配置。如遇 403 错误，可尝试设置为最新的 factory-cli 版本号。
+            </p>
+          </div>
+
           <!-- 代理设置 -->
           <ProxyConfig v-model="form.proxy" />
 
@@ -5724,6 +5779,7 @@ const handleOAuthSuccess = async (tokenInfoOrList) => {
       data.platform = 'droid'
       data.tokenType = normalizedTokens.tokenType
       data.authenticationMethod = normalizedTokens.authenticationMethod
+      data.userAgent = form.value.userAgent || ''
 
       if (normalizedTokens.organizationId) {
         data.organizationId = normalizedTokens.organizationId
@@ -6057,6 +6113,7 @@ const createAccount = async () => {
       data.priority = form.value.priority || 50
       data.endpointType = form.value.endpointType || 'anthropic'
       data.platform = 'droid'
+      data.userAgent = form.value.userAgent || ''
 
       if (form.value.addType === 'apikey') {
         const apiKeys = parseApiKeysInput(form.value.apiKeysInput)
@@ -6379,6 +6436,7 @@ const updateAccount = async () => {
     if (props.account.platform === 'droid') {
       data.priority = form.value.priority || 50
       data.endpointType = form.value.endpointType || 'anthropic'
+      data.userAgent = form.value.userAgent || ''
     }
 
     // Claude 官方账号优先级和订阅类型更新

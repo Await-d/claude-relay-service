@@ -991,11 +991,39 @@ class DroidRelayService {
   }
 
   /**
+   * 检测是否为官方 Factory CLI User-Agent
+   */
+  _isOfficialFactoryUserAgent(userAgent) {
+    if (!userAgent || typeof userAgent !== 'string') {
+      return false
+    }
+    // 官方 Factory CLI User-Agent 格式: factory-cli/x.x.x 或 factory/x.x.x
+    return /^factory(-cli)?\/\d+\.\d+\.\d+/i.test(userAgent.trim())
+  }
+
+  /**
    * 构建请求头
    */
   _buildHeaders(accessToken, requestBody, endpointType, clientHeaders = {}, account = null) {
-    // 优先使用账户级别的 userAgent，否则使用全局配置
-    const userAgent = account?.userAgent || this.userAgent
+    // 获取客户端原始 User-Agent
+    const clientUserAgent =
+      clientHeaders['user-agent'] || clientHeaders['User-Agent'] || clientHeaders.userAgent || ''
+
+    // 确定最终使用的 User-Agent:
+    // 1. 如果账户配置了自定义 userAgent，优先使用
+    // 2. 如果客户端是官方 Factory CLI，透传
+    // 3. 否则使用全局默认配置
+    let userAgent
+    if (account?.userAgent) {
+      userAgent = account.userAgent
+    } else if (this._isOfficialFactoryUserAgent(clientUserAgent)) {
+      userAgent = clientUserAgent
+    } else {
+      userAgent = this.userAgent
+      if (clientUserAgent && !this._isOfficialFactoryUserAgent(clientUserAgent)) {
+        logger.debug(`🔄 Droid: 自动替换非官方 User-Agent "${clientUserAgent}" -> "${userAgent}"`)
+      }
+    }
 
     const headers = {
       'content-type': 'application/json',
