@@ -1037,7 +1037,6 @@ class DroidRelayService {
     if (endpointType === 'anthropic') {
       headers['accept'] = 'application/json'
       headers['anthropic-version'] = '2023-06-01'
-      headers['x-api-key'] = 'placeholder'
       headers['x-api-provider'] = 'anthropic'
 
       if (this._isThinkingRequested(requestBody)) {
