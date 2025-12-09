@@ -44,7 +44,9 @@ router.post('/claude/v1/messages/count_tokens', authenticateApiKey, async (req, 
       totalChars += system.length
     } else if (Array.isArray(system)) {
       system.forEach((s) => {
-        if (s?.text) totalChars += s.text.length
+        if (s?.text) {
+          totalChars += s.text.length
+        }
       })
     }
 
@@ -54,7 +56,9 @@ router.post('/claude/v1/messages/count_tokens', authenticateApiKey, async (req, 
         totalChars += msg.content.length
       } else if (Array.isArray(msg.content)) {
         msg.content.forEach((c) => {
-          if (c?.text) totalChars += c.text.length
+          if (c?.text) {
+            totalChars += c.text.length
+          }
         })
       }
     })
