@@ -3,6 +3,7 @@ const ccrAccountService = require('./ccrAccountService')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const { parseVendorPrefixedModel } = require('../utils/modelHelper')
+const userMessageQueueService = require('./userMessageQueueService')
 
 class CcrRelayService {
   constructor() {
@@ -21,8 +22,67 @@ class CcrRelayService {
   ) {
     let abortController = null
     let account = null
+    let queueLockAcquired = false
+    let queueRequestId = null
 
     try {
+      // 📬 用户消息队列处理
+      if (userMessageQueueService.isUserMessageRequest(requestBody)) {
+        // 校验 accountId 非空，避免空值污染队列锁键
+        if (!accountId || accountId === '') {
+          logger.error('❌ accountId missing for queue lock in CCR relayRequest')
+          throw new Error('accountId missing for queue lock')
+        }
+        const queueResult = await userMessageQueueService.acquireQueueLock(accountId)
+        if (!queueResult.acquired && !queueResult.skipped) {
+          // 区分 Redis 后端错误和队列超时
+          const isBackendError = queueResult.error === 'queue_backend_error'
+          const errorCode = isBackendError ? 'QUEUE_BACKEND_ERROR' : 'QUEUE_TIMEOUT'
+          const errorType = isBackendError ? 'queue_backend_error' : 'queue_timeout'
+          const errorMessage = isBackendError
+            ? 'Queue service temporarily unavailable, please retry later'
+            : 'User message queue wait timeout, please retry later'
+          const statusCode = isBackendError ? 500 : 503
+
+          // 结构化性能日志，用于后续统计
+          logger.performance('user_message_queue_error', {
+            errorType,
+            errorCode,
+            accountId,
+            statusCode,
+            backendError: isBackendError ? queueResult.errorMessage : undefined
+          })
+
+          logger.warn(
+            `📬 User message queue ${errorType} for CCR account ${accountId}`,
+            isBackendError ? { backendError: queueResult.errorMessage } : {}
+          )
+          return {
+            statusCode,
+            headers: {
+              'Content-Type': 'application/json',
+              'x-user-message-queue-error': errorType
+            },
+            body: JSON.stringify({
+              type: 'error',
+              error: {
+                type: errorType,
+                code: errorCode,
+                message: errorMessage
+              }
+            }),
+            accountId
+          }
+        }
+        if (queueResult.acquired && !queueResult.skipped) {
+          queueLockAcquired = true
+          queueRequestId = queueResult.requestId
+          logger.debug(
+            `📬 User message queue lock acquired for CCR account ${accountId}, requestId: ${queueRequestId}`
+          )
+        }
+      }
+
       // 获取账户信息
       account = await ccrAccountService.getAccount(accountId)
       if (!account) {
@@ -162,6 +222,23 @@ class CcrRelayService {
       )
       const response = await axios(requestConfig)
 
+      // 📬 请求已发送成功，立即释放队列锁（无需等待响应处理完成）
+      // 因为 Claude API 限流基于请求发送时刻计算（RPM），不是请求完成时刻
+      if (queueLockAcquired && queueRequestId && accountId) {
+        try {
+          await userMessageQueueService.releaseQueueLock(accountId, queueRequestId)
+          queueLockAcquired = false // 标记已释放，防止 finally 重复释放
+          logger.debug(
+            `📬 User message queue lock released early for CCR account ${accountId}, requestId: ${queueRequestId}`
+          )
+        } catch (releaseError) {
+          logger.error(
+            `❌ Failed to release user message queue lock early for CCR account ${accountId}:`,
+            releaseError.message
+          )
+        }
+      }
+
       // 移除监听器（请求成功完成）
       if (clientRequest) {
         clientRequest.removeListener('close', handleClientDisconnect)
@@ -254,6 +331,21 @@ class CcrRelayService {
       )
 
       throw error
+    } finally {
+      // 📬 释放用户消息队列锁（兜底，正常情况下已在请求发送后提前释放）
+      if (queueLockAcquired && queueRequestId && accountId) {
+        try {
+          await userMessageQueueService.releaseQueueLock(accountId, queueRequestId)
+          logger.debug(
+            `📬 User message queue lock released in finally for CCR account ${accountId}, requestId: ${queueRequestId}`
+          )
+        } catch (releaseError) {
+          logger.error(
+            `❌ Failed to release user message queue lock for CCR account ${accountId}:`,
+            releaseError.message
+          )
+        }
+      }
     }
   }
 
@@ -269,7 +361,74 @@ class CcrRelayService {
     options = {}
   ) {
     let account = null
+    let queueLockAcquired = false
+    let queueRequestId = null
+
     try {
+      // 📬 用户消息队列处理
+      if (userMessageQueueService.isUserMessageRequest(requestBody)) {
+        // 校验 accountId 非空，避免空值污染队列锁键
+        if (!accountId || accountId === '') {
+          logger.error(
+            '❌ accountId missing for queue lock in CCR relayStreamRequestWithUsageCapture'
+          )
+          throw new Error('accountId missing for queue lock')
+        }
+        const queueResult = await userMessageQueueService.acquireQueueLock(accountId)
+        if (!queueResult.acquired && !queueResult.skipped) {
+          // 区分 Redis 后端错误和队列超时
+          const isBackendError = queueResult.error === 'queue_backend_error'
+          const errorCode = isBackendError ? 'QUEUE_BACKEND_ERROR' : 'QUEUE_TIMEOUT'
+          const errorType = isBackendError ? 'queue_backend_error' : 'queue_timeout'
+          const errorMessage = isBackendError
+            ? 'Queue service temporarily unavailable, please retry later'
+            : 'User message queue wait timeout, please retry later'
+          const statusCode = isBackendError ? 500 : 503
+
+          // 结构化性能日志，用于后续��计
+          logger.performance('user_message_queue_error', {
+            errorType,
+            errorCode,
+            accountId,
+            statusCode,
+            stream: true,
+            backendError: isBackendError ? queueResult.errorMessage : undefined
+          })
+
+          logger.warn(
+            `📬 User message queue ${errorType} for CCR account ${accountId} (stream)`,
+            isBackendError ? { backendError: queueResult.errorMessage } : {}
+          )
+          if (!responseStream.headersSent) {
+            responseStream.writeHead(statusCode, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              Connection: 'keep-alive',
+              'x-user-message-queue-error': errorType
+            })
+          }
+          const errorEvent = `event: error\ndata: ${JSON.stringify({
+            type: 'error',
+            error: {
+              type: errorType,
+              code: errorCode,
+              message: errorMessage
+            }
+          })}\n\n`
+          responseStream.write(errorEvent)
+          responseStream.write('data: [DONE]\n\n')
+          responseStream.end()
+          return
+        }
+        if (queueResult.acquired && !queueResult.skipped) {
+          queueLockAcquired = true
+          queueRequestId = queueResult.requestId
+          logger.debug(
+            `📬 User message queue lock acquired for CCR account ${accountId} (stream), requestId: ${queueRequestId}`
+          )
+        }
+      }
+
       // 获取账户信息
       account = await ccrAccountService.getAccount(accountId)
       if (!account) {
@@ -317,14 +476,53 @@ class CcrRelayService {
         accountId,
         usageCallback,
         streamTransformer,
-        options
+        options,
+        // 📬 回调：在收到响应头时释放队列锁
+        async () => {
+          if (queueLockAcquired && queueRequestId && accountId) {
+            try {
+              await userMessageQueueService.releaseQueueLock(accountId, queueRequestId)
+              queueLockAcquired = false // 标记已释放，防止 finally 重复释放
+              logger.debug(
+                `📬 User message queue lock released early for CCR stream account ${accountId}, requestId: ${queueRequestId}`
+              )
+            } catch (releaseError) {
+              logger.error(
+                `❌ Failed to release user message queue lock early for CCR stream account ${accountId}:`,
+                releaseError.message
+              )
+            }
+          }
+        }
       )
 
       // 更新最后使用时间
       await this._updateLastUsedTime(accountId)
     } catch (error) {
-      logger.error(`❌ CCR stream relay failed (Account: ${account?.name || accountId}):`, error)
+      // 客户端主动断开连接是正常情况，使用 INFO 级别
+      if (error.message === 'Client disconnected') {
+        logger.info(
+          `🔌 CCR stream relay ended: Client disconnected (Account: ${account?.name || accountId})`
+        )
+      } else {
+        logger.error(`❌ CCR stream relay failed (Account: ${account?.name || accountId}):`, error)
+      }
       throw error
+    } finally {
+      // 📬 释放用户消息队列锁（兜底，正常情况下已在收到响应头后提前释放）
+      if (queueLockAcquired && queueRequestId && accountId) {
+        try {
+          await userMessageQueueService.releaseQueueLock(accountId, queueRequestId)
+          logger.debug(
+            `📬 User message queue lock released in finally for CCR stream account ${accountId}, requestId: ${queueRequestId}`
+          )
+        } catch (releaseError) {
+          logger.error(
+            `❌ Failed to release user message queue lock for CCR stream account ${accountId}:`,
+            releaseError.message
+          )
+        }
+      }
     }
   }
 
@@ -338,7 +536,8 @@ class CcrRelayService {
     accountId,
     usageCallback,
     streamTransformer = null,
-    requestOptions = {}
+    requestOptions = {},
+    onResponseHeaderReceived = null
   ) {
     return new Promise((resolve, reject) => {
       let aborted = false
@@ -401,8 +600,11 @@ class CcrRelayService {
       // 发送请求
       const request = axios(requestConfig)
 
+      // 注意：使用 .then(async ...) 模式处理响应
+      // - 内部的 releaseQueueLock 有独立的 try-catch，不会导致未捕获异常
+      // - queueLockAcquired = false 的赋值会在 finally 执行前完成（JS 单线程保证）
       request
-        .then((response) => {
+        .then(async (response) => {
           logger.debug(`🌊 CCR stream response status: ${response.status}`)
 
           // 错误响应处理
@@ -450,6 +652,19 @@ class CcrRelayService {
               resolve() // 不抛出异常，正常完成流处理
             })
             return
+          }
+
+          // 📬 收到成功响应头（HTTP 200），调用回调释放队列锁
+          // 此时请求已被 Claude API 接受并计入 RPM 配额，无需等待响应完成
+          if (onResponseHeaderReceived && typeof onResponseHeaderReceived === 'function') {
+            try {
+              await onResponseHeaderReceived()
+            } catch (callbackError) {
+              logger.error(
+                `❌ Failed to execute onResponseHeaderReceived callback for CCR stream account ${accountId}:`,
+                callbackError.message
+              )
+            }
           }
 
           // 成功响应，检查并移除错误状态
