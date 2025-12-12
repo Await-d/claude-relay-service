@@ -4,6 +4,7 @@ const logger = require('../utils/logger')
 const config = require('../../config/config')
 const { parseVendorPrefixedModel } = require('../utils/modelHelper')
 const userMessageQueueService = require('./userMessageQueueService')
+const { isStreamWritable } = require('../utils/streamHelper')
 
 class CcrRelayService {
   constructor() {
@@ -400,10 +401,13 @@ class CcrRelayService {
             isBackendError ? { backendError: queueResult.errorMessage } : {}
           )
           if (!responseStream.headersSent) {
+            const existingConnection = responseStream.getHeader
+              ? responseStream.getHeader('Connection')
+              : null
             responseStream.writeHead(statusCode, {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
+              Connection: existingConnection || 'keep-alive',
               'x-user-message-queue-error': errorType
             })
           }
@@ -627,10 +631,13 @@ class CcrRelayService {
 
             // 设置错误响应的状态码和响应头
             if (!responseStream.headersSent) {
+              const existingConnection = responseStream.getHeader
+                ? responseStream.getHeader('Connection')
+                : null
               const errorHeaders = {
                 'Content-Type': response.headers['content-type'] || 'application/json',
                 'Cache-Control': 'no-cache',
-                Connection: 'keep-alive'
+                Connection: existingConnection || 'keep-alive'
               }
               // 避免 Transfer-Encoding 冲突，让 Express 自动处理
               delete errorHeaders['Transfer-Encoding']
@@ -640,13 +647,13 @@ class CcrRelayService {
 
             // 直接透传错误数据，不进行包装
             response.data.on('data', (chunk) => {
-              if (!responseStream.destroyed) {
+              if (isStreamWritable(responseStream)) {
                 responseStream.write(chunk)
               }
             })
 
             response.data.on('end', () => {
-              if (!responseStream.destroyed) {
+              if (isStreamWritable(responseStream)) {
                 responseStream.end()
               }
               resolve() // 不抛出异常，正常完成流处理
@@ -680,11 +687,20 @@ class CcrRelayService {
           })
 
           // 设置响应头
+          // ⚠️ 关键修复：尊重 auth.js 提前设置的 Connection: close
           if (!responseStream.headersSent) {
+            const existingConnection = responseStream.getHeader
+              ? responseStream.getHeader('Connection')
+              : null
+            if (existingConnection) {
+              logger.debug(
+                `🔌 [CCR Stream] Preserving existing Connection header: ${existingConnection}`
+              )
+            }
             const headers = {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
+              Connection: existingConnection || 'keep-alive',
               'Access-Control-Allow-Origin': '*',
               'Access-Control-Allow-Headers': 'Cache-Control'
             }
@@ -723,12 +739,17 @@ class CcrRelayService {
                   }
 
                   // 写入到响应流
-                  if (outputLine && !responseStream.destroyed) {
+                  if (outputLine && isStreamWritable(responseStream)) {
                     responseStream.write(`${outputLine}\n`)
+                  } else if (outputLine) {
+                    // 客户端连接已断开，记录警告
+                    logger.warn(
+                      `⚠️ [CCR] Client disconnected during stream, skipping data for account: ${accountId}`
+                    )
                   }
                 } else {
                   // 空行也需要传递
-                  if (!responseStream.destroyed) {
+                  if (isStreamWritable(responseStream)) {
                     responseStream.write('\n')
                   }
                 }
@@ -739,10 +760,6 @@ class CcrRelayService {
           })
 
           response.data.on('end', () => {
-            if (!responseStream.destroyed) {
-              responseStream.end()
-            }
-
             // 如果收集到使用统计数据，调用回调
             if (usageCallback && Object.keys(collectedUsage).length > 0) {
               try {
@@ -754,12 +771,26 @@ class CcrRelayService {
               }
             }
 
-            resolve()
+            if (isStreamWritable(responseStream)) {
+              // 等待数据完全 flush 到客户端后再 resolve
+              responseStream.end(() => {
+                logger.debug(
+                  `🌊 CCR stream response completed and flushed | bytesWritten: ${responseStream.bytesWritten || 'unknown'}`
+                )
+                resolve()
+              })
+            } else {
+              // 连接已断开，记录警告
+              logger.warn(
+                `⚠️ [CCR] Client disconnected before stream end, data may not have been received | account: ${accountId}`
+              )
+              resolve()
+            }
           })
 
           response.data.on('error', (err) => {
             logger.error('❌ Stream data error:', err)
-            if (!responseStream.destroyed) {
+            if (isStreamWritable(responseStream)) {
               responseStream.end()
             }
             reject(err)
@@ -791,7 +822,7 @@ class CcrRelayService {
             }
           }
 
-          if (!responseStream.destroyed) {
+          if (isStreamWritable(responseStream)) {
             responseStream.write(`data: ${JSON.stringify(errorResponse)}\n\n`)
             responseStream.end()
           }
