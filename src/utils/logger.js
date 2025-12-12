@@ -139,9 +139,23 @@ const logFormat = createLogFormat(false)
 const consoleFormat = createLogFormat(true)
 const isTestEnv = process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID
 
-// 📁 确保日志目录存在并设置权限（测试环境不落盘）
-if (!isTestEnv && !fs.existsSync(config.logging.dirname)) {
-  fs.mkdirSync(config.logging.dirname, { recursive: true, mode: 0o755 })
+// 📁 确保日志目录可用（测试环境不落盘；目录不可写时自动降级为仅控制台日志）
+let fileLoggingEnabled = false
+
+if (!isTestEnv) {
+  try {
+    if (!fs.existsSync(config.logging.dirname)) {
+      fs.mkdirSync(config.logging.dirname, { recursive: true, mode: 0o755 })
+    }
+
+    fs.accessSync(config.logging.dirname, fs.constants.W_OK)
+    fileLoggingEnabled = true
+  } catch (error) {
+    fileLoggingEnabled = false
+    console.warn(
+      `⚠️ 日志目录不可写，已禁用文件日志：${config.logging.dirname} (${error.code || 'UNKNOWN'})`
+    )
+  }
 }
 
 // 🔄 增强的日志轮转配置
@@ -159,6 +173,12 @@ const createRotateTransport = (filename, level = null) => {
   if (level) {
     transport.level = level
   }
+
+  // 防止文件日志不可写时触发未处理 error 事件导致进程异常
+  transport.on('error', (error) => {
+    transport.silent = true
+    console.warn(`⚠️ 文件日志不可用，已禁用该日志输出：${filename} (${error.code || 'UNKNOWN'})`)
+  })
 
   // 监听轮转事件（测试环境关闭以避免 Jest 退出后输出）
   if (!isTestEnv) {
@@ -178,10 +198,10 @@ const createRotateTransport = (filename, level = null) => {
   return transport
 }
 
-const dailyRotateFileTransport = !isTestEnv
+const dailyRotateFileTransport = fileLoggingEnabled
   ? createRotateTransport('claude-relay-%DATE%.log')
   : null
-const errorFileTransport = !isTestEnv
+const errorFileTransport = fileLoggingEnabled
   ? createRotateTransport('claude-relay-error-%DATE%.log', 'error')
   : null
 
@@ -189,7 +209,7 @@ const errorFileTransport = !isTestEnv
 const securityLogger = winston.createLogger({
   level: 'warn',
   format: logFormat,
-  transports: isTestEnv
+  transports: !fileLoggingEnabled
     ? [new winston.transports.Console({ format: consoleFormat })]
     : [createRotateTransport('claude-relay-security-%DATE%.log', 'warn')],
   silent: false
@@ -206,7 +226,7 @@ const authDetailLogger = winston.createLogger({
       return `[${timestamp}] ${level.toUpperCase()}: ${message}\n${jsonData}\n${'='.repeat(80)}`
     })
   ),
-  transports: isTestEnv
+  transports: !fileLoggingEnabled
     ? [new winston.transports.Console({ format: consoleFormat })]
     : [createRotateTransport('claude-relay-auth-detail-%DATE%.log', 'info')],
   silent: false
@@ -217,9 +237,9 @@ const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || config.logging.level,
   format: logFormat,
   transports: [
-    // 📄 文件输出（测试环境禁用）
-    ...(!isTestEnv && dailyRotateFileTransport ? [dailyRotateFileTransport] : []),
-    ...(!isTestEnv && errorFileTransport ? [errorFileTransport] : []),
+    // 📄 文件输出（测试环境/不可写目录禁用）
+    ...(dailyRotateFileTransport ? [dailyRotateFileTransport] : []),
+    ...(errorFileTransport ? [errorFileTransport] : []),
 
     // 🖥️ 控制台输出
     new winston.transports.Console({
@@ -231,7 +251,7 @@ const logger = winston.createLogger({
 
   // 🚨 异常处理
   exceptionHandlers: [
-    ...(!isTestEnv
+    ...(fileLoggingEnabled
       ? [
           new winston.transports.File({
             filename: path.join(config.logging.dirname, 'exceptions.log'),
@@ -248,7 +268,7 @@ const logger = winston.createLogger({
 
   // 🔄 未捕获异常处理
   rejectionHandlers: [
-    ...(!isTestEnv
+    ...(fileLoggingEnabled
       ? [
           new winston.transports.File({
             filename: path.join(config.logging.dirname, 'rejections.log'),

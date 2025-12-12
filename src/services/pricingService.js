@@ -76,13 +76,34 @@ class PricingService {
     }
   }
 
+  canWriteDataDir() {
+    try {
+      fs.accessSync(this.dataDir, fs.constants.W_OK)
+      return true
+    } catch (error) {
+      return false
+    }
+  }
+
   // 初始化价格服务
   async initialize() {
     try {
       // 确保data目录存在
       if (!fs.existsSync(this.dataDir)) {
-        fs.mkdirSync(this.dataDir, { recursive: true })
-        logger.info('📁 Created data directory')
+        try {
+          fs.mkdirSync(this.dataDir, { recursive: true })
+          logger.info('📁 Created data directory')
+        } catch (error) {
+          logger.warn(
+            `⚠️  Failed to create data directory: ${this.dataDir} (${error.code || 'UNKNOWN'})`
+          )
+        }
+      }
+
+      if (!this.canWriteDataDir()) {
+        logger.warn(
+          `⚠️  Data directory is not writable, pricing cache will not be persisted: ${this.dataDir}`
+        )
       }
 
       // 检查是否需要下载或更新价格数据
@@ -265,7 +286,13 @@ class PricingService {
   persistLocalHash(content) {
     const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8')
     const hash = crypto.createHash('sha256').update(buffer).digest('hex')
-    fs.writeFileSync(this.localHashFile, `${hash}\n`)
+    try {
+      fs.writeFileSync(this.localHashFile, `${hash}\n`)
+    } catch (error) {
+      logger.warn(
+        `⚠️  Failed to persist pricing hash file: ${this.localHashFile} (${error.code || 'UNKNOWN'})`
+      )
+    }
     return hash
   }
 
@@ -290,17 +317,23 @@ class PricingService {
             const rawContent = buffer.toString('utf8')
             const jsonData = JSON.parse(rawContent)
 
-            // 保存到文件并更新哈希
-            fs.writeFileSync(this.pricingFile, rawContent)
-            this.persistLocalHash(buffer)
-
             // 更新内存中的数据
             this.pricingData = jsonData
             this.lastUpdated = new Date()
 
             logger.success(`💰 Downloaded pricing data for ${Object.keys(jsonData).length} models`)
 
-            // 设置或重新设置文件监听器
+            // 保存到文件并更新哈希（写入失败不影响内存数据）
+            try {
+              fs.writeFileSync(this.pricingFile, rawContent)
+              this.persistLocalHash(buffer)
+            } catch (error) {
+              logger.warn(
+                `⚠️  Failed to persist pricing cache: ${this.pricingFile} (${error.code || 'UNKNOWN'})`
+              )
+            }
+
+            // 设置或重新设置文件监听器（文件不存在时会自动跳过）
             this.setupFileWatcher()
 
             resolve()
@@ -354,15 +387,21 @@ class PricingService {
         const fallbackData = fs.readFileSync(this.fallbackFile, 'utf8')
         const jsonData = JSON.parse(fallbackData)
 
-        const formattedJson = JSON.stringify(jsonData, null, 2)
-
-        // 保存到data目录
-        fs.writeFileSync(this.pricingFile, formattedJson)
-        this.persistLocalHash(formattedJson)
-
-        // 更新内存中的数据
+        // 更新内存中的数据（即使无法写入磁盘也可正常使用）
         this.pricingData = jsonData
         this.lastUpdated = new Date()
+
+        const formattedJson = JSON.stringify(jsonData, null, 2)
+
+        // 保存到data目录（写入失败不影响内存数据）
+        try {
+          fs.writeFileSync(this.pricingFile, formattedJson)
+          this.persistLocalHash(formattedJson)
+        } catch (error) {
+          logger.warn(
+            `⚠️  Failed to persist fallback pricing cache: ${this.pricingFile} (${error.code || 'UNKNOWN'})`
+          )
+        }
 
         // 设置或重新设置文件监听器
         this.setupFileWatcher()
