@@ -94,16 +94,12 @@ class PricingService {
           fs.mkdirSync(this.dataDir, { recursive: true })
           logger.info('📁 Created data directory')
         } catch (error) {
-          logger.warn(
-            `⚠️  Failed to create data directory: ${this.dataDir} (${error.code || 'UNKNOWN'})`
-          )
+          logger.warn(`⚠️  无法创建 data 目录：${this.dataDir} (${error.code || 'UNKNOWN'})`)
         }
       }
 
       if (!this.canWriteDataDir()) {
-        logger.warn(
-          `⚠️  Data directory is not writable, pricing cache will not be persisted: ${this.dataDir}`
-        )
+        logger.warn(`⚠️  data 目录不可写，价格缓存不会落盘：${this.dataDir}`)
       }
 
       // 检查是否需要下载或更新价格数据
@@ -289,9 +285,7 @@ class PricingService {
     try {
       fs.writeFileSync(this.localHashFile, `${hash}\n`)
     } catch (error) {
-      logger.warn(
-        `⚠️  Failed to persist pricing hash file: ${this.localHashFile} (${error.code || 'UNKNOWN'})`
-      )
+      logger.warn(`⚠️  无法写入价格哈希文件：${this.localHashFile} (${error.code || 'UNKNOWN'})`)
     }
     return hash
   }
@@ -329,7 +323,7 @@ class PricingService {
               this.persistLocalHash(buffer)
             } catch (error) {
               logger.warn(
-                `⚠️  Failed to persist pricing cache: ${this.pricingFile} (${error.code || 'UNKNOWN'})`
+                `⚠️  无法写入价格缓存文件：${this.pricingFile} (${error.code || 'UNKNOWN'})`
               )
             }
 
@@ -399,7 +393,7 @@ class PricingService {
           this.persistLocalHash(formattedJson)
         } catch (error) {
           logger.warn(
-            `⚠️  Failed to persist fallback pricing cache: ${this.pricingFile} (${error.code || 'UNKNOWN'})`
+            `⚠️  无法写入 fallback 价格缓存文件：${this.pricingFile} (${error.code || 'UNKNOWN'})`
           )
         }
 
