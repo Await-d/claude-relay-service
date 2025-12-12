@@ -139,8 +139,8 @@ const logFormat = createLogFormat(false)
 const consoleFormat = createLogFormat(true)
 const isTestEnv = process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID
 
-// 📁 确保日志目录存在并设置权限
-if (!fs.existsSync(config.logging.dirname)) {
+// 📁 确保日志目录存在并设置权限（测试环境不落盘）
+if (!isTestEnv && !fs.existsSync(config.logging.dirname)) {
   fs.mkdirSync(config.logging.dirname, { recursive: true, mode: 0o755 })
 }
 
@@ -178,14 +178,20 @@ const createRotateTransport = (filename, level = null) => {
   return transport
 }
 
-const dailyRotateFileTransport = createRotateTransport('claude-relay-%DATE%.log')
-const errorFileTransport = createRotateTransport('claude-relay-error-%DATE%.log', 'error')
+const dailyRotateFileTransport = !isTestEnv
+  ? createRotateTransport('claude-relay-%DATE%.log')
+  : null
+const errorFileTransport = !isTestEnv
+  ? createRotateTransport('claude-relay-error-%DATE%.log', 'error')
+  : null
 
 // 🔒 创建专门的安全日志记录器
 const securityLogger = winston.createLogger({
   level: 'warn',
   format: logFormat,
-  transports: [createRotateTransport('claude-relay-security-%DATE%.log', 'warn')],
+  transports: isTestEnv
+    ? [new winston.transports.Console({ format: consoleFormat })]
+    : [createRotateTransport('claude-relay-security-%DATE%.log', 'warn')],
   silent: false
 })
 
@@ -200,7 +206,9 @@ const authDetailLogger = winston.createLogger({
       return `[${timestamp}] ${level.toUpperCase()}: ${message}\n${jsonData}\n${'='.repeat(80)}`
     })
   ),
-  transports: [createRotateTransport('claude-relay-auth-detail-%DATE%.log', 'info')],
+  transports: isTestEnv
+    ? [new winston.transports.Console({ format: consoleFormat })]
+    : [createRotateTransport('claude-relay-auth-detail-%DATE%.log', 'info')],
   silent: false
 })
 
@@ -209,9 +217,9 @@ const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || config.logging.level,
   format: logFormat,
   transports: [
-    // 📄 文件输出
-    dailyRotateFileTransport,
-    errorFileTransport,
+    // 📄 文件输出（测试环境禁用）
+    ...(!isTestEnv && dailyRotateFileTransport ? [dailyRotateFileTransport] : []),
+    ...(!isTestEnv && errorFileTransport ? [errorFileTransport] : []),
 
     // 🖥️ 控制台输出
     new winston.transports.Console({
@@ -223,12 +231,16 @@ const logger = winston.createLogger({
 
   // 🚨 异常处理
   exceptionHandlers: [
-    new winston.transports.File({
-      filename: path.join(config.logging.dirname, 'exceptions.log'),
-      format: logFormat,
-      maxsize: 10485760, // 10MB
-      maxFiles: 5
-    }),
+    ...(!isTestEnv
+      ? [
+          new winston.transports.File({
+            filename: path.join(config.logging.dirname, 'exceptions.log'),
+            format: logFormat,
+            maxsize: 10485760, // 10MB
+            maxFiles: 5
+          })
+        ]
+      : []),
     new winston.transports.Console({
       format: consoleFormat
     })
@@ -236,12 +248,16 @@ const logger = winston.createLogger({
 
   // 🔄 未捕获异常处理
   rejectionHandlers: [
-    new winston.transports.File({
-      filename: path.join(config.logging.dirname, 'rejections.log'),
-      format: logFormat,
-      maxsize: 10485760, // 10MB
-      maxFiles: 5
-    }),
+    ...(!isTestEnv
+      ? [
+          new winston.transports.File({
+            filename: path.join(config.logging.dirname, 'rejections.log'),
+            format: logFormat,
+            maxsize: 10485760, // 10MB
+            maxFiles: 5
+          })
+        ]
+      : []),
     new winston.transports.Console({
       format: consoleFormat
     })
