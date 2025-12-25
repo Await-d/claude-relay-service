@@ -9,6 +9,7 @@ const logger = require('../utils/logger')
 const geminiAccountService = require('../services/geminiAccountService')
 const geminiApiAccountService = require('../services/geminiApiAccountService')
 const { sendGeminiRequest, getAvailableModels } = require('../services/geminiRelayService')
+const { sendAntigravityRequest } = require('../services/antigravityRelayService')
 const crypto = require('crypto')
 const sessionHelper = require('../utils/sessionHelper')
 const unifiedGeminiScheduler = require('../services/unifiedGeminiScheduler')
@@ -508,20 +509,37 @@ async function handleMessages(req, res) {
       // OAuth 账户：使用现有的 sendGeminiRequest
       // 智能处理项目ID：优先使用配置的 projectId，降级到临时 tempProjectId
       const effectiveProjectId = account.projectId || account.tempProjectId || null
+      const oauthProvider = account.oauthProvider || 'gemini-cli'
 
-      geminiResponse = await sendGeminiRequest({
-        messages,
-        model,
-        temperature,
-        maxTokens: max_tokens,
-        stream,
-        accessToken: account.accessToken,
-        proxy: account.proxy,
-        apiKeyId: apiKeyData.id,
-        signal: abortController.signal,
-        projectId: effectiveProjectId,
-        accountId: account.id
-      })
+      if (oauthProvider === 'antigravity') {
+        geminiResponse = await sendAntigravityRequest({
+          messages,
+          model,
+          temperature,
+          maxTokens: max_tokens,
+          stream,
+          accessToken: account.accessToken,
+          proxy: account.proxy,
+          apiKeyId: apiKeyData.id,
+          signal: abortController.signal,
+          projectId: effectiveProjectId,
+          accountId: account.id
+        })
+      } else {
+        geminiResponse = await sendGeminiRequest({
+          messages,
+          model,
+          temperature,
+          maxTokens: max_tokens,
+          stream,
+          accessToken: account.accessToken,
+          proxy: account.proxy,
+          apiKeyId: apiKeyData.id,
+          signal: abortController.signal,
+          projectId: effectiveProjectId,
+          accountId: account.id
+        })
+      }
     }
 
     if (stream) {
@@ -780,8 +798,16 @@ async function handleModels(req, res) {
         ]
       }
     } else {
-      // OAuth 账户：使用 OAuth token 获取模型列表
-      models = await getAvailableModels(account.accessToken, account.proxy)
+      // OAuth 账户：根据 OAuth provider 选择上游
+      const oauthProvider = account.oauthProvider || 'gemini-cli'
+      models =
+        oauthProvider === 'antigravity'
+          ? await geminiAccountService.fetchAvailableModelsAntigravity(
+              account.accessToken,
+              account.proxy,
+              account.refreshToken
+            )
+          : await getAvailableModels(account.accessToken, account.proxy)
     }
 
     res.json({
@@ -953,7 +979,8 @@ function handleSimpleEndpoint(apiMethod) {
       const client = await geminiAccountService.getOauthClient(
         accessToken,
         refreshToken,
-        proxyConfig
+        proxyConfig,
+        account.oauthProvider
       )
 
       // 直接转发请求体，不做特殊处理
@@ -1032,7 +1059,12 @@ async function handleLoadCodeAssist(req, res) {
     // 解析账户的代理配置
     const proxyConfig = parseProxyConfig(account)
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+    const client = await geminiAccountService.getOauthClient(
+      accessToken,
+      refreshToken,
+      proxyConfig,
+      account.oauthProvider
+    )
 
     // 智能处理项目ID
     const effectiveProjectId = projectId || cloudaicompanionProject || null
@@ -1130,7 +1162,12 @@ async function handleOnboardUser(req, res) {
     // 解析账户的代理配置
     const proxyConfig = parseProxyConfig(account)
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+    const client = await geminiAccountService.getOauthClient(
+      accessToken,
+      refreshToken,
+      proxyConfig,
+      account.oauthProvider
+    )
 
     // 智能处理项目ID
     const effectiveProjectId = projectId || cloudaicompanionProject || null
@@ -1282,7 +1319,8 @@ async function handleCountTokens(req, res) {
       const client = await geminiAccountService.getOauthClient(
         accessToken,
         refreshToken,
-        proxyConfig
+        proxyConfig,
+        account.oauthProvider
       )
       response = await geminiAccountService.countTokens(client, contents, model, proxyConfig)
     }
@@ -1392,13 +1430,20 @@ async function handleGenerateContent(req, res) {
     // 解析账户的代理配置
     const proxyConfig = parseProxyConfig(account)
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+    const client = await geminiAccountService.getOauthClient(
+      accessToken,
+      refreshToken,
+      proxyConfig,
+      account.oauthProvider
+    )
 
     // 智能处理项目ID：优先使用配置的 projectId，降级到临时 tempProjectId
     let effectiveProjectId = account.projectId || account.tempProjectId || null
 
+    const oauthProvider = account.oauthProvider || 'gemini-cli'
+
     // 如果没有任何项目ID，尝试调用 loadCodeAssist 获取
-    if (!effectiveProjectId) {
+    if (!effectiveProjectId && oauthProvider !== 'antigravity') {
       try {
         logger.info('📋 No projectId available, attempting to fetch from loadCodeAssist...')
         const loadResponse = await geminiAccountService.loadCodeAssist(client, null, proxyConfig)
@@ -1412,6 +1457,12 @@ async function handleGenerateContent(req, res) {
       } catch (loadError) {
         logger.warn('Failed to fetch projectId from loadCodeAssist:', loadError.message)
       }
+    }
+
+    if (!effectiveProjectId && oauthProvider === 'antigravity') {
+      // Antigravity 账号允许没有 projectId：生成一个稳定的临时 projectId 并缓存
+      effectiveProjectId = `ag-${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`
+      await geminiAccountService.updateTempProjectId(accountId, effectiveProjectId)
     }
 
     // 如果还是没有项目ID，返回错误
@@ -1436,14 +1487,24 @@ async function handleGenerateContent(req, res) {
           : '从loadCodeAssist获取'
     })
 
-    const response = await geminiAccountService.generateContent(
-      client,
-      { model, request: actualRequestData },
-      user_prompt_id,
-      effectiveProjectId,
-      req.apiKey?.id,
-      proxyConfig
-    )
+    const response =
+      oauthProvider === 'antigravity'
+        ? await geminiAccountService.generateContentAntigravity(
+            client,
+            { model, request: actualRequestData },
+            user_prompt_id,
+            effectiveProjectId,
+            req.apiKey?.id,
+            proxyConfig
+          )
+        : await geminiAccountService.generateContent(
+            client,
+            { model, request: actualRequestData },
+            user_prompt_id,
+            effectiveProjectId,
+            req.apiKey?.id,
+            proxyConfig
+          )
 
     // 记录使用统计
     if (response?.response?.usageMetadata) {
@@ -1604,13 +1665,20 @@ async function handleStreamGenerateContent(req, res) {
     // 解析账户的代理配置
     const proxyConfig = parseProxyConfig(account)
 
-    const client = await geminiAccountService.getOauthClient(accessToken, refreshToken, proxyConfig)
+    const client = await geminiAccountService.getOauthClient(
+      accessToken,
+      refreshToken,
+      proxyConfig,
+      account.oauthProvider
+    )
 
     // 智能处理项目ID：优先使用配置的 projectId，降级到临时 tempProjectId
     let effectiveProjectId = account.projectId || account.tempProjectId || null
 
+    const oauthProvider = account.oauthProvider || 'gemini-cli'
+
     // 如果没有任何项目ID，尝试调用 loadCodeAssist 获取
-    if (!effectiveProjectId) {
+    if (!effectiveProjectId && oauthProvider !== 'antigravity') {
       try {
         logger.info('📋 No projectId available, attempting to fetch from loadCodeAssist...')
         const loadResponse = await geminiAccountService.loadCodeAssist(client, null, proxyConfig)
@@ -1624,6 +1692,11 @@ async function handleStreamGenerateContent(req, res) {
       } catch (loadError) {
         logger.warn('Failed to fetch projectId from loadCodeAssist:', loadError.message)
       }
+    }
+
+    if (!effectiveProjectId && oauthProvider === 'antigravity') {
+      effectiveProjectId = `ag-${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`
+      await geminiAccountService.updateTempProjectId(accountId, effectiveProjectId)
     }
 
     // 如果还是没有项目ID，返回错误
@@ -1648,15 +1721,26 @@ async function handleStreamGenerateContent(req, res) {
           : '从loadCodeAssist获取'
     })
 
-    const streamResponse = await geminiAccountService.generateContentStream(
-      client,
-      { model, request: actualRequestData },
-      user_prompt_id,
-      effectiveProjectId,
-      req.apiKey?.id,
-      abortController.signal,
-      proxyConfig
-    )
+    const streamResponse =
+      oauthProvider === 'antigravity'
+        ? await geminiAccountService.generateContentStreamAntigravity(
+            client,
+            { model, request: actualRequestData },
+            user_prompt_id,
+            effectiveProjectId,
+            req.apiKey?.id,
+            abortController.signal,
+            proxyConfig
+          )
+        : await geminiAccountService.generateContentStream(
+            client,
+            { model, request: actualRequestData },
+            user_prompt_id,
+            effectiveProjectId,
+            req.apiKey?.id,
+            abortController.signal,
+            proxyConfig
+          )
 
     // 设置 SSE 响应头
     res.setHeader('Content-Type', 'text/event-stream')
@@ -2004,15 +2088,23 @@ async function handleStandardGenerateContent(req, res) {
     } else {
       // OAuth 账户
       const { accessToken, refreshToken } = account
+      const oauthProvider = account.oauthProvider || 'gemini-cli'
       const client = await geminiAccountService.getOauthClient(
         accessToken,
         refreshToken,
-        proxyConfig
+        proxyConfig,
+        oauthProvider
       )
 
       let effectiveProjectId = account.projectId || account.tempProjectId || null
 
-      if (!effectiveProjectId) {
+      if (oauthProvider === 'antigravity') {
+        if (!effectiveProjectId) {
+          // Antigravity 账号允许没有 projectId：生成一个稳定的临时 projectId 并缓存
+          effectiveProjectId = `ag-${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`
+          await geminiAccountService.updateTempProjectId(actualAccountId, effectiveProjectId)
+        }
+      } else if (!effectiveProjectId) {
         try {
           logger.info('📋 No projectId available, attempting to fetch from loadCodeAssist...')
           const loadResponse = await geminiAccountService.loadCodeAssist(client, null, proxyConfig)
@@ -2050,14 +2142,25 @@ async function handleStandardGenerateContent(req, res) {
 
       const userPromptId = `${crypto.randomUUID()}########0`
 
-      response = await geminiAccountService.generateContent(
-        client,
-        { model, request: actualRequestData },
-        userPromptId,
-        effectiveProjectId,
-        req.apiKey?.id,
-        proxyConfig
-      )
+      if (oauthProvider === 'antigravity') {
+        response = await geminiAccountService.generateContentAntigravity(
+          client,
+          { model, request: actualRequestData },
+          userPromptId,
+          effectiveProjectId,
+          req.apiKey?.id,
+          proxyConfig
+        )
+      } else {
+        response = await geminiAccountService.generateContent(
+          client,
+          { model, request: actualRequestData },
+          userPromptId,
+          effectiveProjectId,
+          req.apiKey?.id,
+          proxyConfig
+        )
+      }
     }
 
     // 记录使用统计
@@ -2289,12 +2392,20 @@ async function handleStandardStreamGenerateContent(req, res) {
       const client = await geminiAccountService.getOauthClient(
         accessToken,
         refreshToken,
-        proxyConfig
+        proxyConfig,
+        account.oauthProvider
       )
 
       let effectiveProjectId = account.projectId || account.tempProjectId || null
 
-      if (!effectiveProjectId) {
+      const oauthProvider = account.oauthProvider || 'gemini-cli'
+
+      if (oauthProvider === 'antigravity') {
+        if (!effectiveProjectId) {
+          effectiveProjectId = `ag-${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`
+          await geminiAccountService.updateTempProjectId(actualAccountId, effectiveProjectId)
+        }
+      } else if (!effectiveProjectId) {
         try {
           logger.info('📋 No projectId available, attempting to fetch from loadCodeAssist...')
           const loadResponse = await geminiAccountService.loadCodeAssist(client, null, proxyConfig)
@@ -2332,15 +2443,27 @@ async function handleStandardStreamGenerateContent(req, res) {
 
       const userPromptId = `${crypto.randomUUID()}########0`
 
-      streamResponse = await geminiAccountService.generateContentStream(
-        client,
-        { model, request: actualRequestData },
-        userPromptId,
-        effectiveProjectId,
-        req.apiKey?.id,
-        abortController.signal,
-        proxyConfig
-      )
+      if (oauthProvider === 'antigravity') {
+        streamResponse = await geminiAccountService.generateContentStreamAntigravity(
+          client,
+          { model, request: actualRequestData },
+          userPromptId,
+          effectiveProjectId,
+          req.apiKey?.id,
+          abortController.signal,
+          proxyConfig
+        )
+      } else {
+        streamResponse = await geminiAccountService.generateContentStream(
+          client,
+          { model, request: actualRequestData },
+          userPromptId,
+          effectiveProjectId,
+          req.apiKey?.id,
+          abortController.signal,
+          proxyConfig
+        )
+      }
     }
 
     // 设置 SSE 响应头
