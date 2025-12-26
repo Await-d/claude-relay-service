@@ -70,7 +70,8 @@ class ClaudeConsoleAccountService {
       maxConcurrentTasks = 0, // 最大并发任务数，0表示无限制
       disableAutoProtection = false, // 是否关闭自动防护（429/401/400/529 不自动禁用）
       autoRecoverErrors = false, // 自动错误恢复（默认禁用）
-      errorRecoveryDuration = 5 // 错误恢复时间（分钟，默认5分钟）
+      errorRecoveryDuration = 5, // 错误恢复时间（分钟，默认5分钟）
+      interceptWarmup = false // 拦截预热请求（标题生成、Warmup等）
     } = options
 
     // 验证必填字段
@@ -122,7 +123,8 @@ class ClaudeConsoleAccountService {
       disableAutoProtection: disableAutoProtection.toString(), // 关闭自动防护
       // 自动错误恢复
       autoRecoverErrors: (options.autoRecoverErrors || false).toString(),
-      errorRecoveryDuration: (options.errorRecoveryDuration || 5).toString()
+      errorRecoveryDuration: (options.errorRecoveryDuration || 5).toString(),
+      interceptWarmup: interceptWarmup.toString() // 拦截预热请求
     }
 
     const client = redis.getClientSafe()
@@ -163,6 +165,7 @@ class ClaudeConsoleAccountService {
       disableAutoProtection, // 新增：返回自动防护开关
       autoRecoverErrors, // 自动错误恢复开关
       errorRecoveryDuration, // 错误恢复时间配置
+      interceptWarmup, // 新增：返回预热请求拦截开关
       activeTaskCount: 0 // 新增：新建账户当前并发数为0
     }
   }
@@ -227,7 +230,9 @@ class ClaudeConsoleAccountService {
             disableAutoProtection: accountData.disableAutoProtection === 'true',
             autoRecoverErrors:
               accountData.autoRecoverErrors === 'true' || accountData.autoRecoverErrors === true,
-            errorRecoveryDuration: parseInt(accountData.errorRecoveryDuration) || 5
+            errorRecoveryDuration: parseInt(accountData.errorRecoveryDuration) || 5,
+            // 拦截预热请求
+            interceptWarmup: accountData.interceptWarmup === 'true'
           })
         }
       }
@@ -277,6 +282,7 @@ class ClaudeConsoleAccountService {
     accountData.autoRecoverErrors =
       accountData.autoRecoverErrors === 'true' || accountData.autoRecoverErrors === true
     accountData.errorRecoveryDuration = parseInt(accountData.errorRecoveryDuration) || 5
+    accountData.interceptWarmup = accountData.interceptWarmup === 'true'
 
     if (accountData.proxy) {
       accountData.proxy = JSON.parse(accountData.proxy)
@@ -387,6 +393,15 @@ class ClaudeConsoleAccountService {
       }
       if (updates.disableAutoProtection !== undefined) {
         updatedData.disableAutoProtection = updates.disableAutoProtection.toString()
+      }
+      if (updates.autoRecoverErrors !== undefined) {
+        updatedData.autoRecoverErrors = updates.autoRecoverErrors.toString()
+      }
+      if (updates.errorRecoveryDuration !== undefined) {
+        updatedData.errorRecoveryDuration = updates.errorRecoveryDuration.toString()
+      }
+      if (updates.interceptWarmup !== undefined) {
+        updatedData.interceptWarmup = updates.interceptWarmup.toString()
       }
 
       // ✅ 直接保存 subscriptionExpiresAt（如果提供）

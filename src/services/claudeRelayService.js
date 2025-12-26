@@ -210,7 +210,17 @@ class ClaudeRelayService {
           logger.error('❌ accountId missing for queue lock in relayRequest')
           throw new Error('accountId missing for queue lock')
         }
-        const queueResult = await userMessageQueueService.acquireQueueLock(accountId)
+        // 获取账户信息以检查账户级串行队列配置
+        const accountForQueue = await claudeAccountService.getAccount(accountId)
+        const accountConfig = accountForQueue
+          ? { maxConcurrency: parseInt(accountForQueue.maxConcurrency || '0', 10) }
+          : null
+        const queueResult = await userMessageQueueService.acquireQueueLock(
+          accountId,
+          null,
+          null,
+          accountConfig
+        )
         if (!queueResult.acquired && !queueResult.skipped) {
           // 区分 Redis 后端错误和队列超时
           const isBackendError = queueResult.error === 'queue_backend_error'
@@ -323,17 +333,46 @@ class ClaudeRelayService {
       }
 
       // 发送请求到Claude API（传入回调以获取请求对象）
-      const response = await this._makeClaudeRequest(
-        processedBody,
-        accessToken,
-        proxyAgent,
-        clientHeaders,
-        accountId,
-        (req) => {
-          upstreamRequest = req
-        },
-        options
-      )
+      // 🔄 403 重试机制：仅对 claude-official 类型账户（OAuth 或 Setup Token）
+      const maxRetries = this._shouldRetryOn403(accountType) ? 2 : 0
+      let retryCount = 0
+      let response
+      let shouldRetry = false
+
+      do {
+        response = await this._makeClaudeRequest(
+          processedBody,
+          accessToken,
+          proxyAgent,
+          clientHeaders,
+          accountId,
+          (req) => {
+            upstreamRequest = req
+          },
+          options
+        )
+
+        // 检查是否需要重试 403
+        shouldRetry = response.statusCode === 403 && retryCount < maxRetries
+        if (shouldRetry) {
+          retryCount++
+          logger.warn(
+            `🔄 403 error for account ${accountId}, retry ${retryCount}/${maxRetries} after 2s`
+          )
+          await this._sleep(2000)
+        }
+      } while (shouldRetry)
+
+      // 如果进行了重试，记录最终结果
+      if (retryCount > 0) {
+        if (response.statusCode === 403) {
+          logger.error(`🚫 403 error persists for account ${accountId} after ${retryCount} retries`)
+        } else {
+          logger.info(
+            `✅ 403 retry successful for account ${accountId} on attempt ${retryCount}, got status ${response.statusCode}`
+          )
+        }
+      }
 
       // 📬 请求已发送成功，立即释放队列锁（无需等待响应处理完成）
       // 因为 Claude API 限流基于请求发送时刻计算（RPM），不是请求完成时刻
@@ -398,9 +437,10 @@ class ClaudeRelayService {
           }
         }
         // 检查是否为403状态码（禁止访问）
+        // 注意：如果进行了重试，retryCount > 0；这里的 403 是重试后最终的结果
         else if (response.statusCode === 403) {
           logger.error(
-            `🚫 Forbidden error (403) detected for account ${accountId}, marking as blocked`
+            `🚫 Forbidden error (403) detected for account ${accountId}${retryCount > 0 ? ` after ${retryCount} retries` : ''}, marking as blocked`
           )
           await unifiedClaudeScheduler.markAccountBlocked(accountId, accountType, sessionHash)
         }
@@ -1336,7 +1376,17 @@ class ClaudeRelayService {
           logger.error('❌ accountId missing for queue lock in relayStreamRequestWithUsageCapture')
           throw new Error('accountId missing for queue lock')
         }
-        const queueResult = await userMessageQueueService.acquireQueueLock(accountId)
+        // 获取账户信息以检查账户级串行队列配置
+        const accountForQueue = await claudeAccountService.getAccount(accountId)
+        const accountConfig = accountForQueue
+          ? { maxConcurrency: parseInt(accountForQueue.maxConcurrency || '0', 10) }
+          : null
+        const queueResult = await userMessageQueueService.acquireQueueLock(
+          accountId,
+          null,
+          null,
+          accountConfig
+        )
         if (!queueResult.acquired && !queueResult.skipped) {
           // 区分 Redis 后端错误和队列超时
           const isBackendError = queueResult.error === 'queue_backend_error'
@@ -1519,8 +1569,10 @@ class ClaudeRelayService {
     streamTransformer = null,
     requestOptions = {},
     isDedicatedOfficialAccount = false,
-    onResponseStart = null // 📬 新增：收到响应头时的回调，用于提前释放队列锁
+    onResponseStart = null, // 📬 新增：收到响应头时的回调，用于提前释放队列锁
+    retryCount = 0 // 🔄 403 重试计数器
   ) {
+    const maxRetries = 2 // 最大重试次数
     // 获取账户信息用于统一 User-Agent
     const account = await claudeAccountService.getAccount(accountId)
 
@@ -1633,6 +1685,51 @@ class ClaudeRelayService {
             }
           }
 
+          // 🔄 403 重试机制（必须在设置 res.on('data')/res.on('end') 之前处理）
+          // 否则重试时旧响应的 on('end') 会与新请求产生竞态条件
+          if (res.statusCode === 403) {
+            const canRetry =
+              this._shouldRetryOn403(accountType) &&
+              retryCount < maxRetries &&
+              !responseStream.headersSent
+
+            if (canRetry) {
+              logger.warn(
+                `🔄 [Stream] 403 error for account ${accountId}, retry ${retryCount + 1}/${maxRetries} after 2s`
+              )
+              // 消费当前响应并销毁请求
+              res.resume()
+              req.destroy()
+
+              // 等待 2 秒后递归重试
+              await this._sleep(2000)
+
+              try {
+                // 递归调用自身进行重试
+                const retryResult = await this._makeClaudeStreamRequestWithUsageCapture(
+                  body,
+                  accessToken,
+                  proxyAgent,
+                  clientHeaders,
+                  responseStream,
+                  usageCallback,
+                  accountId,
+                  accountType,
+                  sessionHash,
+                  streamTransformer,
+                  requestOptions,
+                  isDedicatedOfficialAccount,
+                  onResponseStart,
+                  retryCount + 1
+                )
+                resolve(retryResult)
+              } catch (retryError) {
+                reject(retryError)
+              }
+              return // 重要：提前返回，不设置后续的错误处理器
+            }
+          }
+
           // 将错误处理逻辑封装在一个异步函数中
           const handleErrorResponse = async () => {
             if (res.statusCode === 401) {
@@ -1656,8 +1753,10 @@ class ClaudeRelayService {
                 )
               }
             } else if (res.statusCode === 403) {
+              // 403 处理：走到这里说明重试已用尽或不适用重试，直接标记 blocked
+              // 注意：重试逻辑已在 handleErrorResponse 外部提前处理
               logger.error(
-                `🚫 [Stream] Forbidden error (403) detected for account ${accountId}, marking as blocked`
+                `🚫 [Stream] Forbidden error (403) detected for account ${accountId}${retryCount > 0 ? ` after ${retryCount} retries` : ''}, marking as blocked`
               )
               await unifiedClaudeScheduler.markAccountBlocked(accountId, accountType, sessionHash)
             } else if (res.statusCode === 529) {
@@ -2500,27 +2599,34 @@ class ClaudeRelayService {
     }
   }
 
+  // 🔧 准备测试请求的公共逻辑（供 testAccountConnection 和 testAccountConnectionSync 共用）
+  async _prepareAccountForTest(accountId) {
+    // 获取账户信息
+    const account = await claudeAccountService.getAccount(accountId)
+    if (!account) {
+      throw new Error('Account not found')
+    }
+
+    // 获取有效的访问token
+    const accessToken = await claudeAccountService.getValidAccessToken(accountId)
+    if (!accessToken) {
+      throw new Error('Failed to get valid access token')
+    }
+
+    // 获取代理配置
+    const proxyAgent = await this._getProxyAgent(accountId)
+
+    return { account, accessToken, proxyAgent }
+  }
+
   // 🧪 测试账号连接（供Admin API使用，直接复用 _makeClaudeStreamRequestWithUsageCapture）
-  async testAccountConnection(accountId, responseStream) {
-    const testRequestBody = createClaudeTestPayload('claude-sonnet-4-5-20250929', { stream: true })
+  async testAccountConnection(accountId, responseStream, model = 'claude-sonnet-4-5-20250929') {
+    const testRequestBody = createClaudeTestPayload(model, { stream: true })
 
     try {
-      // 获取账户信息
-      const account = await claudeAccountService.getAccount(accountId)
-      if (!account) {
-        throw new Error('Account not found')
-      }
+      const { account, accessToken, proxyAgent } = await this._prepareAccountForTest(accountId)
 
       logger.info(`🧪 Testing Claude account connection: ${account.name} (${accountId})`)
-
-      // 获取有效的访问token
-      const accessToken = await claudeAccountService.getValidAccessToken(accountId)
-      if (!accessToken) {
-        throw new Error('Failed to get valid access token')
-      }
-
-      // 获取代理配置
-      const proxyAgent = await this._getProxyAgent(accountId)
 
       // 设置响应头
       if (!responseStream.headersSent) {
@@ -2570,6 +2676,125 @@ class ClaudeRelayService {
     }
   }
 
+  // 🧪 非流式测试账号连接（供定时任务使用）
+  // 复用流式请求方法，收集结果后返回
+  async testAccountConnectionSync(accountId, model = 'claude-sonnet-4-5-20250929') {
+    const testRequestBody = createClaudeTestPayload(model, { stream: true })
+    const startTime = Date.now()
+
+    try {
+      // 使用公共方法准备测试所需的账户信息、token 和代理
+      const { account, accessToken, proxyAgent } = await this._prepareAccountForTest(accountId)
+
+      logger.info(`🧪 Testing Claude account connection (sync): ${account.name} (${accountId})`)
+
+      // 创建一个收集器来捕获流式响应
+      let responseText = ''
+      let capturedUsage = null
+      let capturedModel = model
+      let hasError = false
+      let errorMessage = ''
+
+      // 创建模拟的响应流对象
+      const mockResponseStream = {
+        headersSent: true, // 跳过设置响应头
+        write: (data) => {
+          // 解析 SSE 数据
+          if (typeof data === 'string' && data.startsWith('data: ')) {
+            try {
+              const jsonStr = data.replace('data: ', '').trim()
+              if (jsonStr && jsonStr !== '[DONE]') {
+                const parsed = JSON.parse(jsonStr)
+                // 提取文本内容
+                if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                  responseText += parsed.delta.text
+                }
+                // 提取 usage 信息
+                if (parsed.type === 'message_delta' && parsed.usage) {
+                  capturedUsage = parsed.usage
+                }
+                // 提取模型信息
+                if (parsed.type === 'message_start' && parsed.message?.model) {
+                  capturedModel = parsed.message.model
+                }
+                // 检测错误
+                if (parsed.type === 'error') {
+                  hasError = true
+                  errorMessage = parsed.error?.message || 'Unknown error'
+                }
+              }
+            } catch {
+              // 忽略解析错误
+            }
+          }
+          return true
+        },
+        end: () => {},
+        on: () => {},
+        once: () => {},
+        emit: () => {},
+        writable: true
+      }
+
+      // 复用流式请求方法
+      await this._makeClaudeStreamRequestWithUsageCapture(
+        testRequestBody,
+        accessToken,
+        proxyAgent,
+        {}, // clientHeaders - 测试不需要客户端headers
+        mockResponseStream,
+        null, // usageCallback - 测试不需要统计
+        accountId,
+        'claude-official', // accountType
+        null, // sessionHash - 测试不需要会话
+        null, // streamTransformer - 不需要转换，直接解析原始格式
+        {}, // requestOptions
+        false // isDedicatedOfficialAccount
+      )
+
+      const latencyMs = Date.now() - startTime
+
+      if (hasError) {
+        logger.warn(`⚠️ Test completed with error for account: ${account.name} - ${errorMessage}`)
+        return {
+          success: false,
+          error: errorMessage,
+          latencyMs,
+          timestamp: new Date().toISOString()
+        }
+      }
+
+      logger.info(`✅ Test completed for account: ${account.name} (${latencyMs}ms)`)
+
+      return {
+        success: true,
+        message: responseText.substring(0, 200), // 截取前200字符
+        latencyMs,
+        model: capturedModel,
+        usage: capturedUsage,
+        timestamp: new Date().toISOString()
+      }
+    } catch (error) {
+      const latencyMs = Date.now() - startTime
+      logger.error(`❌ Test account connection (sync) failed:`, error.message)
+
+      // 提取错误详情
+      let errorMessage = error.message
+      if (error.response) {
+        errorMessage =
+          error.response.data?.error?.message || error.response.statusText || error.message
+      }
+
+      return {
+        success: false,
+        error: errorMessage,
+        statusCode: error.response?.status,
+        latencyMs,
+        timestamp: new Date().toISOString()
+      }
+    }
+  }
+
   // 🎯 健康检查
   async healthCheck() {
     try {
@@ -2590,6 +2815,17 @@ class ClaudeRelayService {
         timestamp: new Date().toISOString()
       }
     }
+  }
+
+  // 🔄 判断账户是否应该在 403 错误时进行重试
+  // 仅 claude-official 类型账户（OAuth 或 Setup Token 授权）需要重试
+  _shouldRetryOn403(accountType) {
+    return accountType === 'claude-official'
+  }
+
+  // ⏱️ 等待指定毫秒数
+  _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }
 
